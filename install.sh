@@ -46,5 +46,11 @@ fi
 trap - EXIT INT TERM
 
 echo "> Installed  : ${INSTALL_PATH}"
-"${INSTALL_PATH}" version 2>/dev/null || true
+
+if command -v "${INSTALL_PATH}" >/dev/null; then
+  "${INSTALL_PATH}" version 2>/dev/null || true
+elif command -v rbot >/dev/null; then
+  rbot version
+fi
+
 
