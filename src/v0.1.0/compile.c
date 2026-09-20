@@ -4,14 +4,42 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "portability.h"
 #include "util.h"
 
+/* Keluarga toolchain yang didukung */
+typedef enum { CC_GCC, CC_CLANG, CC_MSVC, CC_UNKNOWN } CompilerKind;
+
+static CompilerKind compilerKind(const char *cc) {
+  const char *base = strrchr(cc, '/');
+  base = base ? base + 1 : cc;
+  const char *dot = strrchr(base, '.');
+  char basebuf[128];
+  size_t bl = dot && dot > base ? (size_t)(dot - base) : strlen(base);
+  if (bl >= sizeof(basebuf)) bl = sizeof(basebuf) - 1;
+  memcpy(basebuf, base, bl);
+  basebuf[bl] = '\0';
+
+  if (strcmp(basebuf, "cl") == 0) return CC_MSVC;
+  if (strncmp(basebuf, "clang", 5) == 0) return CC_CLANG;
+  return CC_GCC; /* gcc, cc, mingw32-gcc, dst. */
+}
+
+bool compilerIsMSVC(const Config *c) { return compilerKind(c->cc) == CC_MSVC; }
+
 bool resolveCompiler(Config *c) {
-  if (c->compilers.count == 0) listAdd(&c->compilers, "gcc");
+  if (c->compilers.count == 0) {
+#ifdef _WIN32
+    listAdd(&c->compilers, "cl");
+    listAdd(&c->compilers, "gcc");
+    listAdd(&c->compilers, "clang");
+#else
+    listAdd(&c->compilers, "gcc");
+    listAdd(&c->compilers, "clang");
+#endif
+  }
   for (int i = 0; i < c->compilers.count; i++) {
-    char probe[512];
-    snprintf(probe, sizeof(probe), "command -v %s >/dev/null 2>&1", c->compilers.items[i]);
-    if (system(probe) == 0) {
+    if (probeAvailable(c->compilers.items[i])) {
       copyStr(c->cc, sizeof(c->cc), c->compilers.items[i]);
       return true;
     }
@@ -31,6 +59,12 @@ static const char *headerEntryDir(const char *entry) {
   if (entry[0] == 'I' && entry[1] == '.') return entry + 1;
   return entry;
 }
+
+/*
+ * includeFlags & warningFlags memakai sintaks GNU (-I/-W) sebagai bentuk
+ * kanonik di seluruh program; translasi ke sintaks MSVC (/I, /W4, /W3)
+ * dilakukan satu titik di compileOne() — termasuk kompilasi object embed.
+ */
 
 /* "-Iinclude -I." dari headers.public (menerima bentuk flat & nested) */
 char *includeFlags(const Config *c) {
@@ -75,7 +109,7 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
     const char *rest = NULL;
     if (strcmp(root, ".") == 0)
       rest = src;
-    else if (strncmp(src, root, rl) == 0 && src[rl] == '/')
+    else if (strncmp(src, root, rl) == 0 && (src[rl] == '/' || src[rl] == '\\'))
       rest = src + rl + 1;
     if (!rest) continue;
 
@@ -89,9 +123,63 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
   return false;
 }
 
+/* "token1 token2" -> "token1","token2" — pecah per spasi lalu terjemahkan:
+   -I<dir> -> /I<dir>, -W* -> /W4 (Wall/Wextra) atau /W3 (lainnya),
+   token lain diteruskan (mis. /std dari pemanggil). */
+static char *translateFlagsToMsvc(const char *flags) {
+  size_t n = strlen(flags) + 16;
+  char *out = malloc(n);
+  out[0] = '\0';
+  const char *p = flags;
+  while (*p) {
+    while (*p == ' ') p++;
+    const char *start = p;
+    while (*p && *p != ' ') p++;
+    size_t len = (size_t)(p - start);
+    if (len == 0) continue;
+    if (len >= 2 && start[0] == '-' && start[1] == 'I') {
+      strncat(out, "/I", n - strlen(out) - 1);
+      strncat(out, start + 2, n - strlen(out) - 1);
+    } else if (len >= 2 && start[0] == '-' && start[1] == 'W') {
+      /* -Wall/-Wextra -> /W4; warning lain dinormalisasi ke /W3 */
+      strcat(out, (len == 5 && strncmp(start, "-Wall", 5) == 0) ||
+                          (len == 7 && strncmp(start, "-Wextra", 7) == 0)
+                      ? "/W4"
+                      : "/W3");
+    } else {
+      strncat(out, start, len);
+    }
+    strcat(out, " ");
+  }
+  return out;
+}
+
 bool compileOne(const Config *c, const char *inc, const char *wf, const char *src,
                 const char *obj) {
   mkparent(obj);
+
+  if (compilerKind(c->cc) == CC_MSVC) {
+    /* MSVC (cl.exe): flag GNU diterjemahkan ke /I, /W4|/W3; gnu11/c11 ->
+       /std:c11, c17 -> /std:c17; object -> /Fo<path>. Flag -D diteruskan
+       (MSVC menerima -DNAME juga). */
+    char msvcstd[16] = "c11";
+    if (strstr(c->std, "17"))
+      strcpy(msvcstd, "c17");
+    else if (strstr(c->std, "2"))
+      strcpy(msvcstd, "clatest");
+
+    char *minc = translateFlagsToMsvc(inc);
+    char *mwf = translateFlagsToMsvc(wf);
+    size_t n = strlen(minc) + strlen(mwf) + 2 * strlen(src) + strlen(obj) + 128;
+    char *cmd = malloc(n);
+    snprintf(cmd, n, "cl /nologo %s %s /std:%s /c %s /Fo%s", minc, mwf, msvcstd, src, obj);
+    bool ok = runCmd(cmd);
+    free(cmd);
+    free(minc);
+    free(mwf);
+    return ok;
+  }
+
   char *cmd = malloc(strlen(c->cc) + strlen(inc) + strlen(wf) + strlen(c->std) + 2 * strlen(src) +
                      strlen(obj) + 64);
   sprintf(cmd, "%s %s %s -std=%s -c %s -o %s", c->cc, inc, wf, c->std, src, obj);

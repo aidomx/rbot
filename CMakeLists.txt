@@ -30,3 +30,9 @@ if(MSVC)
 else()
   target_compile_options(rbot PRIVATE -Wall -Wextra)
 endif()
+
+# Windows: rbot butuh shell32 untuk fsRemoveTree (SHFileOperationA).
+# MinGW/MSYS2 sudah link shell32 bawaan; MSVC perlu eksplisit.
+if(WIN32)
+  target_link_libraries(rbot PRIVATE shell32)
+endif()

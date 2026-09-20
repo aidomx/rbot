@@ -1,13 +1,10 @@
 #include "util.h"
 
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <time.h>
-#include <unistd.h>
+
+#include "portability.h"
 
 /* ==================== List & string helpers ==================== */
 
@@ -51,11 +48,11 @@ void mkdirs(const char *path) {
   for (char *p = tmp + 1; *p; p++) {
     if (*p == '/') {
       *p = '\0';
-      mkdir(tmp, 0755);
+      fsMakeDir(tmp);
       *p = '/';
     }
   }
-  mkdir(tmp, 0755);
+  fsMakeDir(tmp);
 }
 
 void mkparent(const char *path) {
@@ -67,36 +64,31 @@ void mkparent(const char *path) {
   mkdirs(tmp);
 }
 
+/* Recursively collect paths under `dir` whose name ends with `ext`.
+   With ext == "" every regular file matches; with ext == "/" only
+   directories are collected (used by fsRemoveTree). */
 void walkDir(const char *dir, const char *ext, List *out) {
-  DIR *d = opendir(dir);
-  if (!d) return;
-  struct dirent *ent;
-  while ((ent = readdir(d))) {
-    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
-    struct stat st;
-    if (stat(path, &st) != 0) continue;
-    if (S_ISDIR(st.st_mode)) {
-      walkDir(path, ext, out);
-      continue;
-    }
+  List dirs = {0}, files = {0};
+  fsListDir(dir, &dirs, &files);
+  if (ext[0] == '/') {
+    for (int i = 0; i < dirs.count; i++) listAdd(out, dirs.items[i]);
+    for (int i = 0; i < dirs.count; i++) walkDir(dirs.items[i], ext, out);
+    return;
+  }
+  for (int i = 0; i < files.count; i++) {
+    const char *path = files.items[i];
     size_t len = strlen(path), elen = strlen(ext);
     if (len > elen && strcmp(path + len - elen, ext) == 0) listAdd(out, path);
   }
-  closedir(d);
+  for (int i = 0; i < dirs.count; i++) walkDir(dirs.items[i], ext, out);
 }
 
-bool newerThan(const char *a, const char *b) {
-  struct stat sa, sb;
-  if (stat(a, &sa) != 0) return false;
-  if (stat(b, &sb) != 0) return true;
-  return sa.st_mtime > sb.st_mtime;
-}
+bool newerThan(const char *a, const char *b) { return fsNewerThan(a, b); }
 
 bool safeRelative(const char *path) {
   if (!path || !*path) return false;
-  if (path[0] == '/') return false;
+  if (path[0] == '/' || path[0] == '\\') return false;
+  if (path[0] && path[1] == ':') return false; /* drive Windows: C:\... */
   if (strcmp(path, ".") == 0 || strcmp(path, "..") == 0) return false;
   if (strstr(path, "..")) return false;
   return true;
@@ -104,14 +96,6 @@ bool safeRelative(const char *path) {
 
 /* ==================== Proses & waktu ==================== */
 
-bool runCmd(const char *cmd) {
-  int status = system(cmd);
-  if (status == -1) return false;
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
-}
+bool runCmd(const char *cmd) { return procRun(cmd); }
 
-double nowSeconds(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-}
+double nowSeconds(void) { return monotonicSeconds(); }

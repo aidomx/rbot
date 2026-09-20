@@ -2,9 +2,9 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "compile.h"
+#include "portability.h"
 
 bool compdbEnabled(const Config *c) {
   /* Nonaktif hanya kalau eksplisit "false"; "true" maupun "auto" (default)
@@ -23,7 +23,7 @@ static void jsonQuote(FILE *fp, const char *s) {
 
 void writeCompdb(const Config *c, List *srcs) {
   char cwd[MAX_PATH];
-  if (!getcwd(cwd, sizeof(cwd))) return;
+  if (!fsGetCwd(cwd, sizeof(cwd))) return;
 
   FILE *fp = fopen("compile_commands.json", "w");
   if (!fp) return;

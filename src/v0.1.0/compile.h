@@ -8,6 +8,9 @@
 
 bool resolveCompiler(Config *c);
 
+/* true bila compiler aktif adalah MSVC (cl.exe) — flag & linker beda. */
+bool compilerIsMSVC(const Config *c);
+
 char *includeFlags(const Config *c);
 char *warningFlags(const Config *c);
 

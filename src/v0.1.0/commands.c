@@ -3,13 +3,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include "compdb.h"
 #include "compile.h"
 #include "config.h"
 #include "embed.h"
+#include "portability.h"
 #include "util.h"
 
 /* ==================== help ==================== */
@@ -26,7 +25,7 @@ void showHelp(void) {
 /* ==================== init ==================== */
 
 int cmdInit(void) {
-  if (access("Buildfile", F_OK) == 0) {
+  if (fsFileExists("Buildfile")) {
     printf("> Buildfile already exists, nothing to do\n");
     return 0;
   }
@@ -86,12 +85,11 @@ int cmdBuild(void) {
   if (!loadConfig(&c, "Buildfile")) return 1;
   if (!resolveCompiler(&c)) return 1;
 
-  struct stat st;
-  if (stat(c.root, &st) != 0 || !S_ISDIR(st.st_mode)) {
+  if (!fsDirExists(c.root)) {
     fprintf(stderr, "rbot: root '%s' is not a directory\n", c.root);
     return 1;
   }
-  if (chdir(c.root) != 0) {
+  if (!fsSetCwd(c.root)) {
     fprintf(stderr, "rbot: cannot enter root '%s'\n", c.root);
     return 1;
   }
@@ -121,7 +119,7 @@ int cmdBuild(void) {
     printf("> Embedded  : config changed, recompiling all sources\n");
     for (int i = 0; i < srcs.count; i++) {
       if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
-      unlink(obj);
+      fsRemoveFile(obj);
     }
   }
 
@@ -133,8 +131,7 @@ int cmdBuild(void) {
   for (int i = 0; i < srcs.count; i++) {
     const char *src = srcs.items[i];
     if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
-    struct stat os;
-    if (stat(obj, &os) == 0 && !newerThan(src, obj))
+    if (fsFileExists(obj) && !newerThan(src, obj))
       skipped++;
     else
       total++;
@@ -144,8 +141,7 @@ int cmdBuild(void) {
   for (int i = 0; i < srcs.count; i++) {
     const char *src = srcs.items[i];
     if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
-    struct stat os;
-    if (stat(obj, &os) == 0 && !newerThan(src, obj)) continue;
+    if (fsFileExists(obj) && !newerThan(src, obj)) continue;
 
     double start = nowSeconds();
     bool ok = compileOne(&c, inc, wf, src, obj);
@@ -186,28 +182,45 @@ int cmdBuild(void) {
     strcat(cmd, " ");
     strcat(cmd, obj);
   }
-  struct stat mos;
   for (int i = 0; i < c.embCount; i++) {
     if (!c.emb[i].enable) continue;
-    if (stat(c.emb[i].objectPath, &mos) == 0) {
+    if (fsFileExists(c.emb[i].objectPath)) {
       strcat(cmd, " ");
       strcat(cmd, c.emb[i].objectPath);
     }
   }
-  strcat(cmd, " -o ");
-  strcat(cmd, c.outBinaryDir);
-  strcat(cmd, "/");
-  strcat(cmd, c.outBinaryName);
-  for (int i = 0; i < c.libraries.count; i++) {
-    const char *lib = c.libraries.items[i];
-    /* "ssl" -> -lssl, "lm" -> -lm (leading 'l' sudah termasuk, seperti "I."
-       di headers); entri yang sudah diawali '-' diteruskan apa adanya */
-    strcat(cmd, " ");
-    if (lib[0] == '-' || lib[0] == 'l')
-      strcat(cmd, "-");
-    else
-      strcat(cmd, "-l");
-    strcat(cmd, lib);
+  if (compilerIsMSVC(&c)) {
+    /* MSVC: object dikumpulkan dulu, opsi linker setelah token /link.
+       /OUT menentukan target; link.exe untuk EXE tanpa /LD tidak menulis
+       .lib/.exp sampingan, jadi tidak perlu /IMPLIB. */
+    char target[MAX_PATH * 2];
+    snprintf(target, sizeof(target), "%s/%s", c.outBinaryDir, c.outBinaryName);
+    strcat(cmd, " /link /nologo /INCREMENTAL:NO /OUT:");
+    strcat(cmd, target);
+    for (int i = 0; i < c.libraries.count; i++) {
+      const char *lib = c.libraries.items[i];
+      if (lib[0] == '-') lib++; /* -lssl -> ssl */
+      if (lib[0] == 'l') lib++; /* "lssl" -> "ssl", seperti konvensi headers "I." */
+      strcat(cmd, " ");
+      strcat(cmd, lib);
+      strcat(cmd, ".lib");
+    }
+  } else {
+    strcat(cmd, " -o ");
+    strcat(cmd, c.outBinaryDir);
+    strcat(cmd, "/");
+    strcat(cmd, c.outBinaryName);
+    for (int i = 0; i < c.libraries.count; i++) {
+      const char *lib = c.libraries.items[i];
+      /* "ssl" -> -lssl, "lm" -> -lm (leading 'l' sudah termasuk, seperti "I."
+         di headers); entri yang sudah diawali '-' diteruskan apa adanya */
+      strcat(cmd, " ");
+      if (lib[0] == '-' || lib[0] == 'l')
+        strcat(cmd, "-");
+      else
+        strcat(cmd, "-l");
+      strcat(cmd, lib);
+    }
   }
 
   printf("> Linking   : %s/%s\n", c.outBinaryDir, c.outBinaryName);
@@ -224,9 +237,16 @@ int cmdBuild(void) {
 
   char target[MAX_PATH * 2];
   snprintf(target, sizeof(target), "%s/%s", c.outBinaryDir, c.outBinaryName);
-  struct stat ts;
-  double sizeKb = 0;
-  if (stat(target, &ts) == 0) sizeKb = (double)ts.st_size / 1024.0;
+#ifdef _WIN32
+  /* Windows menambahkan .exe otomatis saat link; laporkan path sebenarnya */
+  if (!fsFileExists(target)) {
+    char withExe[MAX_PATH * 2];
+    snprintf(withExe, sizeof(withExe), "%s.exe", target);
+    if (fsFileExists(withExe)) snprintf(target, sizeof(target), "%s", withExe);
+  }
+#endif
+  long long sizeBytes = fsFileSize(target);
+  double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
 
   printf("\n> Summary\n");
   printf("Target   : %s\n", target);
@@ -245,15 +265,14 @@ int cmdClean(void) {
 
   bool any = false;
   if (c.cleanBuildDir && safeRelative(c.outBuildDir)) {
-    char *cmd = malloc(strlen(c.outBuildDir) + 16);
-    sprintf(cmd, "rm -rf %s", c.outBuildDir);
-    runCmd(cmd);
-    free(cmd);
-    printf("> Removed   : %s\n", c.outBuildDir);
+    if (fsRemoveTree(c.outBuildDir))
+      printf("> Removed   : %s\n", c.outBuildDir);
+    else
+      printf("> Removed   : %s (sebagian gagal dihapus)\n", c.outBuildDir);
     any = true;
   }
-  if (c.cleanCompileCommands && access("compile_commands.json", F_OK) == 0) {
-    unlink("compile_commands.json");
+  if (c.cleanCompileCommands && fsFileExists("compile_commands.json")) {
+    fsRemoveFile("compile_commands.json");
     printf("> Removed   : compile_commands.json\n");
     any = true;
   }

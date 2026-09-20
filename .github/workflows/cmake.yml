@@ -1,52 +1,79 @@
-# rbot POSIX-only (unistd.h, dirent.h, system("tar"/"ld"), dst) sehingga
-# hanya dibangun di Linux; Buildfile: compiler juga cuma mendaftar gcc/clang,
-# tidak ada dukungan MSVC (cl).
+# rbot lintas platform: Linux (gcc/clang) dan Windows (MSVC + MinGW).
+# Seluruh kode rbot memakai lapisan portabilitas (src/v0.1.0/portability.c),
+# jadi tidak ada lagi asumsi POSIX-only.
 name: CMake
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
-        build_type: [Release]
-        c_compiler: [gcc, clang]
         include:
-          - c_compiler: gcc
+          # ---- Linux: gcc & clang ----
+          - os: ubuntu-latest
+            c_compiler: gcc
             cpp_compiler: g++
-          - c_compiler: clang
+            build_type: Release
+          - os: ubuntu-latest
+            c_compiler: clang
             cpp_compiler: clang++
+            build_type: Release
+          # ---- Windows: MSVC ----
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+            build_type: Release
+          # ---- Windows: MinGW (gcc) ----
+          - os: windows-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            build_type: Release
+
+    runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: |
+          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
 
-    - name: Configure CMake
-      run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        -S ${{ github.workspace }}
+      # MinGW gcc di runner Windows: pakai generator MinGW Makefiles agar
+      # tidak bentrok dengan MSVC yang jadi default generator di VS runner.
+      - name: Configure CMake (MinGW)
+        run: >
+          cmake -B ${{ steps.strings.outputs.build-output-dir }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -G "MinGW Makefiles"
+          -S ${{ github.workspace }}
+        if: matrix.c_compiler == 'gcc' && runner.os == 'Windows'
 
-    - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+      - name: Configure CMake
+        run: >
+          cmake -B ${{ steps.strings.outputs.build-output-dir }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -S ${{ github.workspace }}
+        if: matrix.c_compiler != 'gcc' || runner.os != 'Windows'
 
-    - name: Smoke test
-      # Belum ada test lewat CTest (enable_testing()/add_test() belum
-      # didefinisikan di CMakeLists.txt), jadi cukup pastikan binary-nya
-      # bisa dieksekusi.
-      working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: ./bin/rbot version
+      - name: Build
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+
+      - name: Smoke test
+        # Belum ada test lewat CTest (enable_testing()/add_test() belum
+        # didefinisikan di CMakeLists.txt), jadi cukup pastikan binary-nya
+        # bisa dieksekusi.
+        working-directory: ${{ steps.strings.outputs.build-output-dir }}
+        shell: bash
+        run: ./bin/rbot version
