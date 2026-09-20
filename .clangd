@@ -1,0 +1,46 @@
+CompileFlags:
+  Add:
+    - -xc
+    - -std=gnu11
+    - -Wall
+    - -Wextra
+    - -Iinclude
+    - -I.
+    #- -I/usr/include/aarch64-linux-gnu
+    #- --target=aarch64-linux-gnu
+    - -Wno-use-of-tag-name-without-tag, -std=gnu11
+    - -Wimplicit-function-declaration
+
+Diagnostics:
+  ClangTidy:
+    Add:
+      - clang-analyzer-*
+      - performance-*
+
+  UnusedIncludes: None
+  MissingIncludes: None
+  Suppress:
+    - forward_ref_enum
+    - pp_file_not_found
+
+Index:
+  StandardLibrary: true
+  Background: Build
+
+Completion:
+  AllScopes: Yes
+  ArgumentLists: FullPlaceholders
+  HeaderInsertion: Never
+  CodePatterns: All
+
+InlayHints:
+  BlockEnd: true
+  Designators: true
+  Enabled: true
+  ParameterNames: true
+  DeducedTypes: true
+  DefaultArguments: false
+  TypeNameLimit: 24
+
+Hover:
+  ShowAKA: true

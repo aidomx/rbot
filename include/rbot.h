@@ -1,4 +1,4 @@
-#ifndef RBOT_H
+#pragma once
 #define RBOT_H
 
 /*
@@ -13,4 +13,8 @@
  */
 int rbotRun(int argc, const char *argv[]);
 
-#endif /* RBOT_H */
+/* Versi implementasi aktif, dikompilasi tetap ke dalam binary (bukan
+ * dibaca ulang dari .version saat runtime) — supaya `rbot version` selalu
+ * benar di mana pun dijalankan, tidak tergantung direktori kerja.
+ */
+const char *rbotVersion(void);

@@ -7,9 +7,9 @@
 #include "compile.h"
 
 bool compdbEnabled(const Config *c) {
-  if (strcmp(c->outCompileCommands, "false") == 0) return false;
-  if (strcmp(c->outCompileCommands, "true") == 0) return true;
-  return access("compile_commands.json", F_OK) == 0; /* auto: hanya refresh */
+  /* Nonaktif hanya kalau eksplisit "false"; "true" maupun "auto" (default)
+     sama-sama berarti compile_commands.json dibuat/diperbarui otomatis. */
+  return strcmp(c->outCompileCommands, "false") != 0;
 }
 
 static void jsonQuote(FILE *fp, const char *s) {
