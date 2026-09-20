@@ -25,4 +25,8 @@ target_include_directories(rbot PRIVATE
 )
 
 # Mirror Buildfile: flags: - Wall, - Wextra
-target_compile_options(rbot PRIVATE -Wall -Wextra)
+if(MSVC)
+  target_compile_options(rbot PRIVATE /W4)
+else()
+  target_compile_options(rbot PRIVATE -Wall -Wextra)
+endif()
