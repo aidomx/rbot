@@ -6,23 +6,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
-/* SHFileOperationA ada di shell32; dideklarasikan manual agar build tidak
-   butuh header shellapi.h yang tergantung konfigurasi WIN32_LEAN_AND_MEAN. */
-typedef struct _SHFILEOPSTRUCTA_Shim {
-  HWND hwnd;
-  unsigned wFunc;
-  const char *pFrom;
-  const char *pTo;
-  unsigned short fFlags;
-  int fAnyOperationsAborted;
-  void *hNameMappings;
-  const char *lpszProgressTitle;
-} SHFILEOPSTRUCTA_Shim;
-__declspec(dllimport) int __stdcall SHFileOperationA(SHFILEOPSTRUCTA_Shim *);
-#define FO_DELETE 3
-#define FOF_SILENT 0x0004
-#define FOF_NOCONFIRMATION 0x0010
-#define FOF_NOERRORUI 0x0400
+#include <shellapi.h>
 #else
 #include <dirent.h>
 #include <sys/stat.h>
@@ -171,7 +155,7 @@ bool fsRemoveTree(const char *path) {
   memcpy(doubled, tmp, len + 1);
   doubled[len + 1] = '\0';
 
-  SHFILEOPSTRUCTA_Shim op;
+  SHFILEOPSTRUCTA op;
   memset(&op, 0, sizeof(op));
   op.hwnd = NULL;
   op.wFunc = FO_DELETE;
