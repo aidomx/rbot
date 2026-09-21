@@ -14,12 +14,13 @@
 /* ==================== help ==================== */
 
 void showHelp(void) {
-  printf("Rbot help\n\n");
+  printf("Rbot - A simple builder for you\n\n");
   printf("> rbot <command>\n\n");
-  printf("%-6s%s\n", "", "- build project from Buildfile (default, no command needed)");
-  printf("%-6s%s\n", "init", "- create a default Buildfile if none exists yet");
-  printf("%-6s%s\n", "clean", "- clean build artifacts (Buildfile: clean)");
-  printf("%-6s%s\n", "help", "- show this help");
+  printf("%-8s%s\n", "", "- build project from Buildfile (default, no command needed)");
+  printf("%-8s%s\n", "init", "- create a default Buildfile if none exists yet");
+  printf("%-8s%s\n", "clean", "- clean build artifacts (Buildfile: clean)");
+  printf("%-8s%s\n", "help", "- show this help");
+  printf("%-8s%s\n", "version", "- show version of rbot");
 }
 
 /* ==================== init ==================== */
@@ -36,42 +37,41 @@ int cmdInit(void) {
     return 1;
   }
 
-  fputs(
-      "root: .\n"
-      "\n"
-      "clean:\n"
-      "  - buildDir: false\n"
-      "  - compileCommands: false\n"
-      "\n"
-      "version: \"0.1.0\"\n"
-      "\n"
-      "sources:\n"
-      "  - src\n"
-      "\n"
-      "flags:\n"
-      "  - Wall\n"
-      "  - Wextra\n"
-      "\n"
-      "std: gnu11\n"
-      "\n"
-      "headers:\n"
-      "  - include\n"
-      "  - I.\n"
-      "\n"
-      "compiler:\n"
-      "  - gcc\n"
-      "  - clang\n"
-      "\n"
-      "progress:\n"
-      "  bar: true\n"
-      "  error: always\n"
-      "\n"
-      "output:\n"
-      "  - binaryName: rbot\n"
-      "  - binaryDir: bin\n"
-      "  - buildDir: build\n"
-      "  - compileCommands: auto # compile_commands.json\n",
-      fp);
+  fputs("root: .\n"
+        "\n"
+        "clean:\n"
+        "  - buildDir: false\n"
+        "  - compileCommands: false\n"
+        "\n"
+        "version: \"0.1.0\"\n"
+        "\n"
+        "sources:\n"
+        "  - src\n"
+        "\n"
+        "flags:\n"
+        "  - Wall\n"
+        "  - Wextra\n"
+        "\n"
+        "std: gnu11\n"
+        "\n"
+        "headers:\n"
+        "  - include\n"
+        "  - I.\n"
+        "\n"
+        "compiler:\n"
+        "  - gcc\n"
+        "  - clang\n"
+        "\n"
+        "progress:\n"
+        "  bar: true\n"
+        "  error: always\n"
+        "\n"
+        "output:\n"
+        "  - binaryName: rbot\n"
+        "  - binaryDir: bin\n"
+        "  - buildDir: build\n"
+        "  - compileCommands: auto # compile_commands.json\n",
+        fp);
   fclose(fp);
 
   printf("> Created   : Buildfile\n");
