@@ -40,7 +40,10 @@ typedef struct {
   List flags;
   List headerInternal; /* metadata saja, tidak dilewatkan ke compiler */
   List headerPublic;   /* tiap entri jadi -I<entry> */
-  List libraries;      /* tiap entri jadi -l<entry> */
+  List libraries;      /* library aktif: flat + platform yang dipilih */
+  List librariesLinux;
+  List librariesMacOS;
+  List librariesWindows;
   List compilers;      /* yang pertama tersedia menang */
 
   char std[32];

@@ -41,7 +41,23 @@ static void configFinalizeEntry(EmbeddedEntry *e, const char *buildDir) {
   snprintf(e->objectPath, sizeof(e->objectPath), "%s/%s.o", buildDir, e->archiveName);
 }
 
+static void appendLibraries(List *dst, const List *src) {
+  for (int i = 0; i < src->count; i++) listAdd(dst, src->items[i]);
+}
+
+/* Pilih library nested berdasarkan target host. Library flat tetap selalu dipakai. */
+static void configFinalizeLibraries(Config *c) {
+#if defined(__linux__)
+  appendLibraries(&c->libraries, &c->librariesLinux);
+#elif defined(__APPLE__)
+  appendLibraries(&c->libraries, &c->librariesMacOS);
+#elif defined(_WIN32)
+  appendLibraries(&c->libraries, &c->librariesWindows);
+#endif
+}
+
 static void configFinalize(Config *c) {
+  configFinalizeLibraries(c);
   for (int i = 0; i < c->embCount; i++)
     configFinalizeEntry(&c->emb[i], c->outBuildDir);
 }
@@ -140,14 +156,25 @@ static void configApply(Config *c, const char *section, const char *sub, const c
   }
 }
 
+static List *libraryListForPlatform(Config *c, const char *platform) {
+  if (!platform) return NULL;
+  if (strcmp(platform, "linux") == 0) return &c->librariesLinux;
+  if (strcmp(platform, "macos") == 0 || strcmp(platform, "macOS") == 0 ||
+      strcmp(platform, "darwin") == 0) return &c->librariesMacOS;
+  if (strcmp(platform, "windows") == 0 || strcmp(platform, "win32") == 0 ||
+      strcmp(platform, "mingw") == 0) return &c->librariesWindows;
+  return NULL;
+}
+
 static void listForSection(Config *c, const char *section, const char *sub, const char *item) {
   if (strcmp(section, "sources") == 0)
     listAdd(&c->sources, item);
   else if (strcmp(section, "flags") == 0)
     listAdd(&c->flags, item);
-  else if (strcmp(section, "library") == 0)
-    listAdd(&c->libraries, item);
-  else if (strcmp(section, "compiler") == 0)
+  else if (strcmp(section, "library") == 0) {
+    List *platform = libraryListForPlatform(c, sub);
+    listAdd(platform ? platform : &c->libraries, item);
+  } else if (strcmp(section, "compiler") == 0)
     listAdd(&c->compilers, item);
   else if (strcmp(section, "headers") == 0) {
     if (sub && strcmp(sub, "internal") == 0)
