@@ -10,9 +10,12 @@ set(CMAKE_C_EXTENSIONS ON)   # ON -> -std=gnu11 (bukan -std=c11)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Put generated binaries next to the configured build tree instead of the source tree.
-# This matches the workflow's smoke-test assumption that the executable lives under
-# ${build-dir}/bin and keeps CI output paths consistent across OSes.
+# This keeps the output consistent across Unix Makefiles and multi-config generators
+# such as Visual Studio on GitHub-hosted Windows runners.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+foreach(config IN ITEMS RELEASE RELWITHDEBINFO MINSIZEREL DEBUG)
+  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config} ${CMAKE_BINARY_DIR}/bin)
+endforeach()
 
 # Mirror Buildfile: sources: - src (scan rekursif semua .c di bawah src/)
 file(GLOB_RECURSE RBOT_SOURCES CONFIGURE_DEPENDS src/*.c)
