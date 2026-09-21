@@ -87,6 +87,7 @@ Bagian yang sering disesuaikan:
 - **library** _(opsional, tidak ada di default)_ — tiap entri jadi `-l<nama>`,
   contoh `ssl` → `-lssl` (di MSVC otomatis jadi `ssl.lib`).
 - **output.binaryName / binaryDir** — nama & lokasi binary hasil build.
+
 ## Embedded (Buildfile: embedded)
 
 Fitur embedded mengarsipkan sebuah direktori lalu menempelkannya ke binary
@@ -95,17 +96,31 @@ Fitur embedded mengarsipkan sebuah direktori lalu menempelkannya ke binary
 ### Menulis di Buildfile
 
 ```yaml
+library:
+  - ssl
+  - crypto
+
+  - linux:
+      - m
+      - pthread
+
+  - macos:
+      - m
+
+  - windows:
+      - ws2_32
+
 embedded:
-  - assets:              # nama entri (bebas; jadi prefix macro EMBED_ASSETS_*)
-    - src: assets        # direktori yang diarsipkan
-    - pattern: .txt      # (opsional) pola scan freshness; kosong = semua file
-    - extract: /tmp/rupa-assets  # (opsional) catatan direktori ekstraksi runtime
-    - archive:
-      - dir: modules     # lokasi arsip (default: modules)
-      - name: demo_assets # nama arsip (default: nama entri)
-      - with:
-        - tar: true      # true = tar[.gz], false = gzip langsung
-        - ext: gz        # ekstensi tambahan (gz)
+  - assets: # nama entri (bebas; jadi prefix macro EMBED_ASSETS_*)
+      - src: assets # direktori yang diarsipkan
+      - pattern: .txt # (opsional) pola scan freshness; kosong = semua file
+      - extract: /tmp/rupa-assets # (opsional) catatan direktori ekstraksi runtime
+      - archive:
+          - dir: modules # lokasi arsip (default: modules)
+          - name: demo_assets # nama arsip (default: nama entri)
+          - with:
+              - tar: true # true = tar[.gz], false = gzip langsung
+              - ext: gz # ekstensi tambahan (gz)
 ```
 
 Hasil di direktori project:
@@ -121,13 +136,13 @@ build/embedded.h            # macro & deklarasi simbol — di-include kode kamu
 Include `build/embedded.h` (tambahkan `build` ke `headers` di Buildfile),
 lalu pakai macro per entri `<NAMA>` (uppercase nama entri):
 
-| Macro | Arti |
-|---|---|
+| Macro                       | Arti                                     |
+| --------------------------- | ---------------------------------------- |
 | `EMBED_<NAMA>_ARCHIVE_NAME` | nama file arsip (`"demo_assets.tar.gz"`) |
-| `EMBED_<NAMA>_EXTRACT_DIR` | isi `extract:` di Buildfile |
-| `EMBED_<NAMA>_SYMBOL` | pointer ke byte pertama data |
-| `EMBED_<NAMA>_SYMBOL_END` | pointer satu-byte-setelah-blok |
-| `EMBED_<NAMA>_SYMBOL_LEN` | panjang data dalam byte |
+| `EMBED_<NAMA>_EXTRACT_DIR`  | isi `extract:` di Buildfile              |
+| `EMBED_<NAMA>_SYMBOL`       | pointer ke byte pertama data             |
+| `EMBED_<NAMA>_SYMBOL_END`   | pointer satu-byte-setelah-blok           |
+| `EMBED_<NAMA>_SYMBOL_LEN`   | panjang data dalam byte                  |
 
 ```c
 #include <stdio.h>
@@ -147,10 +162,10 @@ int main(void) {
 
 ### Dua jalur embed (otomatis)
 
-| Jalur | Kapan dipakai | Bentuk simbol |
-|---|---|---|
-| `ld -r -b binary` | GNU ld tersedia (Linux/MinGW) | `_binary_<path>_start/_end` nyata |
-| Fallback C array | MSVC, atau tanpa `ld` (paksa: env `RBOT_NO_LD=1`) | `start[]` + `unsigned long _len` |
+| Jalur             | Kapan dipakai                                     | Bentuk simbol                     |
+| ----------------- | ------------------------------------------------- | --------------------------------- |
+| `ld -r -b binary` | GNU ld tersedia (Linux/MinGW)                     | `_binary_<path>_start/_end` nyata |
+| Fallback C array  | MSVC, atau tanpa `ld` (paksa: env `RBOT_NO_LD=1`) | `start[]` + `unsigned long _len`  |
 
 Macro `EMBED_<NAMA>_*` di `build/embedded.h` sama persis di kedua jalur —
 kode konsumen tidak perlu tahu jalur mana yang aktif (header bahkan
