@@ -9,8 +9,10 @@ set(CMAKE_C_EXTENSIONS ON)   # ON -> -std=gnu11 (bukan -std=c11)
 # Mirror Buildfile: output.compileCommands
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Mirror Buildfile: output.binaryDir: bin
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+# Put generated binaries next to the configured build tree instead of the source tree.
+# This matches the workflow's smoke-test assumption that the executable lives under
+# ${build-dir}/bin and keeps CI output paths consistent across OSes.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Mirror Buildfile: sources: - src (scan rekursif semua .c di bawah src/)
 file(GLOB_RECURSE RBOT_SOURCES CONFIGURE_DEPENDS src/*.c)
