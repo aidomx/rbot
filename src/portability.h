@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <time.h>
 
 #include "util.h"
@@ -38,6 +39,7 @@ void fsMakeDir(const char *path); /* mkdir satu level, diam bila sudah ada */
 bool fsFileExists(const char *path);
 bool fsDirExists(const char *path);
 time_t fsMTime(const char *path); /* (time_t)-1 bila tidak ada */
+int64_t fsMTimeNs(const char *path); /* -1 bila tidak ada */
 long long fsFileSize(const char *path);
 bool fsNewerThan(const char *a, const char *b);
 bool fsRemoveFile(const char *path);

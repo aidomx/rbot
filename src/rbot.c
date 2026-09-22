@@ -10,7 +10,9 @@
  * mengikutinya. Bukan dibaca dari .version saat runtime; dikompilasi tetap
  * ke binary supaya `rbot version` selalu benar di mana pun dijalankan.
  */
-const char *rbotVersion(void) { return "v0.1.0"; }
+const char *rbotVersion(void) {
+  return "v0.1.1";
+}
 
 /*
  * Titik masuk implementasi versi v0.1.0. Dipanggil oleh src/main.c
@@ -24,12 +26,9 @@ int rbotRun(int argc, const char *argv[]) {
   }
 
   const char *cmd = argv[1];
-  if (strcmp(cmd, "init") == 0)
-    return cmdInit();
-  if (strcmp(cmd, "clean") == 0)
-    return cmdClean();
-  if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 ||
-      strcmp(cmd, "-h") == 0) {
+  if (strcmp(cmd, "init") == 0) return cmdInit();
+  if (strcmp(cmd, "clean") == 0) return cmdClean();
+  if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0) {
     showHelp();
     return 0;
   }

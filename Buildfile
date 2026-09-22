@@ -4,7 +4,7 @@ clean:
   - buildDir: false
   - compileCommands: false
 
-version: "0.1.0"
+version: "0.1.1"
 
 sources:
   - src

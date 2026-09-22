@@ -166,7 +166,62 @@ int cmdBuild(void) {
     return 1;
   }
 
-  /* link */
+  /* link: hanya jalankan linker bila target belum ada atau salah satu
+     input object lebih baru daripada target. Gunakan nanosecond mtime agar
+     keputusan incremental tidak kehilangan perubahan yang terjadi dalam
+     detik yang sama. */
+  char target[MAX_PATH * 2];
+  snprintf(target, sizeof(target), "%s/%s", c.outBinaryDir, c.outBinaryName);
+#ifdef _WIN32
+  /* Windows dapat menambahkan .exe otomatis saat link. */
+  if (!fsFileExists(target)) {
+    char withExe[MAX_PATH * 2];
+    snprintf(withExe, sizeof(withExe), "%s.exe", target);
+    if (fsFileExists(withExe)) snprintf(target, sizeof(target), "%s", withExe);
+  }
+#endif
+
+  bool linkNeeded = !fsFileExists(target);
+  if (!linkNeeded) {
+    int64_t targetMtime = fsMTimeNs(target);
+    if (targetMtime < 0) {
+      linkNeeded = true;
+    } else {
+      for (int i = 0; i < srcs.count && !linkNeeded; i++) {
+        if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
+        int64_t objectMtime = fsMTimeNs(obj);
+        if (objectMtime < 0 || objectMtime > targetMtime)
+          linkNeeded = true;
+      }
+
+      for (int i = 0; i < c.embCount && !linkNeeded; i++) {
+        if (!c.emb[i].enable) continue;
+        if (!fsFileExists(c.emb[i].objectPath)) {
+          linkNeeded = true;
+          break;
+        }
+        int64_t objectMtime = fsMTimeNs(c.emb[i].objectPath);
+        if (objectMtime < 0 || objectMtime > targetMtime)
+          linkNeeded = true;
+      }
+    }
+  }
+
+  if (!linkNeeded) {
+    printf("> Linking   : %s (up-to-date)\n", target);
+    free(inc);
+    free(wf);
+    printf("\n> Summary\n");
+    long long sizeBytes = fsFileSize(target);
+    double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
+    printf("Target   : %s\n", target);
+    printf("Size     : %.1fKB\n", sizeKb);
+    printf("Compiled : %d\n", compiled);
+    printf("Skipped  : %d\n", skipped);
+    printf("Status   : Success\n");
+    return 0;
+  }
+
   size_t n = strlen(c.cc) + strlen(c.outBinaryDir) + strlen(c.outBinaryName) + 256;
   for (int i = 0; i < srcs.count; i++)
     if (objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) n += strlen(obj) + 2;
@@ -235,16 +290,6 @@ int cmdBuild(void) {
     return 1;
   }
 
-  char target[MAX_PATH * 2];
-  snprintf(target, sizeof(target), "%s/%s", c.outBinaryDir, c.outBinaryName);
-#ifdef _WIN32
-  /* Windows menambahkan .exe otomatis saat link; laporkan path sebenarnya */
-  if (!fsFileExists(target)) {
-    char withExe[MAX_PATH * 2];
-    snprintf(withExe, sizeof(withExe), "%s.exe", target);
-    if (fsFileExists(withExe)) snprintf(target, sizeof(target), "%s", withExe);
-  }
-#endif
   long long sizeBytes = fsFileSize(target);
   double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
 

@@ -124,6 +124,17 @@ time_t fsMTime(const char *path) {
   return filetimeToTimeT(&fad.ftLastWriteTime);
 }
 
+int64_t fsMTimeNs(const char *path) {
+  WIN32_FILE_ATTRIBUTE_DATA fad;
+  if (!statInfo(path, &fad)) return -1;
+  ULARGE_INTEGER u;
+  u.LowPart = fad.ftLastWriteTime.dwLowDateTime;
+  u.HighPart = fad.ftLastWriteTime.dwHighDateTime;
+  if (u.QuadPart == 0) return -1;
+  /* FILETIME is already expressed in 100ns units since 1601. */
+  return (int64_t)u.QuadPart * 100LL;
+}
+
 long long fsFileSize(const char *path) {
   WIN32_FILE_ATTRIBUTE_DATA fad;
   if (!statInfo(path, &fad)) return -1;
@@ -273,6 +284,16 @@ time_t fsMTime(const char *path) {
   struct stat st;
   if (stat(path, &st) != 0) return (time_t)-1;
   return st.st_mtime;
+}
+
+int64_t fsMTimeNs(const char *path) {
+  struct stat st;
+  if (stat(path, &st) != 0) return -1;
+#if defined(__APPLE__)
+  return (int64_t)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
+#else
+  return (int64_t)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
+#endif
 }
 
 long long fsFileSize(const char *path) {
