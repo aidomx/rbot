@@ -104,8 +104,6 @@ clean:
   - buildDir: false
   - compileCommands: false
 
-version: "0.1.0"
-
 sources:
   - src
 
