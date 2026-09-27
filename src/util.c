@@ -71,8 +71,10 @@ void walkDir(const char *dir, const char *ext, List *out) {
   List dirs = {0}, files = {0};
   fsListDir(dir, &dirs, &files);
   if (ext[0] == '/') {
-    for (int i = 0; i < dirs.count; i++) listAdd(out, dirs.items[i]);
-    for (int i = 0; i < dirs.count; i++) walkDir(dirs.items[i], ext, out);
+    for (int i = 0; i < dirs.count; i++)
+      listAdd(out, dirs.items[i]);
+    for (int i = 0; i < dirs.count; i++)
+      walkDir(dirs.items[i], ext, out);
     return;
   }
   for (int i = 0; i < files.count; i++) {
@@ -80,10 +82,13 @@ void walkDir(const char *dir, const char *ext, List *out) {
     size_t len = strlen(path), elen = strlen(ext);
     if (len > elen && strcmp(path + len - elen, ext) == 0) listAdd(out, path);
   }
-  for (int i = 0; i < dirs.count; i++) walkDir(dirs.items[i], ext, out);
+  for (int i = 0; i < dirs.count; i++)
+    walkDir(dirs.items[i], ext, out);
 }
 
-bool newerThan(const char *a, const char *b) { return fsNewerThan(a, b); }
+bool newerThan(const char *a, const char *b) {
+  return fsNewerThan(a, b);
+}
 
 bool safeRelative(const char *path) {
   if (!path || !*path) return false;
@@ -96,6 +101,10 @@ bool safeRelative(const char *path) {
 
 /* ==================== Proses & waktu ==================== */
 
-bool runCmd(const char *cmd) { return procRun(cmd); }
+bool runCmd(const char *cmd) {
+  return procRun(cmd);
+}
 
-double nowSeconds(void) { return monotonicSeconds(); }
+double nowSeconds(void) {
+  return monotonicSeconds();
+}

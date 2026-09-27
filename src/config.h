@@ -55,10 +55,28 @@ typedef struct {
   bool progressBar;
   bool progressErrorAlways;
 
+  List excludes;       /* nama/path file yang dilepas dari build (mis. main.c) */
+
   char outBinaryName[128];
   char outBinaryDir[MAX_PATH];
   char outBuildDir[MAX_PATH];
   char outCompileCommands[16]; /* "true" | "false" | "auto" */
+
+  /*
+   * library (opsional): selain binary, build memproduksi library dari
+   * object yang sama. Hasil:
+   *   statis  -> <libDir>/lib<libName>.a     (ar; Windows: <libName>.lib)
+   *   shared  -> <libDir>/lib<libName>.so    (Linux/macOS: .so/.dylib;
+   *                                            Windows: <libName>.dll)
+   * <libDir> default "lib", <libName> default = outBinaryName.
+   * Library hanya dibangun bila libraryName/libraryStatic/libraryShared
+   * disebut di Buildfile (libRequested).
+   */
+  bool libRequested;
+  bool libStatic;
+  bool libShared;
+  char outLibName[128];
+  char outLibDir[MAX_PATH];
 
   /*
    * embedded: entri bernama yang asetnya diarsipkan dan di-embed ke binary

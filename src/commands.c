@@ -19,6 +19,7 @@ void showHelp(void) {
   printf("%-8s%s\n", "", "- build project from Buildfile (default, no command needed)");
   printf("%-8s%s\n", "init", "- create a default Buildfile if none exists yet");
   printf("%-8s%s\n", "clean", "- clean build artifacts (Buildfile: clean)");
+  printf("%-8s%s\n", "", "- output.libraryName/libraryShared membangun lib<name>.a + .so");
   printf("%-8s%s\n", "help", "- show this help");
   printf("%-8s%s\n", "version", "- show version of rbot");
 }
@@ -79,6 +80,177 @@ int cmdInit(void) {
 }
 
 /* ==================== build ==================== */
+
+/* Nama file library sesuai toolchain: lib<name>.a / <name>.lib (statis). */
+static void libStaticPath(const Config *c, char *out, size_t n) {
+#ifdef _WIN32
+  if (compilerIsMSVC(c))
+    snprintf(out, n, "%s/%s.lib", c->outLibDir, c->outLibName);
+  else
+    snprintf(out, n, "%s/lib%s.a", c->outLibDir, c->outLibName);
+#else
+  (void)c;
+  snprintf(out, n, "%s/lib%s.a", c->outLibDir, c->outLibName);
+#endif
+}
+
+/* Nama file library dinamis: lib<name>.so / .dylib / <name>.dll. */
+static void libSharedPath(const Config *c, char *out, size_t n) {
+#if defined(_WIN32)
+  (void)c;
+  snprintf(out, n, "%s/%s.dll", c->outLibDir, c->outLibName);
+#elif defined(__APPLE__)
+  (void)c;
+  snprintf(out, n, "%s/lib%s.dylib", c->outLibDir, c->outLibName);
+#else
+  (void)c;
+  snprintf(out, n, "%s/lib%s.so", c->outLibDir, c->outLibName);
+#endif
+}
+
+static void printLibSummary(const Config *c) {
+  if (!c->libRequested) return;
+  char libp[MAX_PATH * 2];
+  if (c->libStatic) {
+    libStaticPath(c, libp, sizeof(libp));
+    printf("Library  : %s\n", libp);
+  }
+  if (c->libShared) {
+    libSharedPath(c, libp, sizeof(libp));
+    printf("Library  : %s\n", libp);
+  }
+}
+
+/*
+ * Fase library: kumpulkan object hasil kompilasi (source + embedded),
+ * kemas statis (ar / lib) dan/atau link shared (-shared / /LD).
+ * Object perantara TIDAK dihapus — tetap dipakai link binary dan
+ * agar build incremental berikutnya tidak kompilasi ulang total.
+ */
+static bool buildLibrary(const Config *c, const List *srcs) {
+  if (!c->libRequested) return true;
+
+  List objs = {0};
+  char obj[MAX_PATH];
+  for (int i = 0; i < srcs->count; i++) {
+    /* exclude: source tidak ikut DIKEMAS ke library (mis. main.c milik
+       binary) — tetap dikompilasi untuk executable. */
+    if (excludedSource(c, srcs->items[i])) continue;
+    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) listAdd(&objs, obj);
+  }
+  for (int i = 0; i < c->embCount; i++)
+    if (c->emb[i].enable && fsFileExists(c->emb[i].objectPath))
+      listAdd(&objs, c->emb[i].objectPath);
+
+  if (objs.count == 0) {
+    fprintf(stderr, "rbot: library requested but no object files found\n");
+    return false;
+  }
+
+  mkdirs(c->outLibDir);
+
+  bool staticDone = true, sharedDone = true;
+  char target[MAX_PATH * 2];
+
+  if (c->libStatic) {
+    libStaticPath(c, target, sizeof(target));
+    size_t n = 64;
+    for (int i = 0; i < objs.count; i++) n += strlen(objs.items[i]) + 3;
+    char *cmd = malloc(n);
+    if (compilerIsMSVC(c))
+      snprintf(cmd, n, "lib /nologo /OUT:%s", target);
+    else
+      snprintf(cmd, n, "ar rcs %s", target);
+    for (int i = 0; i < objs.count; i++) {
+      strcat(cmd, " ");
+      strcat(cmd, objs.items[i]);
+    }
+    printf("> Library   : %s\n", target);
+    staticDone = runCmd(cmd);
+    free(cmd);
+    if (!staticDone) fprintf(stderr, "rbot: static library build failed\n");
+  }
+
+  if (c->libShared) {
+    libSharedPath(c, target, sizeof(target));
+    size_t n = strlen(c->cc) + strlen(target) + 96;
+    for (int i = 0; i < objs.count; i++) n += strlen(objs.items[i]) + 3;
+    for (int i = 0; i < c->libraries.count; i++) n += strlen(c->libraries.items[i]) + 8;
+    char *cmd = malloc(n);
+    if (compilerIsMSVC(c)) {
+      snprintf(cmd, n, "cl /nologo /LD");
+      for (int i = 0; i < objs.count; i++) {
+        strcat(cmd, " ");
+        strcat(cmd, objs.items[i]);
+      }
+      strcat(cmd, " /link /nologo /INCREMENTAL:NO /OUT:");
+      strcat(cmd, target);
+      for (int i = 0; i < c->libraries.count; i++) {
+        const char *lib = c->libraries.items[i];
+        if (lib[0] == '-') lib++;
+        if (lib[0] == 'l') lib++;
+        strcat(cmd, " ");
+        strcat(cmd, lib);
+        strcat(cmd, ".lib");
+      }
+    } else {
+      snprintf(cmd, n, "%s -shared", c->cc);
+      for (int i = 0; i < objs.count; i++) {
+        strcat(cmd, " ");
+        strcat(cmd, objs.items[i]);
+      }
+      strcat(cmd, " -o ");
+      strcat(cmd, target);
+      for (int i = 0; i < c->libraries.count; i++) {
+        const char *lib = c->libraries.items[i];
+        strcat(cmd, " ");
+        if (lib[0] == '-' || lib[0] == 'l')
+          strcat(cmd, "-");
+        else
+          strcat(cmd, "-l");
+        strcat(cmd, lib);
+      }
+    }
+    printf("> Library   : %s\n", target);
+    sharedDone = runCmd(cmd);
+    free(cmd);
+    if (!sharedDone) fprintf(stderr, "rbot: shared library build failed\n");
+  }
+
+  return staticDone && sharedDone;
+}
+
+/* True bila semua varian library yang diminta sudah ada dan lebih baru
+   daripada seluruh object inputnya — fase library boleh dilewati. */
+static bool libTargetsUpToDate(const Config *c, const List *srcs) {
+  char obj[MAX_PATH];
+  char target[MAX_PATH * 2];
+
+  for (int v = 0; v < 2; v++) {
+    bool isStatic = v == 0;
+    if (isStatic ? !c->libStatic : !c->libShared) continue;
+    if (isStatic)
+      libStaticPath(c, target, sizeof(target));
+    else
+      libSharedPath(c, target, sizeof(target));
+
+    int64_t mtime = fsMTimeNs(target);
+    if (mtime < 0) return false; /* target belum ada */
+
+    for (int i = 0; i < srcs->count; i++) {
+      if (excludedSource(c, srcs->items[i])) continue;
+      if (!objectPathFor(c, srcs->items[i], obj, sizeof(obj))) continue;
+      int64_t om = fsMTimeNs(obj);
+      if (om < 0 || om > mtime) return false;
+    }
+    for (int i = 0; i < c->embCount; i++) {
+      if (!c->emb[i].enable) continue;
+      int64_t om = fsMTimeNs(c->emb[i].objectPath);
+      if (om < 0 || om > mtime) return false;
+    }
+  }
+  return true;
+}
 
 int cmdBuild(void) {
   Config c = configDefaults();
@@ -144,7 +316,7 @@ int cmdBuild(void) {
     if (fsFileExists(obj) && !newerThan(src, obj)) continue;
 
     double start = nowSeconds();
-    bool ok = compileOne(&c, inc, wf, src, obj);
+    bool ok = compileLibraryOne(&c, inc, wf, src, obj);
     double dt = nowSeconds() - start;
 
     compiled++;
@@ -209,6 +381,14 @@ int cmdBuild(void) {
 
   if (!linkNeeded) {
     printf("> Linking   : %s (up-to-date)\n", target);
+    /* Library bisa jadi masih perlu dibangun (baru diaktifkan di
+       Buildfile / terhapus manual) meski binary sudah up-to-date. */
+    if (c.libRequested && !libTargetsUpToDate(&c, &srcs) && !buildLibrary(&c, &srcs)) {
+      free(inc);
+      free(wf);
+      return 1;
+    }
+    printLibSummary(&c);
     free(inc);
     free(wf);
     printf("\n> Summary\n");
@@ -290,6 +470,12 @@ int cmdBuild(void) {
     return 1;
   }
 
+  /* Library statis/shared dari object yang sama — object tidak dihapus. */
+  if (!buildLibrary(&c, &srcs)) {
+    return 1;
+  }
+  printLibSummary(&c);
+
   long long sizeBytes = fsFileSize(target);
   double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
 
@@ -314,6 +500,13 @@ int cmdClean(void) {
       printf("> Removed   : %s\n", c.outBuildDir);
     else
       printf("> Removed   : %s (sebagian gagal dihapus)\n", c.outBuildDir);
+    any = true;
+  }
+  if (c.cleanBuildDir && c.libRequested && safeRelative(c.outLibDir)) {
+    if (fsRemoveTree(c.outLibDir))
+      printf("> Removed   : %s\n", c.outLibDir);
+    else
+      printf("> Removed   : %s (sebagian gagal dihapus)\n", c.outLibDir);
     any = true;
   }
   if (c.cleanCompileCommands && fsFileExists("compile_commands.json")) {

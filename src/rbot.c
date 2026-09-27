@@ -6,12 +6,10 @@
 #include "commands.h"
 
 /*
- * Nama folder ini (src/v0.1.0) ADALAH versinya — konstanta di bawah cukup
- * mengikutinya. Bukan dibaca dari .version saat runtime; dikompilasi tetap
- * ke binary supaya `rbot version` selalu benar di mana pun dijalankan.
+ * Version of rbot
  */
 const char *rbotVersion(void) {
-  return "v0.1.1";
+  return "v0.1.2";
 }
 
 /*

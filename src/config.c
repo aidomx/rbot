@@ -21,6 +21,7 @@ Config configDefaults(void) {
   copyStr(c.outBinaryDir, sizeof(c.outBinaryDir), "bin");
   copyStr(c.outBuildDir, sizeof(c.outBuildDir), "build");
   copyStr(c.outCompileCommands, sizeof(c.outCompileCommands), "auto");
+  copyStr(c.outLibDir, sizeof(c.outLibDir), "lib");
   /* default embedded per-entri; tidak ada yang di-preset di sini */
   return c;
 }
@@ -112,6 +113,19 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       copyStr(c->outBuildDir, sizeof(c->outBuildDir), value);
     else if (strcmp(key, "compileCommands") == 0)
       copyStr(c->outCompileCommands, sizeof(c->outCompileCommands), value);
+    else if (strcmp(key, "libraryName") == 0) {
+      /* output.libraryName menandai library diminta + menetapkan namanya. */
+      c->libRequested = true;
+      c->libStatic = true;
+      copyStr(c->outLibName, sizeof(c->outLibName), value);
+    } else if (strcmp(key, "libDir") == 0)
+      copyStr(c->outLibDir, sizeof(c->outLibDir), value);
+    else if (strcmp(key, "libraryStatic") == 0 && parseBool(value, &b))
+      c->libStatic = b;
+    else if (strcmp(key, "libraryShared") == 0 && parseBool(value, &b)) {
+      c->libShared = b;
+      if (b) c->libRequested = true;
+    }
     return;
   }
 
@@ -180,6 +194,8 @@ static void listForSection(Config *c, const char *section, const char *sub, cons
     listAdd(platform ? platform : &c->libraries, item);
   } else if (strcmp(section, "compiler") == 0)
     listAdd(&c->compilers, item);
+  else if (strcmp(section, "exclude") == 0)
+    listAdd(&c->excludes, item);
   else if (strcmp(section, "headers") == 0) {
     if (sub && strcmp(sub, "internal") == 0)
       listAdd(&c->headerInternal, item);
@@ -236,7 +252,7 @@ static void parseLine(Config *c, char *section, char *sub, char *subsub, int *su
 /* ==================== Persistent Buildfile cache ==================== */
 
 #define CONFIG_CACHE_MAGIC "RBOTCFG1"
-#define CONFIG_CACHE_VERSION 1u
+#define CONFIG_CACHE_VERSION 2u
 #define CONFIG_CACHE_DIR ".rbot"
 #define CONFIG_CACHE_FILE "buildfile.cache"
 
@@ -336,6 +352,10 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
       !cacheWriteU8(fp, progress) || !cacheWriteU8(fp, progressError) ||
       !cacheWriteString(fp, c->outBinaryName) || !cacheWriteString(fp, c->outBinaryDir) ||
       !cacheWriteString(fp, c->outBuildDir) || !cacheWriteString(fp, c->outCompileCommands) ||
+      !cacheWriteString(fp, c->outLibName) || !cacheWriteString(fp, c->outLibDir) ||
+      !cacheWriteU8(fp, c->libRequested ? 1 : 0) || !cacheWriteU8(fp, c->libStatic ? 1 : 0) ||
+      !cacheWriteU8(fp, c->libShared ? 1 : 0) ||
+      !cacheWriteList(fp, &c->excludes) ||
       !cacheWriteU32(fp, (uint32_t)c->embCount))
     return false;
 
@@ -346,6 +366,7 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
 
 static bool cacheReadConfig(FILE *fp, Config *c) {
   uint8_t cleanBuild = 0, cleanCompdb = 0, progress = 0, progressError = 0;
+  uint8_t libRequested = 0, libStatic = 0, libShared = 0;
   uint32_t embCount = 0;
 
   if (!cacheReadString(fp, c->root, sizeof(c->root)) ||
@@ -361,6 +382,10 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
       !cacheReadString(fp, c->outBinaryDir, sizeof(c->outBinaryDir)) ||
       !cacheReadString(fp, c->outBuildDir, sizeof(c->outBuildDir)) ||
       !cacheReadString(fp, c->outCompileCommands, sizeof(c->outCompileCommands)) ||
+      !cacheReadString(fp, c->outLibName, sizeof(c->outLibName)) ||
+      !cacheReadString(fp, c->outLibDir, sizeof(c->outLibDir)) ||
+      !cacheReadU8(fp, &libRequested) || !cacheReadU8(fp, &libStatic) ||
+      !cacheReadU8(fp, &libShared) || !cacheReadList(fp, &c->excludes) ||
       !cacheReadU32(fp, &embCount) || embCount > MAX_EMBEDDED)
     return false;
 
@@ -368,6 +393,9 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
   c->cleanCompileCommands = cleanCompdb != 0;
   c->progressBar = progress != 0;
   c->progressErrorAlways = progressError != 0;
+  c->libRequested = libRequested != 0;
+  c->libStatic = libStatic != 0;
+  c->libShared = libShared != 0;
   c->embCount = (int)embCount;
   for (int i = 0; i < c->embCount; i++)
     if (!cacheReadEmbedded(fp, &c->emb[i])) return false;

@@ -61,9 +61,9 @@ Kondisi pengujian:
 - Pembanding menggunakan `bear -- make` agar workflow Make juga menghasilkan
   `compile_commands.json`.
 
-| Build system | Run 1 | Run 2 | Rata-rata |
-| --- | ---: | ---: | ---: |
-| **rbot** | 0.858 s | 0.814 s | **0.836 s** |
+| Build system    |   Run 1 |   Run 2 |   Rata-rata |
+| --------------- | ------: | ------: | ----------: |
+| **rbot**        | 0.858 s | 0.814 s | **0.836 s** |
 | **bear + make** | 2.204 s | 2.169 s | **2.187 s** |
 
 Pada pengujian tersebut:
@@ -84,10 +84,10 @@ Rata-rata wall-clock time `rbot` sekitar **2.6× lebih rendah** dibandingkan
 
 CPU time yang tercatat:
 
-| Build system | Run 1 | Run 2 | Rata-rata |
-| --- | ---: | ---: | ---: |
-| **rbot** | 0.14 s | 0.13 s | **0.135 s** |
-| **bear + make** | 1.41 s | 1.41 s | **1.41 s** |
+| Build system    |  Run 1 |  Run 2 |   Rata-rata |
+| --------------- | -----: | -----: | ----------: |
+| **rbot**        | 0.14 s | 0.13 s | **0.135 s** |
+| **bear + make** | 1.41 s | 1.41 s |  **1.41 s** |
 
 Benchmark ini merupakan pengukuran pada environment pengujian yang sama dan
 bukan klaim performa universal. Hasil dapat berbeda tergantung hardware,
@@ -139,7 +139,7 @@ Bagian yang sering disesuaikan:
 - **sources** — daftar direktori yang di-scan rekursif untuk file `.c`.
 - **headers** — tiap entri menjadi `-I<dir>`; `I.` shorthand untuk `-I.`
   (di MSVC otomatis menjadi `/I<dir>`).
-- **library** *(opsional, tidak ada di default)* — tiap entri menjadi
+- **library** _(opsional, tidak ada di default)_ — tiap entri menjadi
   `-l<nama>`, contoh `ssl` → `-lssl` (di MSVC otomatis menjadi `ssl.lib`).
 - **output.binaryName / binaryDir** — nama & lokasi binary hasil build.
 
@@ -191,13 +191,13 @@ build/embedded.h
 Include `build/embedded.h` (tambahkan `build` ke `headers` di Buildfile),
 lalu pakai macro per entri `<NAMA>` (uppercase nama entri):
 
-| Macro | Arti |
-| --- | --- |
-| `EMBED_<NAMA>_ARCHIVE_NAME` | nama file arsip |
-| `EMBED_<NAMA>_EXTRACT_DIR` | isi `extract:` di Buildfile |
-| `EMBED_<NAMA>_SYMBOL` | pointer ke byte pertama data |
-| `EMBED_<NAMA>_SYMBOL_END` | pointer satu-byte-setelah-blok |
-| `EMBED_<NAMA>_SYMBOL_LEN` | panjang data dalam byte |
+| Macro                       | Arti                           |
+| --------------------------- | ------------------------------ |
+| `EMBED_<NAMA>_ARCHIVE_NAME` | nama file arsip                |
+| `EMBED_<NAMA>_EXTRACT_DIR`  | isi `extract:` di Buildfile    |
+| `EMBED_<NAMA>_SYMBOL`       | pointer ke byte pertama data   |
+| `EMBED_<NAMA>_SYMBOL_END`   | pointer satu-byte-setelah-blok |
+| `EMBED_<NAMA>_SYMBOL_LEN`   | panjang data dalam byte        |
 
 ```c
 #include <stdio.h>
@@ -216,20 +216,52 @@ int main(void) {
 
 ### Dua jalur embed (otomatis)
 
-| Jalur | Kapan dipakai | Bentuk simbol |
-| --- | --- | --- |
-| `ld -r -b binary` | GNU ld tersedia (Linux/MinGW) | `_binary_<path>_start/_end` nyata |
-| Fallback C array | MSVC, atau tanpa `ld` (`RBOT_NO_LD=1`) | `start[]` + `unsigned long _len` |
+| Jalur             | Kapan dipakai                          | Bentuk simbol                     |
+| ----------------- | -------------------------------------- | --------------------------------- |
+| `ld -r -b binary` | GNU ld tersedia (Linux/MinGW)          | `_binary_<path>_start/_end` nyata |
+| Fallback C array  | MSVC, atau tanpa `ld` (`RBOT_NO_LD=1`) | `start[]` + `unsigned long _len`  |
 
 Macro `EMBED_<NAMA>_*` di `build/embedded.h` sama persis di kedua jalur.
 Freshness arsip dicek otomatis: perubahan pada file di `src:` akan memicu
 build ulang arsip dan object.
 
-## `.version`
+## Library (Buildfile: output.library*)
 
-File `.version` di root project menandai versi implementasi rbot yang
-aktif (mis. `v0.1.0`). Ini dipakai oleh dispatcher (`src/main.c` pada
-source rbot sendiri) dan oleh `rbot version`.
+Selain binary, rbot bisa memproduksi library statis dan/atau dinamis dari
+object yang sama:
+
+```yaml
+output:
+  - binaryName: rupa
+  - binaryDir: bin
+  - buildDir: build
+
+  - libraryName: rupa # aktifkan library: lib/librupa.a
+  - libDir: lib # direktori hasil (default "lib")
+  - libraryShared: true # + lib/librupa.so (perlu -fPIC saat kompilasi)
+```
+
+- `libraryName` mengaktifkan **statis**: `lib<name>.a` (GNU/Clang) atau
+  `<name>.lib` (MSVC).
+- `libraryShared: true` menambah varian **dinamis**: `lib<name>.so`
+  (Linux), `.dylib` (macOS), `<name>.dll` (Windows). Saat aktif, semua
+  source otomatis dikompilasi dengan `-fPIC` sehingga object tetap bisa
+  dipakai link binary.
+- **exclude** — melepas source dari pengemasan library tanpa memengaruhi
+  binary (mis. `main.c` milik executable):
+
+  ```yaml
+  exclude:
+    - main.c
+  ```
+
+  Cocok berdasarkan nama file (`main.c`), path (`src/main.c`), atau
+  prefix direktori (`src/tools/`).
+
+Keputusan build library incremental: fase library dilewati bila semua
+varian yang diminta sudah lebih baru daripada seluruh object inputnya;
+object perantara tidak dihapus sehingga build berikutnya tetap murah.
+`rbot clean` (dengan `clean.buildDir: true`) ikut menghapus `libDir`.
 
 ## Lisensi
 

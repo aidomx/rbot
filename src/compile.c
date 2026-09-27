@@ -123,6 +123,45 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
   return false;
 }
 
+/*
+ * exclude: nama file, path relatif, atau direktori. Pencocokan:
+ *   - basename sama persis ("main.c" vs "src/main.c"), atau
+ *   - path sama persis, atau diakhiri "/<entry>".
+ */
+bool excludedSource(const Config *c, const char *src) {
+  if (!c || c->excludes.count == 0 || !src) return false;
+  const char *base = strrchr(src, '/');
+  base = base ? base + 1 : src;
+  for (int i = 0; i < c->excludes.count; i++) {
+    const char *e = c->excludes.items[i];
+    if (!e || !*e) continue;
+    if (strcmp(src, e) == 0 || strcmp(base, e) == 0) return true;
+    size_t el = strlen(e);
+    /* Entri berakhiran '/' = prefix direktori: semua src di bawahnya. */
+    if (el > 0 && e[el - 1] == '/' && strncmp(src, e, el) == 0) return true;
+  }
+  return false;
+}
+
+/* Kompilasi satu source untuk library: identik compileOne, plus -fPIC
+   bila library shared diminta (GNU/Clang; MSVC tidak butuh flag). */
+bool compileLibraryOne(const Config *c, const char *inc, const char *wf, const char *src,
+                       const char *obj) {
+#ifndef _WIN32
+  if (c->libShared && compilerKind(c->cc) != CC_MSVC) {
+    char *picwf = malloc(strlen(wf) + 16);
+    strcpy(picwf, wf);
+    strcat(picwf, "-fPIC ");
+    bool ok = compileOne(c, inc, picwf, src, obj);
+    free(picwf);
+    return ok;
+  }
+#else
+  (void)c;
+#endif
+  return compileOne(c, inc, wf, src, obj);
+}
+
 /* "token1 token2" -> "token1","token2" — pecah per spasi lalu terjemahkan:
    -I<dir> -> /I<dir>, -W* -> /W4 (Wall/Wextra) atau /W3 (lainnya),
    token lain diteruskan (mis. /std dari pemanggil). */

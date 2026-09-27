@@ -20,4 +20,12 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n);
 bool compileOne(const Config *c, const char *inc, const char *wf, const char *src,
                 const char *obj);
 
+/* "src/main.c" tercantum di Buildfile: exclude -> dilepas dari build. */
+bool excludedSource(const Config *c, const char *src);
+
+/* Kompilasi satu source untuk library: identik compileOne, plus -fPIC
+   bila library shared diminta (GNU/Clang; MSVC tidak butuh flag). */
+bool compileLibraryOne(const Config *c, const char *inc, const char *wf, const char *src,
+                       const char *obj);
+
 #endif /* RBOT_V0_1_0_COMPILE_H */
