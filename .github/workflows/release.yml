@@ -28,11 +28,6 @@ jobs:
           - os: ubuntu-24.04-arm    # Runner ARM64 native (Tersedia untuk public repo)
             asset_name: rbot-linux-arm64
             exe_ext: ""
-
-          # --- MACOS ---
-          - os: macos-13            # Runner Intel (x86_64)
-            asset_name: rbot-macos-x64
-            exe_ext: ""
             
           - os: macos-latest        # Runner Apple Silicon M1/M2 (arm64)
             asset_name: rbot-macos-arm64
