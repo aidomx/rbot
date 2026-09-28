@@ -1,5 +1,5 @@
 # rbot lintas platform: Linux (gcc/clang), macOS (clang), dan Windows (MSVC + MinGW).
-# Seluruh kode rbot memakai lapisan portabilitas (src/v0.1.0/portability.c),
+# Seluruh kode rbot memakai lapisan portabilitas (src/portability.c),
 # jadi tidak ada lagi asumsi POSIX-only.
 name: CMake
 
@@ -15,36 +15,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ---- Linux x86_64: gcc & clang ----
+          # ---- Linux x86_64 ----
           - os: ubuntu-latest
             c_compiler: gcc
             cpp_compiler: g++
             build_type: Release
-            
           - os: ubuntu-latest
             c_compiler: clang
             cpp_compiler: clang++
             build_type: Release
 
-          # ---- Linux arm64: gcc & clang ----
-          # Menggunakan runner ARM native terbaru dari GitHub
+          # ---- Linux arm64 ----
           - os: ubuntu-24.04-arm
             c_compiler: gcc
             cpp_compiler: g++
             build_type: Release
-            
           - os: ubuntu-24.04-arm
             c_compiler: clang
             cpp_compiler: clang++
             build_type: Release
 
-          # ---- macOS x86_64 (Intel) ----
-          - os: macos-13
-            c_compiler: clang
-            cpp_compiler: clang++
-            build_type: Release
-
-          # ---- macOS arm64 (Apple Silicon M1/M2/M3) ----
+          # ---- macOS arm64 (Apple Silicon) ----
           - os: macos-latest
             c_compiler: clang
             cpp_compiler: clang++
@@ -55,8 +46,8 @@ jobs:
             c_compiler: cl
             cpp_compiler: cl
             build_type: Release
-            
-          # ---- Windows x86_64: MinGW (gcc) ----
+
+          # ---- Windows x86_64: MinGW ----
           - os: windows-latest
             c_compiler: gcc
             cpp_compiler: g++
@@ -73,8 +64,6 @@ jobs:
         run: |
           echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
 
-      # MinGW gcc di runner Windows: pakai generator MinGW Makefiles agar
-      # tidak bentrok dengan MSVC yang jadi default generator di VS runner.
       - name: Configure CMake (MinGW)
         run: >
           cmake -B ${{ steps.strings.outputs.build-output-dir }}
@@ -98,7 +87,6 @@ jobs:
         run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
 
       - name: Smoke test
-        # Memastikan binary bisa dieksekusi di arsitektur runner masing-masing.
         working-directory: ${{ steps.strings.outputs.build-output-dir }}
         shell: bash
         run: ./bin/rbot version
