@@ -1,7 +1,7 @@
 root: .
 
 clean:
-  - buildDir: true
+  - build: true
   - compileCommands: true
 
 sources:

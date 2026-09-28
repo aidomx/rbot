@@ -1,7 +1,7 @@
 #include "config.h"
 
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -33,8 +33,7 @@ static void configFinalizeEntry(EmbeddedEntry *e, const char *buildDir) {
       snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s.tar.%s", e->archiveDir,
                e->archiveName, e->ext);
     else
-      snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s.tar", e->archiveDir,
-               e->archiveName);
+      snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s.tar", e->archiveDir, e->archiveName);
   } else if (e->ext[0]) {
     snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s.%s", e->archiveDir, e->archiveName,
              e->ext);
@@ -47,7 +46,8 @@ static void configFinalizeEntry(EmbeddedEntry *e, const char *buildDir) {
 }
 
 static void appendLibraries(List *dst, const List *src) {
-  for (int i = 0; i < src->count; i++) listAdd(dst, src->items[i]);
+  for (int i = 0; i < src->count; i++)
+    listAdd(dst, src->items[i]);
 }
 
 /* Pilih library nested berdasarkan target host. Library flat tetap selalu dipakai. */
@@ -89,7 +89,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
   }
 
   if (strcmp(section, "clean") == 0) {
-    if (strcmp(key, "buildDir") == 0 && parseBool(value, &b))
+    if (strcmp(key, "build") == 0 && parseBool(value, &b))
       c->cleanBuildDir = b;
     else if (strcmp(key, "compileCommands") == 0 && parseBool(value, &b))
       c->cleanCompileCommands = b;
@@ -178,9 +178,11 @@ static List *libraryListForPlatform(Config *c, const char *platform) {
   if (!platform) return NULL;
   if (strcmp(platform, "linux") == 0) return &c->librariesLinux;
   if (strcmp(platform, "macos") == 0 || strcmp(platform, "macOS") == 0 ||
-      strcmp(platform, "darwin") == 0) return &c->librariesMacOS;
+      strcmp(platform, "darwin") == 0)
+    return &c->librariesMacOS;
   if (strcmp(platform, "windows") == 0 || strcmp(platform, "win32") == 0 ||
-      strcmp(platform, "mingw") == 0) return &c->librariesWindows;
+      strcmp(platform, "mingw") == 0)
+    return &c->librariesWindows;
   return NULL;
 }
 
@@ -264,10 +266,18 @@ static bool cacheReadBytes(FILE *fp, void *p, size_t n) {
   return fread(p, 1, n, fp) == n;
 }
 
-static bool cacheWriteU32(FILE *fp, uint32_t v) { return cacheWriteBytes(fp, &v, sizeof(v)); }
-static bool cacheReadU32(FILE *fp, uint32_t *v) { return cacheReadBytes(fp, v, sizeof(*v)); }
-static bool cacheWriteU8(FILE *fp, uint8_t v) { return cacheWriteBytes(fp, &v, sizeof(v)); }
-static bool cacheReadU8(FILE *fp, uint8_t *v) { return cacheReadBytes(fp, v, sizeof(*v)); }
+static bool cacheWriteU32(FILE *fp, uint32_t v) {
+  return cacheWriteBytes(fp, &v, sizeof(v));
+}
+static bool cacheReadU32(FILE *fp, uint32_t *v) {
+  return cacheReadBytes(fp, v, sizeof(*v));
+}
+static bool cacheWriteU8(FILE *fp, uint8_t v) {
+  return cacheWriteBytes(fp, &v, sizeof(v));
+}
+static bool cacheReadU8(FILE *fp, uint8_t *v) {
+  return cacheReadBytes(fp, v, sizeof(*v));
+}
 
 static bool cacheWriteString(FILE *fp, const char *s) {
   uint32_t n = (uint32_t)(s ? strlen(s) : 0);
@@ -303,30 +313,22 @@ static bool cacheReadList(FILE *fp, List *l) {
 static bool cacheWriteEmbedded(FILE *fp, const EmbeddedEntry *e) {
   uint8_t b = e->enable ? 1 : 0;
   uint8_t tar = e->tar ? 1 : 0;
-  return cacheWriteString(fp, e->name) &&
-         cacheWriteU8(fp, b) &&
-         cacheWriteString(fp, e->src) &&
-         cacheWriteString(fp, e->extract) &&
-         cacheWriteString(fp, e->pattern) &&
-         cacheWriteString(fp, e->archiveDir) &&
-         cacheWriteString(fp, e->archiveName) &&
-         cacheWriteU8(fp, tar) &&
-         cacheWriteString(fp, e->ext) &&
-         cacheWriteString(fp, e->archivePath) &&
-         cacheWriteString(fp, e->objectPath);
+  return cacheWriteString(fp, e->name) && cacheWriteU8(fp, b) && cacheWriteString(fp, e->src) &&
+         cacheWriteString(fp, e->extract) && cacheWriteString(fp, e->pattern) &&
+         cacheWriteString(fp, e->archiveDir) && cacheWriteString(fp, e->archiveName) &&
+         cacheWriteU8(fp, tar) && cacheWriteString(fp, e->ext) &&
+         cacheWriteString(fp, e->archivePath) && cacheWriteString(fp, e->objectPath);
 }
 
 static bool cacheReadEmbedded(FILE *fp, EmbeddedEntry *e) {
   uint8_t b = 0, tar = 0;
   memset(e, 0, sizeof(*e));
-  if (!cacheReadString(fp, e->name, sizeof(e->name)) ||
-      !cacheReadU8(fp, &b) ||
+  if (!cacheReadString(fp, e->name, sizeof(e->name)) || !cacheReadU8(fp, &b) ||
       !cacheReadString(fp, e->src, sizeof(e->src)) ||
       !cacheReadString(fp, e->extract, sizeof(e->extract)) ||
       !cacheReadString(fp, e->pattern, sizeof(e->pattern)) ||
       !cacheReadString(fp, e->archiveDir, sizeof(e->archiveDir)) ||
-      !cacheReadString(fp, e->archiveName, sizeof(e->archiveName)) ||
-      !cacheReadU8(fp, &tar) ||
+      !cacheReadString(fp, e->archiveName, sizeof(e->archiveName)) || !cacheReadU8(fp, &tar) ||
       !cacheReadString(fp, e->ext, sizeof(e->ext)) ||
       !cacheReadString(fp, e->archivePath, sizeof(e->archivePath)) ||
       !cacheReadString(fp, e->objectPath, sizeof(e->objectPath)))
@@ -354,8 +356,7 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
       !cacheWriteString(fp, c->outBuildDir) || !cacheWriteString(fp, c->outCompileCommands) ||
       !cacheWriteString(fp, c->outLibName) || !cacheWriteString(fp, c->outLibDir) ||
       !cacheWriteU8(fp, c->libRequested ? 1 : 0) || !cacheWriteU8(fp, c->libStatic ? 1 : 0) ||
-      !cacheWriteU8(fp, c->libShared ? 1 : 0) ||
-      !cacheWriteList(fp, &c->excludes) ||
+      !cacheWriteU8(fp, c->libShared ? 1 : 0) || !cacheWriteList(fp, &c->excludes) ||
       !cacheWriteU32(fp, (uint32_t)c->embCount))
     return false;
 
@@ -369,24 +370,22 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
   uint8_t libRequested = 0, libStatic = 0, libShared = 0;
   uint32_t embCount = 0;
 
-  if (!cacheReadString(fp, c->root, sizeof(c->root)) ||
-      !cacheReadList(fp, &c->sources) || !cacheReadList(fp, &c->flags) ||
-      !cacheReadList(fp, &c->headerInternal) || !cacheReadList(fp, &c->headerPublic) ||
-      !cacheReadList(fp, &c->libraries) || !cacheReadList(fp, &c->librariesLinux) ||
-      !cacheReadList(fp, &c->librariesMacOS) || !cacheReadList(fp, &c->librariesWindows) ||
-      !cacheReadList(fp, &c->compilers) || !cacheReadString(fp, c->std, sizeof(c->std)) ||
-      !cacheReadString(fp, c->cc, sizeof(c->cc)) || !cacheReadU8(fp, &cleanBuild) ||
-      !cacheReadU8(fp, &cleanCompdb) || !cacheReadU8(fp, &progress) ||
-      !cacheReadU8(fp, &progressError) ||
+  if (!cacheReadString(fp, c->root, sizeof(c->root)) || !cacheReadList(fp, &c->sources) ||
+      !cacheReadList(fp, &c->flags) || !cacheReadList(fp, &c->headerInternal) ||
+      !cacheReadList(fp, &c->headerPublic) || !cacheReadList(fp, &c->libraries) ||
+      !cacheReadList(fp, &c->librariesLinux) || !cacheReadList(fp, &c->librariesMacOS) ||
+      !cacheReadList(fp, &c->librariesWindows) || !cacheReadList(fp, &c->compilers) ||
+      !cacheReadString(fp, c->std, sizeof(c->std)) || !cacheReadString(fp, c->cc, sizeof(c->cc)) ||
+      !cacheReadU8(fp, &cleanBuild) || !cacheReadU8(fp, &cleanCompdb) ||
+      !cacheReadU8(fp, &progress) || !cacheReadU8(fp, &progressError) ||
       !cacheReadString(fp, c->outBinaryName, sizeof(c->outBinaryName)) ||
       !cacheReadString(fp, c->outBinaryDir, sizeof(c->outBinaryDir)) ||
       !cacheReadString(fp, c->outBuildDir, sizeof(c->outBuildDir)) ||
       !cacheReadString(fp, c->outCompileCommands, sizeof(c->outCompileCommands)) ||
       !cacheReadString(fp, c->outLibName, sizeof(c->outLibName)) ||
-      !cacheReadString(fp, c->outLibDir, sizeof(c->outLibDir)) ||
-      !cacheReadU8(fp, &libRequested) || !cacheReadU8(fp, &libStatic) ||
-      !cacheReadU8(fp, &libShared) || !cacheReadList(fp, &c->excludes) ||
-      !cacheReadU32(fp, &embCount) || embCount > MAX_EMBEDDED)
+      !cacheReadString(fp, c->outLibDir, sizeof(c->outLibDir)) || !cacheReadU8(fp, &libRequested) ||
+      !cacheReadU8(fp, &libStatic) || !cacheReadU8(fp, &libShared) ||
+      !cacheReadList(fp, &c->excludes) || !cacheReadU32(fp, &embCount) || embCount > MAX_EMBEDDED)
     return false;
 
   c->cleanBuildDir = cleanBuild != 0;
@@ -431,13 +430,12 @@ static bool loadConfigCache(Config *c, const char *path, const char *cachePath) 
   long long currentSize = fsFileSize(path);
 
   bool ok = cacheReadBytes(fp, magic, sizeof(magic)) &&
-            memcmp(magic, CONFIG_CACHE_MAGIC, sizeof(magic)) == 0 &&
-            cacheReadU32(fp, &version) && version == CONFIG_CACHE_VERSION &&
+            memcmp(magic, CONFIG_CACHE_MAGIC, sizeof(magic)) == 0 && cacheReadU32(fp, &version) &&
+            version == CONFIG_CACHE_VERSION &&
             cacheReadBytes(fp, &cachedMTimeNs, sizeof(cachedMTimeNs)) &&
-            cacheReadBytes(fp, &cachedSize, sizeof(cachedSize)) &&
-            currentMTimeNs >= 0 && currentSize >= 0 &&
-            cachedMTimeNs == currentMTimeNs && cachedSize == (int64_t)currentSize &&
-            cacheReadConfig(fp, c);
+            cacheReadBytes(fp, &cachedSize, sizeof(cachedSize)) && currentMTimeNs >= 0 &&
+            currentSize >= 0 && cachedMTimeNs == currentMTimeNs &&
+            cachedSize == (int64_t)currentSize && cacheReadConfig(fp, c);
   fclose(fp);
   return ok;
 }
@@ -468,8 +466,7 @@ static void saveConfigCache(const Config *c, const char *path, const char *cache
   bool ok = cacheWriteBytes(fp, magic, sizeof(magic) - 1) &&
             cacheWriteU32(fp, CONFIG_CACHE_VERSION) &&
             cacheWriteBytes(fp, &mtimeNs, sizeof(int64_t)) &&
-            cacheWriteBytes(fp, &size, sizeof(int64_t)) &&
-            cacheWriteConfig(fp, c);
+            cacheWriteBytes(fp, &size, sizeof(int64_t)) && cacheWriteConfig(fp, c);
   if (fclose(fp) != 0) ok = false;
   if (ok) {
     /* POSIX rename is atomic; on Windows remove the old cache first because

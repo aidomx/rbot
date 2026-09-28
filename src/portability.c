@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef _WIN32
+#include <errno.h>
+#include <signal.h>
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
@@ -75,12 +80,63 @@ bool probeAvailable(const char *exe) {
   return false;
 }
 
+static volatile PROCESS_INFORMATION *gProc = NULL;
+
+static BOOL WINAPI procConsoleHandler(DWORD type) {
+  if (type != CTRL_C_EVENT && type != CTRL_BREAK_EVENT) return FALSE;
+  if (gProc && gProc->dwProcessId) {
+    /* CREATE_NEW_PROCESS_GROUP membuat compiler terpisah dari grup rbot.
+       CTRL_BREAK_EVENT dapat dikirim ke grup tersebut tanpa membunuh rbot. */
+    GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, gProc->dwProcessId);
+  }
+  return TRUE;
+}
+
 bool procRun(const char *cmd) {
-  /* Jalankan apa adanya via cmd.exe: '/' di path diterima, dan switch
-     compiler (/I, /Fo, /link) tetap utuh. system() sudah mengembalikan
-     exit code penuh di MSVCRT. */
-  int status = system(cmd);
-  return status == 0;
+  if (!cmd || !*cmd) return false;
+
+  STARTUPINFOA si;
+  PROCESS_INFORMATION pi;
+  char *line = _strdup(cmd);
+  if (!line) return false;
+
+  memset(&si, 0, sizeof(si));
+  memset(&pi, 0, sizeof(pi));
+  si.cb = sizeof(si);
+
+  /* cmd.exe mempertahankan perilaku command line Windows yang sudah dipakai
+     rbot, termasuk MSVC (/I, /Fo, /link) dan MinGW. */
+  char shell[MAX_PATH];
+  DWORD n = GetEnvironmentVariableA("COMSPEC", shell, sizeof(shell));
+  if (n == 0 || n >= sizeof(shell)) {
+    strcpy(shell, "cmd.exe");
+  }
+
+  char command[MAX_PATH * 4];
+  int written = snprintf(command, sizeof(command), "\"%s\" /d /s /c \"%s\"",
+                         shell, line);
+  free(line);
+  if (written < 0 || (size_t)written >= sizeof(command)) return false;
+
+  if (!SetConsoleCtrlHandler(procConsoleHandler, TRUE)) return false;
+
+  BOOL created = CreateProcessA(NULL, command, NULL, NULL, TRUE,
+                                CREATE_NEW_PROCESS_GROUP, NULL, NULL, &si, &pi);
+  if (!created) {
+    SetConsoleCtrlHandler(procConsoleHandler, FALSE);
+    return false;
+  }
+
+  gProc = &pi;
+  DWORD wait = WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD exitCode = 1;
+  if (wait == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &exitCode);
+
+  gProc = NULL;
+  SetConsoleCtrlHandler(procConsoleHandler, FALSE);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  return wait == WAIT_OBJECT_0 && exitCode == 0;
 }
 
 double monotonicSeconds(void) {
@@ -249,10 +305,56 @@ bool probeAvailable(const char *exe) {
   return false;
 }
 
+static void procSigintHandler(int sig) {
+  (void)sig;
+}
+
 bool procRun(const char *cmd) {
-  int status = system(cmd);
-  if (status == -1) return false;
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  if (!cmd || !*cmd) return false;
+
+  pid_t pid = fork();
+  if (pid < 0) return false;
+
+  if (pid == 0) {
+    /* system() membuat signal SIGINT/SIGQUIT diabaikan saat shell berjalan.
+       Child build harus kembali ke default agar Ctrl+C dari terminal benar-
+       benar menghentikan shell/compiler. */
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = SIG_DFL;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGQUIT, &sa, NULL);
+
+    execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+    _exit(127);
+  }
+
+  /* Tetap hidup ketika terminal mengirim Ctrl+C. Karena child berada di
+     foreground process group yang sama, child menerima SIGINT dengan
+     SIG_DFL dan berhenti; parent cukup membiarkan waitpid() selesai. */
+  struct sigaction ignoreInt, oldInt, oldQuit;
+  memset(&ignoreInt, 0, sizeof(ignoreInt));
+  ignoreInt.sa_handler = procSigintHandler;
+  sigemptyset(&ignoreInt.sa_mask);
+  sigaction(SIGINT, &ignoreInt, &oldInt);
+  sigaction(SIGQUIT, &ignoreInt, &oldQuit);
+
+  int status;
+  for (;;) {
+    if (waitpid(pid, &status, 0) >= 0) break;
+    if (errno == EINTR) continue;
+    sigaction(SIGINT, &oldInt, NULL);
+    sigaction(SIGQUIT, &oldQuit, NULL);
+    return false;
+  }
+
+  sigaction(SIGINT, &oldInt, NULL);
+  sigaction(SIGQUIT, &oldQuit, NULL);
+
+  if (WIFEXITED(status)) return WEXITSTATUS(status) == 0;
+  if (WIFSIGNALED(status)) return false;
+  return false;
 }
 
 double monotonicSeconds(void) {

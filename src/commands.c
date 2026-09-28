@@ -41,7 +41,7 @@ int cmdInit(void) {
   fputs("root: .\n"
         "\n"
         "clean:\n"
-        "  - buildDir: false\n"
+        "  - build: false\n"
         "  - compileCommands: false\n"
         "\n"
         "version: \"0.1.0\"\n"
@@ -155,7 +155,8 @@ static bool buildLibrary(const Config *c, const List *srcs) {
   if (c->libStatic) {
     libStaticPath(c, target, sizeof(target));
     size_t n = 64;
-    for (int i = 0; i < objs.count; i++) n += strlen(objs.items[i]) + 3;
+    for (int i = 0; i < objs.count; i++)
+      n += strlen(objs.items[i]) + 3;
     char *cmd = malloc(n);
     if (compilerIsMSVC(c))
       snprintf(cmd, n, "lib /nologo /OUT:%s", target);
@@ -174,8 +175,10 @@ static bool buildLibrary(const Config *c, const List *srcs) {
   if (c->libShared) {
     libSharedPath(c, target, sizeof(target));
     size_t n = strlen(c->cc) + strlen(target) + 96;
-    for (int i = 0; i < objs.count; i++) n += strlen(objs.items[i]) + 3;
-    for (int i = 0; i < c->libraries.count; i++) n += strlen(c->libraries.items[i]) + 8;
+    for (int i = 0; i < objs.count; i++)
+      n += strlen(objs.items[i]) + 3;
+    for (int i = 0; i < c->libraries.count; i++)
+      n += strlen(c->libraries.items[i]) + 8;
     char *cmd = malloc(n);
     if (compilerIsMSVC(c)) {
       snprintf(cmd, n, "cl /nologo /LD");
@@ -362,8 +365,7 @@ int cmdBuild(void) {
       for (int i = 0; i < srcs.count && !linkNeeded; i++) {
         if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
         int64_t objectMtime = fsMTimeNs(obj);
-        if (objectMtime < 0 || objectMtime > targetMtime)
-          linkNeeded = true;
+        if (objectMtime < 0 || objectMtime > targetMtime) linkNeeded = true;
       }
 
       for (int i = 0; i < c.embCount && !linkNeeded; i++) {
@@ -373,8 +375,7 @@ int cmdBuild(void) {
           break;
         }
         int64_t objectMtime = fsMTimeNs(c.emb[i].objectPath);
-        if (objectMtime < 0 || objectMtime > targetMtime)
-          linkNeeded = true;
+        if (objectMtime < 0 || objectMtime > targetMtime) linkNeeded = true;
       }
     }
   }
@@ -502,13 +503,13 @@ int cmdClean(void) {
       printf("> Removed   : %s (sebagian gagal dihapus)\n", c.outBuildDir);
     any = true;
   }
-  if (c.cleanBuildDir && c.libRequested && safeRelative(c.outLibDir)) {
-    if (fsRemoveTree(c.outLibDir))
-      printf("> Removed   : %s\n", c.outLibDir);
-    else
-      printf("> Removed   : %s (sebagian gagal dihapus)\n", c.outLibDir);
-    any = true;
-  }
+  /*if (c.cleanBuildDir && c.libRequested && safeRelative(c.outLibDir)) {*/
+  /*if (fsRemoveTree(c.outLibDir))*/
+  /*printf("> Removed   : %s\n", c.outLibDir);*/
+  /*else*/
+  /*printf("> Removed   : %s (sebagian gagal dihapus)\n", c.outLibDir);*/
+  /*any = true;*/
+  /*}*/
   if (c.cleanCompileCommands && fsFileExists("compile_commands.json")) {
     fsRemoveFile("compile_commands.json");
     printf("> Removed   : compile_commands.json\n");
