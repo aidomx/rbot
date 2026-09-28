@@ -9,35 +9,80 @@ permissions:
   contents: write
 
 jobs:
-  release-windows:
-    runs-on: windows-latest
+  # Job 1: Build binary untuk berbagai OS dan Arsitektur secara paralel
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- WINDOWS ---
+          - os: windows-latest
+            asset_name: rbot-windows-x64.exe
+            exe_ext: .exe
+            
+          # --- LINUX ---
+          - os: ubuntu-latest       # Runner x86_64
+            asset_name: rbot-linux-x64
+            exe_ext: ""
+            
+          - os: ubuntu-24.04-arm    # Runner ARM64 native (Tersedia untuk public repo)
+            asset_name: rbot-linux-arm64
+            exe_ext: ""
+
+          # --- MACOS ---
+          - os: macos-13            # Runner Intel (x86_64)
+            asset_name: rbot-macos-x64
+            exe_ext: ""
+            
+          - os: macos-latest        # Runner Apple Silicon M1/M2 (arm64)
+            asset_name: rbot-macos-arm64
+            exe_ext: ""
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Configure
+      - name: Configure CMake
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Rename executable
-        shell: bash
-        run: cp build/bin/rbot.exe rbot-${GITHUB_REF_NAME}-windows-x64.exe
-
-      - name: Create source archive
+      - name: Prepare Binary
         shell: bash
         run: |
-          git archive \
-            --format=zip \
-            --output="rbot-${GITHUB_REF_NAME}-source.zip" \
-            HEAD
+          # Menyalin binary dari output CMake (sesuaikan path 'build/bin/' jika CMake Anda output ke tempat lain)
+          cp build/bin/rbot${{ matrix.exe_ext }} ${{ matrix.asset_name }}
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+
+  # Job 2: Mengumpulkan semua binary, membuat source.zip, dan membuat Release
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifact-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create source archive
+        run: |
+          git archive --format=zip --output="release-assets/rbot-${{ github.ref_name }}-source.zip" HEAD
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            rbot-${{ github.ref_name }}-windows-x64.exe
-            rbot-${{ github.ref_name }}-source.zip
+          files: release-assets/*
