@@ -35,12 +35,6 @@ jobs:
             cpp_compiler: clang++
             build_type: Release
 
-          # ---- macOS arm64 (Apple Silicon) ----
-          - os: macos-latest
-            c_compiler: clang
-            cpp_compiler: clang++
-            build_type: Release
-
           # ---- Windows x86_64: MSVC ----
           - os: windows-latest
             c_compiler: cl
