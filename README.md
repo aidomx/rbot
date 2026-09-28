@@ -101,7 +101,7 @@ filesystem, toolchain, jumlah source, dan environment runtime.
 root: .
 
 clean:
-  - buildDir: false
+  - build: false
   - compileCommands: false
 
 sources:
