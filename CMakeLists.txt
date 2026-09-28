@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
+# Opsional: Mencetak arsitektur target di log CMake untuk verifikasi CI
+message(STATUS "Building rbot for system: ${CMAKE_SYSTEM_NAME}, processor: ${CMAKE_SYSTEM_PROCESSOR}")
 project(rbot C)
 
 # Mirror Buildfile: std: gnu11
