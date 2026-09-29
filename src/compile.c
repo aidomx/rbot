@@ -27,6 +27,31 @@ static CompilerKind compilerKind(const char *cc) {
 
 bool compilerIsMSVC(const Config *c) { return compilerKind(c->cc) == CC_MSVC; }
 
+/*
+ * Flag arsitektur untuk Buildfile: target — "" bila target kosong/tak
+ * dikenal (fallback host). Nilai yang dikenal: x86_64, arm64, riscv64.
+ * GNU/Clang: -march/-mabi (x86_64 juga menerima -m64); Apple Clang: -arch;
+ * MSVC: /ARCH (x86_64 = default, tidak perlu flag).
+ */
+char *targetFlags(const Config *c) {
+  const char *t = c->target;
+  if (!t || !*t) return NULL;
+
+#if defined(__APPLE__)
+  if (strcmp(t, "x86_64") == 0) return strdup("-arch x86_64 ");
+  if (strcmp(t, "arm64") == 0 || strcmp(t, "aarch64") == 0) return strdup("-arch arm64 ");
+  return NULL;
+#else
+  if (strcmp(t, "x86_64") == 0 || strcmp(t, "amd64") == 0)
+    return strdup(compilerKind(c->cc) == CC_MSVC ? "" : "-m64 ");
+  if (strcmp(t, "arm64") == 0 || strcmp(t, "aarch64") == 0)
+    return strdup(compilerKind(c->cc) == CC_MSVC ? "" : "-march=armv8-a ");
+  if (strcmp(t, "riscv64") == 0)
+    return strdup(compilerKind(c->cc) == CC_MSVC ? "" : "-march=rv64gc -mabi=lp64d ");
+  return NULL;
+#endif
+}
+
 bool resolveCompiler(Config *c) {
   if (c->compilers.count == 0) {
 #ifdef _WIN32
@@ -86,20 +111,36 @@ char *includeFlags(const Config *c) {
   return s;
 }
 
-/* "-Wall -Wextra" dari flags; entri mempertahankan '-' di depan bila ada */
-char *warningFlags(const Config *c) {
+/* Inti warningFlags: gabungkan flag (tambah '-' bila belum ada). */
+static char *joinFlags(const List *flags) {
   size_t n = 1;
-  for (int i = 0; i < c->flags.count; i++)
-    n += strlen(c->flags.items[i]) + 8;
+  for (int i = 0; i < flags->count; i++)
+    n += strlen(flags->items[i]) + 8;
   char *s = malloc(n);
   s[0] = '\0';
-  for (int i = 0; i < c->flags.count; i++) {
-    const char *f = c->flags.items[i];
+  for (int i = 0; i < flags->count; i++) {
+    const char *f = flags->items[i];
     if (f[0] != '-') strcat(s, "-");
     strcat(s, f);
     strcat(s, " ");
   }
   return s;
+}
+
+/* "-Wall -Wextra" dari flags; entri mempertahankan '-' di depan bila ada */
+char *warningFlags(const Config *c) {
+  return joinFlags(&c->flags);
+}
+
+/* warningFlags + -fPIC — dipakai compileOne & kompilasi paralel saat
+   library shared diminta (GNU/Clang; MSVC tidak butuh flag). */
+char *picWarningFlags(const Config *c) {
+  char *wf = warningFlags(c);
+  char *picwf = malloc(strlen(wf) + 16);
+  strcpy(picwf, wf);
+  strcat(picwf, "-fPIC ");
+  free(wf);
+  return picwf;
 }
 
 bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
@@ -149,9 +190,7 @@ bool compileLibraryOne(const Config *c, const char *inc, const char *wf, const c
                        const char *obj) {
 #ifndef _WIN32
   if (c->libShared && compilerKind(c->cc) != CC_MSVC) {
-    char *picwf = malloc(strlen(wf) + 16);
-    strcpy(picwf, wf);
-    strcat(picwf, "-fPIC ");
+    char *picwf = picWarningFlags(c);
     bool ok = compileOne(c, inc, picwf, src, obj);
     free(picwf);
     return ok;
@@ -193,9 +232,15 @@ static char *translateFlagsToMsvc(const char *flags) {
   return out;
 }
 
-bool compileOne(const Config *c, const char *inc, const char *wf, const char *src,
-                const char *obj) {
-  mkparent(obj);
+/*
+ * Susun command kompilasi satu source — dipakai compileOne (runtime juga
+ * untuk jalur embed fallback) dan jalur kompilasi paralel (-jN).
+ * Hasil di buffer malloc; pemanggil yang membebaskan.
+ */
+char *compileCmd(const Config *c, const char *inc, const char *wf, const char *src,
+                 const char *obj) {
+  char *tf = targetFlags(c); /* NULL bila tidak ada target */
+  size_t tflen = tf ? strlen(tf) : 0;
 
   if (compilerKind(c->cc) == CC_MSVC) {
     /* MSVC (cl.exe): flag GNU diterjemahkan ke /I, /W4|/W3; gnu11/c11 ->
@@ -209,19 +254,30 @@ bool compileOne(const Config *c, const char *inc, const char *wf, const char *sr
 
     char *minc = translateFlagsToMsvc(inc);
     char *mwf = translateFlagsToMsvc(wf);
-    size_t n = strlen(minc) + strlen(mwf) + 2 * strlen(src) + strlen(obj) + 128;
+    char *mtf = tf ? translateFlagsToMsvc(tf) : NULL;
+    size_t n = strlen(minc) + strlen(mwf) + (mtf ? strlen(mtf) : 0) + 2 * strlen(src) +
+               strlen(obj) + 128;
     char *cmd = malloc(n);
-    snprintf(cmd, n, "cl /nologo %s %s /std:%s /c %s /Fo%s", minc, mwf, msvcstd, src, obj);
-    bool ok = runCmd(cmd);
-    free(cmd);
+    snprintf(cmd, n, "cl /nologo %s %s %s/std:%s /c %s /Fo%s", mtf ? mtf : "", minc, mwf,
+             msvcstd, src, obj);
     free(minc);
     free(mwf);
-    return ok;
+    free(mtf);
+    free(tf);
+    return cmd;
   }
 
-  char *cmd = malloc(strlen(c->cc) + strlen(inc) + strlen(wf) + strlen(c->std) + 2 * strlen(src) +
-                     strlen(obj) + 64);
-  sprintf(cmd, "%s %s %s -std=%s -c %s -o %s", c->cc, inc, wf, c->std, src, obj);
+  char *cmd = malloc(strlen(c->cc) + strlen(inc) + strlen(wf) + tflen + strlen(c->std) +
+                     2 * strlen(src) + strlen(obj) + 64);
+  sprintf(cmd, "%s %s %s %s-std=%s -c %s -o %s", c->cc, tf ? tf : "", inc, wf, c->std, src, obj);
+  free(tf);
+  return cmd;
+}
+
+bool compileOne(const Config *c, const char *inc, const char *wf, const char *src,
+                const char *obj) {
+  mkparent(obj);
+  char *cmd = compileCmd(c, inc, wf, src, obj);
   bool ok = runCmd(cmd);
   free(cmd);
   return ok;

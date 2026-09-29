@@ -15,8 +15,9 @@
 
 void showHelp(void) {
   printf("Rbot - A simple builder for you\n\n");
-  printf("> rbot <command>\n\n");
+  printf("> rbot [-jN] <command>\n\n");
   printf("%-8s%s\n", "", "- build project from Buildfile (default, no command needed)");
+  printf("%-8s%s\n", "-j[N]", "- build paralel, N job (default: jumlah core CPU)");
   printf("%-8s%s\n", "init", "- create a default Buildfile if none exists yet");
   printf("%-8s%s\n", "clean", "- clean build artifacts (Buildfile: clean)");
   printf("%-8s%s\n", "", "- output.libraryName/libraryShared membangun lib<name>.a + .so");
@@ -42,7 +43,7 @@ int cmdInit(void) {
         "\n"
         "clean:\n"
         "  - build: false\n"
-        "  - compileCommands: false\n"
+        "  - compdb: false # compile_commands.json (dulu: compileCommands)\n"
         "\n"
         "version: \"0.1.0\"\n"
         "\n"
@@ -119,6 +120,98 @@ static void printLibSummary(const Config *c) {
     libSharedPath(c, libp, sizeof(libp));
     printf("Library  : %s\n", libp);
   }
+}
+
+/*
+ * Kompilasi paralel (rbot -jN, mirip make). Baris status tiap job dicetak
+ * oleh parent tepat setelah job selesai — satu printf utuh per baris, jadi
+ * tidak ada interleaving antar job. Return false bila ada yang gagal atau
+ * build di-interupsi Ctrl+C.
+ */
+typedef struct {
+  char src[MAX_PATH]; /* source yang dikompilasi slot ini */
+  double start;       /* untuk durasi per job */
+} JobSlot;
+
+static bool runParallelJobs(const Config *c, const char *inc, const char *wf, const List *srcs,
+                            char *objPath, size_t objCap, int jobs, int *outCompiled,
+                            int *outFailed, int *outInterrupted) {
+  JobSlot *slots = calloc((size_t)jobs, sizeof(JobSlot));
+  ProcHandle *handles = calloc((size_t)jobs, sizeof(ProcHandle));
+  if (!slots || !handles) {
+    free(slots);
+    free(handles);
+    return false;
+  }
+
+  /* -fPIC untuk library shared (GNU/Clang) — setara compileLibraryOne. */
+#ifndef _WIN32
+  char *picwf = (c->libShared && !compilerIsMSVC(c)) ? picWarningFlags(c) : NULL;
+  const char *wfUse = picwf ? picwf : wf;
+#else
+  const char *wfUse = wf;
+#endif
+
+  int total = srcs->count;
+  int compiled = 0, failed = 0, interrupted = 0;
+  int nextSrc = 0, active = 0;
+
+  while (nextSrc < total || active > 0) {
+    /* isi slot kosong dengan job baru (berhenti juga saat Ctrl+C) */
+    while (active < jobs && nextSrc < total && !procInterrupted()) {
+      const char *src = srcs->items[nextSrc];
+      if (!objectPathFor(c, src, objPath, objCap)) {
+        nextSrc++;
+        continue;
+      }
+      mkparent(objPath);
+      char *cmd = compileCmd(c, inc, wfUse, src, objPath);
+      bool started = procStart(cmd, &handles[active]);
+      free(cmd);
+      if (!started) {
+        fprintf(stderr, "rbot: cannot start compiler for %s\n", src);
+        failed++;
+        nextSrc++;
+        continue;
+      }
+      snprintf(slots[active].src, sizeof(slots[active].src), "%s", src);
+      slots[active].start = nowSeconds();
+      nextSrc++;
+      active++;
+    }
+    if (active == 0) break;
+
+    ProcHandle *fin = NULL;
+    int w = procWaitAny(handles, active, &fin);
+    if (w < 0) break; /* tidak ada job tersisa (atau wait gagal) */
+
+    double dt = nowSeconds() - slots[w].start;
+    compiled++;
+    const char *tag = fin->interrupted ? "INT" : (fin->ok ? "OK" : "FAIL");
+    printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, tag, dt, slots[w].src);
+    fflush(stdout);
+    if (!fin->ok) {
+      if (fin->interrupted)
+        interrupted++;
+      else
+        failed++;
+    }
+
+    /* kompakkan: pindahkan slot terakhir ke slot yang baru kosong */
+    handles[w] = handles[active - 1];
+    slots[w] = slots[active - 1];
+    active--;
+  }
+
+  free(slots);
+  free(handles);
+#ifndef _WIN32
+  free(picwf);
+#endif
+  *outCompiled = compiled;
+  *outFailed = failed;
+  *outInterrupted = interrupted;
+  return failed == 0 && interrupted == 0;
 }
 
 /*
@@ -255,10 +348,67 @@ static bool libTargetsUpToDate(const Config *c, const List *srcs) {
   return true;
 }
 
-int cmdBuild(void) {
+/*
+ * Terbitkan build/version.h dari .rbot-version (root project). Bila file
+ * itu ada, project yang menambahkan build ke headers bisa memakai
+ * RBOT_VERSION_EMBEDDED — versi ikut ter-embed ke binary saat build, bukan
+ * dibaca ulang saat runtime, sehingga `rbot version` tetap benar di mana
+ * pun binary dijalankan (tidak tergantung path lokal/repo). Header hanya
+ * ditulis ulang saat isinya berubah; perubahan memaksa kompilasi ulang.
+ */
+static bool emitVersionHeader(const Config *c, bool *changed) {
+  if (!fsFileExists(".rbot-version")) return true;
+
+  FILE *rf = fopen(".rbot-version", "rb");
+  if (!rf) return true;
+  char raw[64] = {0};
+  size_t n = fread(raw, 1, sizeof(raw) - 1, rf);
+  fclose(rf);
+  while (n && (raw[n - 1] == '\n' || raw[n - 1] == '\r' || raw[n - 1] == ' ' || raw[n - 1] == '\t'))
+    raw[--n] = '\0';
+  char *s = raw;
+  while (*s == ' ' || *s == '\t') s++;
+  if (!*s) return true; /* kosong: jangan terbitkan apa pun */
+
+  char body[192];
+  snprintf(body, sizeof(body),
+           "/* Auto-generated by rbot from .rbot-version. Do not edit. */\n"
+           "#define RBOT_VERSION_EMBEDDED \"%s\"\n",
+           s);
+
+  char path[MAX_PATH + 16];
+  snprintf(path, sizeof(path), "%s/version.h", c->outBuildDir);
+  mkparent(path);
+
+  /* lewati penulisan ulang bila tidak berubah agar mtime tetap stabil */
+  char existing[192] = {0};
+  FILE *ef = fopen(path, "rb");
+  if (ef) {
+    size_t en = fread(existing, 1, sizeof(existing) - 1, ef);
+    fclose(ef);
+    if (en == strlen(body) && memcmp(existing, body, en) == 0) return true;
+  }
+
+  FILE *wf = fopen(path, "w");
+  if (!wf) {
+    fprintf(stderr, "rbot: cannot write %s\n", path);
+    return false;
+  }
+  fwrite(body, 1, strlen(body), wf);
+  fclose(wf);
+  if (changed) *changed = true;
+  return true;
+}
+
+int cmdBuild(int jobs) {
   Config c = configDefaults();
   if (!loadConfig(&c, "Buildfile")) return 1;
   if (!resolveCompiler(&c)) return 1;
+
+  /* Mode sinyal: build paralel selalu butuh handler forward SIGINT karena
+     tiap compiler ada di process group sendiri (Ctrl+C dari terminal hanya
+     sampai ke rbot). Build serial mengikuti Buildfile: foreground. */
+  procSetForeground(jobs > 1 ? false : c.foreground);
 
   if (!fsDirExists(c.root)) {
     fprintf(stderr, "rbot: root '%s' is not a directory\n", c.root);
@@ -285,13 +435,18 @@ int cmdBuild(void) {
 
   if (compdbEnabled(&c)) writeCompdb(&c, &srcs);
 
-  /* Terbitkan build/embedded.h sebelum kompilasi agar konsumen melihat
-     simbol yang benar; jika isinya berubah, paksa kompilasi ulang total. */
+  /* Terbitkan build/embedded.h & build/version.h sebelum kompilasi agar
+     konsumen melihat simbol/versi yang benar; jika salah satunya berubah,
+     paksa kompilasi ulang total. */
   char obj[MAX_PATH];
-  bool embHeaderChanged = false;
+  bool embHeaderChanged = false, verHeaderChanged = false;
   if (c.embCount > 0 && !emitEmbeddedHeader(&c, &embHeaderChanged)) return 1;
-  if (embHeaderChanged) {
-    printf("> Embedded  : config changed, recompiling all sources\n");
+  if (!emitVersionHeader(&c, &verHeaderChanged)) return 1;
+  if (embHeaderChanged || verHeaderChanged) {
+    if (verHeaderChanged)
+      printf("> Version   : .rbot-version changed, recompiling all sources\n");
+    else
+      printf("> Embedded  : config changed, recompiling all sources\n");
     for (int i = 0; i < srcs.count; i++) {
       if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
       fsRemoveFile(obj);
@@ -300,32 +455,58 @@ int cmdBuild(void) {
 
   printf("> Build with %s %s-std=%s\n", c.cc, wf, c.std);
 
-  int total = 0, compiled = 0, skipped = 0, failed = 0;
+  int total = 0, compiled = 0, skipped = 0, failed = 0, interrupted = 0;
 
-  /* Fase 1: klasifikasi up-to-date vs perlu-kompilasi */
+  /* Fase 1: klasifikasi up-to-date vs perlu-kompilasi. Pakai mtime
+     nanodetik (bukan detik) agar perubahan dalam detik yang sama tetap
+     terdeteksi — sama seperti keputusan link di bawah. */
+  List pending = {0};
   for (int i = 0; i < srcs.count; i++) {
     const char *src = srcs.items[i];
     if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
-    if (fsFileExists(obj) && !newerThan(src, obj))
+    int64_t objM = fsFileExists(obj) ? fsMTimeNs(obj) : -1;
+    int64_t srcM = fsMTimeNs(src);
+    if (objM >= 0 && srcM >= 0 && objM >= srcM) {
       skipped++;
-    else
-      total++;
+      continue;
+    }
+    listAdd(&pending, src);
+  }
+  total = pending.count;
+
+  /* Fase 2: kompilasi hanya yang berubah — paralel (-jN) atau serial. */
+  if (jobs != 1 && total > 0) {
+    runParallelJobs(&c, inc, wf, &pending, obj, sizeof(obj), jobs, &compiled, &failed,
+                    &interrupted);
+  } else {
+    for (int i = 0; i < pending.count; i++) {
+      const char *src = pending.items[i];
+      if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
+
+      double start = nowSeconds();
+      bool ok = compileLibraryOne(&c, inc, wf, src, obj);
+      double dt = nowSeconds() - start;
+
+      compiled++;
+      if (procInterrupted()) {
+        /* foreground=false: child mati karena forward SIGINT dari rbot —
+           hentikan build, jangan lanjut ke source berikutnya. */
+        interrupted++;
+        if (ok || c.progressErrorAlways)
+          printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, "INT", dt, src);
+        break;
+      }
+      if (!ok) failed++;
+      if (ok || c.progressErrorAlways)
+        printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, ok ? "OK" : "FAIL", dt, src);
+    }
   }
 
-  /* Fase 2: kompilasi hanya yang berubah */
-  for (int i = 0; i < srcs.count; i++) {
-    const char *src = srcs.items[i];
-    if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
-    if (fsFileExists(obj) && !newerThan(src, obj)) continue;
-
-    double start = nowSeconds();
-    bool ok = compileLibraryOne(&c, inc, wf, src, obj);
-    double dt = nowSeconds() - start;
-
-    compiled++;
-    if (!ok) failed++;
-    if (ok || c.progressErrorAlways)
-      printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, ok ? "OK" : "FAIL", dt, src);
+  if (interrupted > 0) {
+    fprintf(stderr, "\nrbot: build interrupted; stopping\n");
+    free(inc);
+    free(wf);
+    return 130;
   }
 
   if (failed > 0) {

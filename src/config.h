@@ -49,11 +49,28 @@ typedef struct {
   char std[32];
   char cc[128];
 
+  /*
+   * target (Buildfile: target, opsional): arsitektur yang dituju compiler.
+   * Kosong = host (perilaku lama). Nilai yang dikenal: x86_64, arm64,
+   * riscv64 — dipetakan ke flag compiler/linker sesuai toolchain (GNU/Clang:
+   * -march/-arch/-mabi; MSVC: /ARCH:AVX512 dsb.) dan disertakan di compdb.
+   */
+  char target[32];
+
   bool cleanBuildDir;
   bool cleanCompileCommands;
 
   bool progressBar;
   bool progressErrorAlways;
+
+  /*
+   * foreground (default true): bila true, child build berjalan di process
+   * group yang sama dengan rbot (perilaku klasik — Ctrl+C dibawa terminal
+   * ke semua proses). Bila false, child berjalan di process group terpisah
+   * sehingga SIGINT dari terminal hanya sampai ke rbot; rbot meneruskannya
+   * ke child secara eksplisit lalu membatalkan build dengan rapi.
+   */
+  bool foreground;
 
   List excludes;       /* nama/path file yang dilepas dari build (mis. main.c) */
 

@@ -1,6 +1,7 @@
 #include "compdb.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "compile.h"
@@ -41,6 +42,7 @@ static uint64_t compdbFingerprint(const Config *c, List *srcs, const char *cwd) 
   h = hashString(h, cwd);
   h = hashString(h, c->cc);
   h = hashString(h, c->std);
+  h = hashString(h, c->target);
   h = hashString(h, c->outBuildDir);
   h = hashString(h, c->outBinaryDir);
   h = hashString(h, c->outBinaryName);
@@ -110,6 +112,17 @@ void writeCompdb(const Config *c, List *srcs) {
     fprintf(fp, "  {\n    \"arguments\": [\n      ");
     jsonQuote(fp, c->cc);
     fprintf(fp, ",\n      ");
+    char *tf = targetFlags(c);
+    if (tf && tf[0]) {
+      /* target dipisah per token (mis. "-march=armv8-a -mabi=lp64d") */
+      char *tok = strtok(tf, " ");
+      while (tok) {
+        jsonQuote(fp, tok);
+        fprintf(fp, ",\n      ");
+        tok = strtok(NULL, " ");
+      }
+    }
+    free(tf);
     for (int h = 0; h < c->headerPublic.count; h++) {
       const char *entry = c->headerPublic.items[h];
       char flag[MAX_PATH + 8];

@@ -1,8 +1,10 @@
 root: .
 
+foreground: false # SIGINT dikendalikan rbot, lalu diteruskan ke child build
+
 clean:
   - build: true
-  - compileCommands: true
+  - compdb: true
 
 sources:
   - src
@@ -17,6 +19,7 @@ std: gnu11
 headers:
   - include
   - I.
+  - build # build/version.h & build/embedded.h (dihasilkan saat build)
 
 compiler:
   - gcc

@@ -33,9 +33,34 @@ cmake --build build
 rbot            # build project sesuai Buildfile (default, tanpa argumen)
 rbot init       # buat Buildfile default kalau project belum punya
 rbot clean      # bersihkan build dir & compile_commands.json (lihat Buildfile: clean)
-rbot version    # tampilkan versi rbot yang aktif (baca dari .version)
+rbot version    # tampilkan versi rbot yang aktif (ter-embed dari .rbot-version)
 rbot help       # tampilkan bantuan
 ```
+
+### Versi (.rbot-version)
+
+Versi tidak lagi ditulis manual di source. rbot membaca file `.rbot-version`
+di root saat build, lalu menerbitkan `build/version.h` berisi
+`RBOT_VERSION_EMBEDDED` — versi ikut ter-embed ke binary sehingga
+`rbot version` tetap benar di mana pun binary dijalankan, tidak tergantung
+path lokal atau repo. Mengubah isi `.rbot-version` otomatis memicu
+kompilasi ulang saat build berikutnya.
+
+```bash
+printf 'v0.2.0\n' > .rbot-version
+rbot && rbot version   # -> rbot v0.2.0
+```
+
+Kode konsumen bisa memakai macro yang sama:
+
+```c
+#include "version.h" /* tambahkan build ke headers di Buildfile */
+printf("%s\n", RBOT_VERSION_EMBEDDED);
+```
+
+Cara ini juga menjawab kondisi release: binary yang di-build dari commit
+tersebut selalu membawa versi yang benar, tanpa perlu membaca file versi
+atau API release saat runtime.
 
 ## Benchmark
 
@@ -102,7 +127,7 @@ root: .
 
 clean:
   - build: false
-  - compileCommands: false
+  - compdb: false # compile_commands.json (dulu: compileCommands)
 
 sources:
   - src
@@ -129,17 +154,59 @@ output:
   - binaryName: rbot
   - binaryDir: bin
   - buildDir: build
-  - compileCommands: auto # compile_commands.json
+  - compileCommands: auto # compile_commands.json (beda dari clean.compdb)
 ```
 
 Bagian yang sering disesuaikan:
 
 - **sources** — daftar direktori yang di-scan rekursif untuk file `.c`.
+- **target** _(opsional)_ — arsitektur tujuan build, mis. `x86_64`, `arm64`,
+  atau `riscv64`. Kosong berarti host (perilaku lama). Flag arsitektur
+  ditambahkan otomatis sesuai toolchain (GNU/Clang: `-m64`,
+  `-march=armv8-a`, `-march=rv64gc -mabi=lp64d`; Apple Clang: `-arch`;
+  MSVC: `/ARCH` bila perlu) — juga tercatat di `compile_commands.json`.
+
+  ```yaml
+  target: arm64
+  ```
 - **headers** — tiap entri menjadi `-I<dir>`; `I.` shorthand untuk `-I.`
   (di MSVC otomatis menjadi `/I<dir>`).
 - **library** _(opsional, tidak ada di default)_ — tiap entri menjadi
   `-l<nama>`, contoh `ssl` → `-lssl` (di MSVC otomatis menjadi `ssl.lib`).
 - **output.binaryName / binaryDir** — nama & lokasi binary hasil build.
+- **foreground** _(opsional, default `true`)_ — kendali Ctrl+C:
+
+  ```yaml
+  foreground: false
+  ```
+
+  Saat `true` (default), child build berbagi process group dengan rbot —
+  Ctrl+C dari terminal menghentikan rbot dan compiler sekaligus (perilaku
+  klasik). Saat `false`, child berjalan di process group terpisah: rbot
+  menerima SIGINT sendiri, meneruskannya ke compiler, lalu membatalkan
+  build dengan rapi. Ini membuat SIGINT bisa diterima lebih fleksibel
+  (mis. untuk mencatat status sebelum keluar) tanpa menyisakan proses
+  compiler yang masih berjalan.
+
+## Build paralel (-jN)
+
+```bash
+rbot -j         # paralel, default sejumlah core CPU
+rbot -j4        # paralel, 4 job
+rbot --jobs=4
+rbot clean -j2  # opsi boleh sebelum/sesudah command
+```
+
+Mirip `make -j`: hanya fase kompilasi yang diparalelkan; link, embedded,
+dan fase library tetap berurutan. Setiap job mendapat process group
+sendiri sehingga Ctrl+C diteruskan ke semua compiler yang sedang berjalan
+dan build berhenti dengan rapi (exit code 130).
+
+## Interrupt (Ctrl+C)
+
+Dengan `foreground: false` (atau saat `-jN` aktif), rbot menangani SIGINT
+sendiri: compiler yang sedang berjalan menerima sinyal, job baru tidak
+dimulai, dan rbot keluar dengan status `interrupted` alih-alih error build.
 
 ## Embedded (Buildfile: embedded)
 
@@ -259,7 +326,7 @@ output:
 Keputusan build library incremental: fase library dilewati bila semua
 varian yang diminta sudah lebih baru daripada seluruh object inputnya;
 object perantara tidak dihapus sehingga build berikutnya tetap murah.
-`rbot clean` (dengan `clean.buildDir: true`) ikut menghapus `libDir`.
+`rbot clean` (dengan `clean.build: true`) ikut menghapus `libDir`.
 
 ## Lisensi
 

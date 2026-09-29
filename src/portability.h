@@ -27,8 +27,58 @@ void pathNormalizeSlash(char *s);
    (di Windows otomatis mencoba sufiks .exe/.bat/.cmd). */
 bool probeAvailable(const char *exe);
 
-/* Jalankan command lewat shell OS (sh / cmd.exe); true bila exit 0. */
+/*
+ * Mode foreground (Buildfile: foreground, default true).
+ *
+ * foreground=true  : perilaku klasik — child berada di process group yang
+ *                    sama dengan rbot; Ctrl+C dari terminal menghentikan
+ *                    rbot dan compiler sekaligus (POSIX), sementara di
+ *                    Windows child selalu dipisah dan diteruskan
+ *                    CTRL_BREAK (perilaku lama tetap).
+ * foreground=false : rbot memasang handler SIGINT-nya sendiri. Ctrl+C hanya
+ *                    sampai ke rbot, lalu diteruskan ke child secara
+ *                    eksplisit. Panggil SEBELUM procRun/procStart.
+ */
+bool procSetForeground(bool foreground);
+
+/* true bila Ctrl+C tertangkap sejak panggilan procSetForeground terakhir. */
+bool procInterrupted(void);
+
+/* Jalankan command lewat shell OS (sh / cmd.exe); true bila exit 0.
+   Return PROC_RUN_INTERRUPTED bila child berhenti karena Ctrl+C yang
+   ditangani rbot (foreground=false). */
+#define PROC_RUN_INTERRUPTED (-1)
 bool procRun(const char *cmd);
+
+/*
+ * Proses paralel (Buildfile: -jN, mirip make).
+ * procStart menjalankan command tanpa menunggu; kumpulkan handle-nya lalu
+ * panggil procWaitAny sampai selesai. Child paralel selalu di process group
+ * terpisah sehingga SIGINT dari rbot terarah per proses.
+ */
+typedef struct {
+#ifdef _WIN32
+  unsigned long pid; /* dwProcessId */
+  void *hProcess;    /* HANDLE proses (dipakai ulang procWaitAny/procStopAll) */
+#else
+  int pid; /* pid_t */
+#endif
+  bool finished; /* sudah di-reap oleh procWaitAny/procStopAll */
+  bool ok;       /* exit code 0 */
+  bool interrupted; /* mati karena Ctrl+C (bukan error kompilasi) */
+} ProcHandle;
+
+bool procStart(const char *cmd, ProcHandle *out);
+
+/* Tunggu satu proses selesai; index di `handles` atau -1 bila ada Ctrl+C.
+   `finished` (boleh NULL) diisi handle yang baru selesai. */
+int procWaitAny(ProcHandle *handles, int count, ProcHandle **finished);
+
+/* Kirim Ctrl+C ke semua child yang masih jalan lalu tunggu sampai mati. */
+void procStopAll(ProcHandle *handles, int count);
+
+/* Jumlah core CPU (min. 1) — default jobs untuk -j tanpa angka. */
+int cpuCount(void);
 
 /* Detik monotonic untuk pengukuran durasi build. */
 double monotonicSeconds(void);
