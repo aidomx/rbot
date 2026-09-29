@@ -12,6 +12,9 @@ bool resolveCompiler(Config *c);
 bool compilerIsMSVC(const Config *c);
 
 char *includeFlags(const Config *c);
+
+/* Direktori -I dari headers (tanpa flag non-I) — dipakai pelacak header. */
+void includeDirs(const Config *c, List *out);
 char *warningFlags(const Config *c);
 
 /* warningFlags + "-fPIC " — untuk library shared & jalur paralel. */

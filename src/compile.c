@@ -111,6 +111,17 @@ char *includeFlags(const Config *c) {
   return s;
 }
 
+void includeDirs(const Config *c, List *out) {
+  for (int i = 0; i < c->headerPublic.count; i++) {
+    const char *entry = c->headerPublic.items[i];
+    if (entry[0] == '-') {
+      if (entry[1] == 'I' && entry[2]) listAdd(out, entry + 2);
+      continue; /* flag lain bukan direktori */
+    }
+    listAdd(out, headerEntryDir(entry));
+  }
+}
+
 /* Inti warningFlags: gabungkan flag (tambah '-' bila belum ada). */
 static char *joinFlags(const List *flags) {
   size_t n = 1;

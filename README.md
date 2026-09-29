@@ -62,6 +62,24 @@ Cara ini juga menjawab kondisi release: binary yang di-build dari commit
 tersebut selalu membawa versi yang benar, tanpa perlu membaca file versi
 atau API release saat runtime.
 
+## Header tracking
+
+rbot melacak dependensi header secara otomatis: source dikompilasi ulang
+bila `.c`-nya **atau header apa pun yang di-include-nya (transitif)** lebih
+baru daripada object-nya. Tidak perlu konfigurasi tambahan.
+
+- `#include "x.h"` dicari di direktori file pengguna dulu, lalu di direktori
+  `headers` Buildfile; `#include <x.h>` hanya di direktori `headers`.
+- Header yang tidak ada di direktori project (mis. `<stdio.h>`) dianggap
+  header sistem dan diabaikan.
+- Pemindai mengabaikan komentar dan `#if`/`#ifdef`, jadi hasilnya bisa
+  sedikit berlebih (kompilasi ulang yang tak perlu), tidak pernah kurang.
+  `#include` yang memakai macro tidak terdeteksi.
+- Header hanya dipindai untuk source yang lolos cek mtime `.c`, dan setiap
+  header dibaca sekali per build — no-op build tetap murah.
+- Saat ada yang usang karena header, rbot mencetak
+  `> Headers   : N source(s) stale due to header change`.
+
 ## Benchmark
 
 Benchmark berikut membandingkan **rbot self-hosted** dengan workflow

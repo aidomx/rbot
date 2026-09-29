@@ -7,6 +7,7 @@
 #include "compdb.h"
 #include "compile.h"
 #include "config.h"
+#include "deps.h"
 #include "embed.h"
 #include "portability.h"
 #include "util.h"
@@ -460,18 +461,35 @@ int cmdBuild(int jobs) {
   /* Fase 1: klasifikasi up-to-date vs perlu-kompilasi. Pakai mtime
      nanodetik (bukan detik) agar perubahan dalam detik yang sama tetap
      terdeteksi — sama seperti keputusan link di bawah. */
+  /* Header tracking: object juga dianggap usang bila salah satu header
+     project yang di-include (transitif) lebih baru daripada object. Header
+     hanya dipindai untuk source yang lolos cek mtime .c — yang sudah pasti
+     dikompilasi ulang tidak perlu dipindai. */
   List pending = {0};
+  List incDirs = {0};
+  includeDirs(&c, &incDirs);
+  DepCache *deps = depsNew(&incDirs);
+  int headerStale = 0;
   for (int i = 0; i < srcs.count; i++) {
     const char *src = srcs.items[i];
     if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
     int64_t objM = fsFileExists(obj) ? fsMTimeNs(obj) : -1;
     int64_t srcM = fsMTimeNs(src);
     if (objM >= 0 && srcM >= 0 && objM >= srcM) {
-      skipped++;
-      continue;
+      if (depsNewestHeaderMTime(deps, src) > objM) {
+        headerStale++;
+      } else {
+        skipped++;
+        continue;
+      }
     }
     listAdd(&pending, src);
   }
+  depsFree(deps);
+  for (int i = 0; i < incDirs.count; i++)
+    free(incDirs.items[i]);
+  if (headerStale > 0)
+    printf("> Headers   : %d source(s) stale due to header change\n", headerStale);
   total = pending.count;
 
   /* Fase 2: kompilasi hanya yang berubah — paralel (-jN) atau serial. */
