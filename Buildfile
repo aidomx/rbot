@@ -3,7 +3,7 @@ root: .
 foreground: false # SIGINT dikendalikan rbot, lalu diteruskan ke child build
 
 clean:
-  - build: true
+  - build: false
   - compdb: true
 
 sources:
