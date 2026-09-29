@@ -187,6 +187,7 @@ Bagian yang sering disesuaikan:
   ```yaml
   target: arm64
   ```
+
 - **headers** — tiap entri menjadi `-I<dir>`; `I.` shorthand untuk `-I.`
   (di MSVC otomatis menjadi `/I<dir>`).
 - **library** _(opsional, tidak ada di default)_ — tiap entri menjadi
@@ -344,7 +345,6 @@ output:
 Keputusan build library incremental: fase library dilewati bila semua
 varian yang diminta sudah lebih baru daripada seluruh object inputnya;
 object perantara tidak dihapus sehingga build berikutnya tetap murah.
-`rbot clean` (dengan `clean.build: true`) ikut menghapus `libDir`.
 
 ## Lisensi
 
