@@ -16,8 +16,11 @@
 
 void showHelp(void) {
   printf("Rbot - A simple builder for you\n\n");
-  printf("> rbot [-jN] <command>\n\n");
+  printf("> rbot [-f <file>] [-jN] <command>\n\n");
   printf("%-8s%s\n", "", "- build project from Buildfile (default, no command needed)");
+  printf("%-8s%s\n", "-f <f>", "- pakai <f> sebagai Buildfile (default: Buildfile)");
+  printf("%-8s%s\n", "-xf <n>", "- konversi build.ninja <n> -> Buildfile sementara, lalu jalankan command");
+  printf("%-8s%s\n", "-xcf <n>", "- sama seperti -xf, tapi Buildfile hasil konversi tetap ada");
   printf("%-8s%s\n", "-j[N]", "- build paralel, N job (default: jumlah core CPU)");
   printf("%-8s%s\n", "init", "- create a default Buildfile if none exists yet");
   printf("%-8s%s\n", "clean", "- clean build artifacts (Buildfile: clean)");
@@ -28,52 +31,46 @@ void showHelp(void) {
 
 /* ==================== init ==================== */
 
-int cmdInit(void) {
-  if (fsFileExists("Buildfile")) {
-    printf("> Buildfile already exists, nothing to do\n");
+int cmdInit(const char *buildfilePath) {
+  const char *path = buildfilePath && *buildfilePath ? buildfilePath : "Buildfile";
+  if (fsFileExists(path)) {
+    printf("> %s already exists, nothing to do\n", path);
     return 0;
   }
 
-  FILE *fp = fopen("Buildfile", "w");
+  FILE *fp = fopen(path, "w");
   if (!fp) {
-    fprintf(stderr, "rbot: cannot create Buildfile\n");
+    fprintf(stderr, "rbot: cannot create %s\n", path);
     return 1;
   }
 
-  fputs("root: .\n"
+  fputs("use alias\n"
         "\n"
-        "clean:\n"
-        "  - build: false\n"
-        "  - compdb: false # compile_commands.json (dulu: compileCommands)\n"
+        "clean as c\n"
+        "output as o\n"
         "\n"
-        "version: \"0.1.0\"\n"
+        "root = .\n"
         "\n"
-        "sources:\n"
-        "  - src\n"
+        "c.build = false\n"
+        "c.compdb = false # compile_commands.json\n"
         "\n"
-        "flags:\n"
-        "  - Wall\n"
-        "  - Wextra\n"
+        "sources = src\n"
         "\n"
-        "std: gnu11\n"
+        "flags = Wall, Wextra, MMD, MP # MMD: dep file <obj>.d (GNU/Clang); MP: phony target\n"
         "\n"
-        "headers:\n"
-        "  - include\n"
-        "  - I.\n"
+        "std = gnu11\n"
         "\n"
-        "compiler:\n"
-        "  - gcc\n"
-        "  - clang\n"
+        "headers = include, I.\n"
         "\n"
-        "progress:\n"
-        "  bar: true\n"
-        "  error: always\n"
+        "compiler = gcc, clang\n"
         "\n"
-        "output:\n"
-        "  - binaryName: rbot\n"
-        "  - binaryDir: bin\n"
-        "  - buildDir: build\n"
-        "  - compileCommands: auto # compile_commands.json\n",
+        "progress.bar = true\n"
+        "progress.error = always\n"
+        "\n"
+        "o.binaryName = app\n"
+        "o.binaryDir = bin\n"
+        "o.buildDir = build\n"
+        "o.compileCommands = auto # compile_commands.json\n",
         fp);
   fclose(fp);
 
@@ -401,9 +398,9 @@ static bool emitVersionHeader(const Config *c, bool *changed) {
   return true;
 }
 
-int cmdBuild(int jobs) {
+int cmdBuild(int jobs, const char *buildfilePath) {
   Config c = configDefaults();
-  if (!loadConfig(&c, "Buildfile")) return 1;
+  if (!loadConfig(&c, buildfilePath)) return 1;
   if (!resolveCompiler(&c)) return 1;
 
   /* Mode sinyal: build paralel selalu butuh handler forward SIGINT karena
@@ -461,22 +458,33 @@ int cmdBuild(int jobs) {
   /* Fase 1: klasifikasi up-to-date vs perlu-kompilasi. Pakai mtime
      nanodetik (bukan detik) agar perubahan dalam detik yang sama tetap
      terdeteksi — sama seperti keputusan link di bawah. */
-  /* Header tracking: object juga dianggap usang bila salah satu header
-     project yang di-include (transitif) lebih baru daripada object. Header
-     hanya dipindai untuk source yang lolos cek mtime .c — yang sudah pasti
-     dikompilasi ulang tidak perlu dipindai. */
+  /*
+   * Header tracking dua lapis:
+   *   1. mtime — object usang bila header transitive lebih baru. Murah.
+   *   2. konten — bila mtime mengatakan stale (mis. setelah `touch`), hash
+   *      isi dibandingkan dengan snapshot build sukses terakhir
+   *      (.rbot/deps.cache). Konten sama => tidak perlu kompilasi ulang.
+   *
+   * Edges header diambil dari file .d compiler (flag -MMD, GCC/Clang) —
+   * akurat & lengkap; pemindai #include hanya fallback (build pertama,
+   * MSVC, .d belum ada). Lihat deps.c.
+   */
   List pending = {0};
-  List incDirs = {0};
-  includeDirs(&c, &incDirs);
-  DepCache *deps = depsNew(&incDirs);
-  int headerStale = 0;
+  DepCache *deps = depsNew(&c);
+  int headerStale = 0, headerTouched = 0;
   for (int i = 0; i < srcs.count; i++) {
     const char *src = srcs.items[i];
     if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
-    int64_t objM = fsFileExists(obj) ? fsMTimeNs(obj) : -1;
     int64_t srcM = fsMTimeNs(src);
+    int64_t objM = fsMTimeNs(obj); /* -1 = object belum ada (sekali stat) */
     if (objM >= 0 && srcM >= 0 && objM >= srcM) {
       if (depsNewestHeaderMTime(deps, src) > objM) {
+        /* header lebih baru — tapi mungkin hanya `touch`: cek konten */
+        if (depsContentUpToDate(deps, src)) {
+          headerTouched++;
+          skipped++;
+          continue;
+        }
         headerStale++;
       } else {
         skipped++;
@@ -485,9 +493,8 @@ int cmdBuild(int jobs) {
     }
     listAdd(&pending, src);
   }
-  depsFree(deps);
-  for (int i = 0; i < incDirs.count; i++)
-    free(incDirs.items[i]);
+  if (headerTouched > 0)
+    printf("> Headers   : %d source(s) skipped (touched, content unchanged)\n", headerTouched);
   if (headerStale > 0)
     printf("> Headers   : %d source(s) stale due to header change\n", headerStale);
   total = pending.count;
@@ -591,6 +598,12 @@ int cmdBuild(int jobs) {
     printLibSummary(&c);
     free(inc);
     free(wf);
+    /* Build sukses: rekam snapshot hash source + dependensi agar build
+       berikutnya bisa membedakan `touch` (isi sama) dari perubahan konten. */
+    for (int i = 0; i < srcs.count; i++)
+      depsRecordUpdate(deps, srcs.items[i]);
+    depsSave(deps);
+    depsFree(deps);
     printf("\n> Summary\n");
     long long sizeBytes = fsFileSize(target);
     double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
@@ -676,6 +689,12 @@ int cmdBuild(int jobs) {
   }
   printLibSummary(&c);
 
+  /* Build sukses: rekam snapshot hash (lihat jalur up-to-date di atas). */
+  for (int i = 0; i < srcs.count; i++)
+    depsRecordUpdate(deps, srcs.items[i]);
+  depsSave(deps);
+  depsFree(deps);
+
   long long sizeBytes = fsFileSize(target);
   double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
 
@@ -690,9 +709,9 @@ int cmdBuild(int jobs) {
 
 /* ==================== clean ==================== */
 
-int cmdClean(void) {
+int cmdClean(const char *buildfilePath) {
   Config c = configDefaults();
-  if (!loadConfig(&c, "Buildfile")) return 1;
+  if (!loadConfig(&c, buildfilePath)) return 1;
 
   bool any = false;
   if (c.cleanBuildDir && safeRelative(c.outBuildDir)) {
@@ -712,6 +731,13 @@ int cmdClean(void) {
   if (c.cleanCompileCommands && fsFileExists("compile_commands.json")) {
     fsRemoveFile("compile_commands.json");
     printf("> Removed   : compile_commands.json\n");
+    any = true;
+  }
+  /* Snapshot hash dependensi dihapus juga: verifikasi konten dimulai dari
+     nol pada build berikutnya (build sukses merekam ulang dari awal). */
+  if (fsFileExists(".rbot/deps.cache")) {
+    fsRemoveFile(".rbot/deps.cache");
+    printf("> Removed   : .rbot/deps.cache\n");
     any = true;
   }
   if (!any) printf("> Nothing to clean (see Buildfile: clean)\n");

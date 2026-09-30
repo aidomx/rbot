@@ -25,7 +25,9 @@ static CompilerKind compilerKind(const char *cc) {
   return CC_GCC; /* gcc, cc, mingw32-gcc, dst. */
 }
 
-bool compilerIsMSVC(const Config *c) { return compilerKind(c->cc) == CC_MSVC; }
+bool compilerIsMSVC(const Config *c) {
+  return compilerKind(c->cc) == CC_MSVC;
+}
 
 /*
  * Flag arsitektur untuk Buildfile: target — "" bila target kosong/tak
@@ -175,6 +177,16 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
   return false;
 }
 
+/* src/x/y.c -> build/y.d — file dependensi (-MMD) milik object-nya. */
+bool dotDPathFor(const Config *c, const char *src, char *out, size_t n) {
+  if (!objectPathFor(c, src, out, n)) return false;
+  size_t len = strlen(out);
+  if (len + 2 >= n) return false;
+  out[len - 1] = 'd'; /* .o -> .d */
+  out[len] = '\0';
+  return true;
+}
+
 /*
  * exclude: nama file, path relatif, atau direktori. Pencocokan:
  *   - basename sama persis ("main.c" vs "src/main.c"), atau
@@ -221,20 +233,26 @@ static char *translateFlagsToMsvc(const char *flags) {
   out[0] = '\0';
   const char *p = flags;
   while (*p) {
-    while (*p == ' ') p++;
+    while (*p == ' ')
+      p++;
     const char *start = p;
-    while (*p && *p != ' ') p++;
+    while (*p && *p != ' ')
+      p++;
     size_t len = (size_t)(p - start);
     if (len == 0) continue;
     if (len >= 2 && start[0] == '-' && start[1] == 'I') {
       strncat(out, "/I", n - strlen(out) - 1);
       strncat(out, start + 2, n - strlen(out) - 1);
-    } else if (len >= 2 && start[0] == '-' && start[1] == 'W') {
+    } else    if (len >= 2 && start[0] == '-' && start[1] == 'W') {
       /* -Wall/-Wextra -> /W4; warning lain dinormalisasi ke /W3 */
       strcat(out, (len == 5 && strncmp(start, "-Wall", 5) == 0) ||
                           (len == 7 && strncmp(start, "-Wextra", 7) == 0)
                       ? "/W4"
                       : "/W3");
+    } else if (len >= 2 && start[0] == '-' && start[1] == 'M') {
+      /* -MMD/-MP/-MF/-MT: opsi dep-file GCC/Clang tanpa padanan langsung di
+         MSVC — dilewati agar tidak salah diterjemahkan jadi /W3. */
+      continue;
     } else {
       strncat(out, start, len);
     }
@@ -266,11 +284,11 @@ char *compileCmd(const Config *c, const char *inc, const char *wf, const char *s
     char *minc = translateFlagsToMsvc(inc);
     char *mwf = translateFlagsToMsvc(wf);
     char *mtf = tf ? translateFlagsToMsvc(tf) : NULL;
-    size_t n = strlen(minc) + strlen(mwf) + (mtf ? strlen(mtf) : 0) + 2 * strlen(src) +
-               strlen(obj) + 128;
+    size_t n =
+        strlen(minc) + strlen(mwf) + (mtf ? strlen(mtf) : 0) + 2 * strlen(src) + strlen(obj) + 128;
     char *cmd = malloc(n);
-    snprintf(cmd, n, "cl /nologo %s %s %s/std:%s /c %s /Fo%s", mtf ? mtf : "", minc, mwf,
-             msvcstd, src, obj);
+    snprintf(cmd, n, "cl /nologo %s %s %s/std:%s /c %s /Fo%s", mtf ? mtf : "", minc, mwf, msvcstd,
+             src, obj);
     free(minc);
     free(mwf);
     free(mtf);

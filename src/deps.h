@@ -11,10 +11,17 @@
  *
  * Tanpa ini, rbot hanya membandingkan mtime object dengan file .c-nya,
  * sehingga mengubah sebuah header tidak pernah memicu kompilasi ulang.
- * Modul ini memindai direktif #include ("..." dan <...>) secara transitif,
- * meresolusinya seperti preprocessor (dir file pengguna dulu untuk "...",
- * lalu direktori -I dari Buildfile: headers), dan melaporkan mtime header
- * terbaru yang dipakai sebuah source.
+ * Sumber dependensi dua lapis, dipilih per source saat run:
+ *   1. file .d dari compiler (flag -MMD -MP, GCC/Clang) — bila tersedia dan
+ *      segar (mtime >= source), daftar header-nya dipakai langsung. Lengkap
+ *      dan akurat: compiler yang meresolusi (menangani #if, makro, computed
+ *      include), tanpa berlebih.
+ *   2. fallback: pemindai #include ("..." dan <...>) transitif, meresolusi
+ *      seperti preprocessor (dir file pengguna dulu untuk "...", lalu
+ *      direktori -I dari Buildfile: headers) — untuk build pertama, MSVC,
+ *      atau saat .d belum ada.
+ *
+ * Keduanya melaporkan mtime header terbaru yang dipakai sebuah source.
  *
  * Header yang tidak ditemukan di direktori project (mis. <stdio.h>)
  * dianggap header sistem dan diabaikan. Pemindaian mengabaikan #if/#ifdef,
@@ -24,8 +31,12 @@
 
 typedef struct DepCache DepCache;
 
-/* Buat cache; `incDirs` = direktori -I hasil includeDirs(). */
-DepCache *depsNew(const List *incDirs);
+/*
+ * Buat cache dari konfigurasi build. `c->sources` dipakai memetakan source
+ * -> object -> file .d (GCC/Clang), `c->headers` sebagai direktori -I
+ * fallback pemindai #include. Boleh NULL (pemindai tanpa -I).
+ */
+DepCache *depsNew(const Config *c);
 void depsFree(DepCache *dc);
 
 /*
@@ -34,5 +45,32 @@ void depsFree(DepCache *dc);
  * dan di-cache, jadi aman dipanggil untuk ratusan source.
  */
 int64_t depsNewestHeaderMTime(DepCache *dc, const char *src);
+
+/*
+ * Verifikasi konten (anti recompile tanpa perubahan isi, mis. setelah
+ * `touch`): `true` bila snapshot hash source + seluruh dependensinya dari
+ * build sukses terakhir (persist di .rbot/deps.cache) sama dengan isi file
+ * saat ini. Snapshot dibaca sekali lazily; jika file tak dikenal snapshot,
+ * dianggap berubah (return false — perilaku aman).
+ */
+bool depsContentUpToDate(DepCache *dc, const char *src);
+
+/*
+ * Rekam hash konten source + seluruh dependensinya sebagai snapshot
+ * "terkompilasi". Dipanggil setelah build sukses; ditulis ke disk oleh
+ * depsSave() (format teks: <path> <hash> per baris).
+ */
+void depsRecordUpdate(DepCache *dc, const char *src);
+
+/* Tulis snapshot ke .rbot/deps.cache (atomik; diam bila gagal). */
+void depsSave(DepCache *dc);
+
+
+/*
+ * Baca file dependensi compiler (.d, format make -MMD) untuk `src` dan
+ * pasang sebagai edges node source-nya, menggantikan hasil pemindai
+ * #include. Dipanggil internal; disediakan untuk pengujian.
+ */
+bool depsLoadDotD(DepCache *dc, const char *src);
 
 #endif /* RBOT_V0_1_0_DEPS_H */

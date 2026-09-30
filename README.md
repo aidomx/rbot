@@ -31,8 +31,9 @@ cmake --build build
 
 ```bash
 rbot            # build project sesuai Buildfile (default, tanpa argumen)
+rbot -f lain    # build memakai file konfigurasi lain (bila diperlukan)
 rbot init       # buat Buildfile default kalau project belum punya
-rbot clean      # bersihkan build dir & compile_commands.json (lihat Buildfile: clean)
+rbot clean      # bersihkan build dir, compile_commands.json & .rbot/deps.cache (lihat Buildfile: clean)
 rbot version    # tampilkan versi rbot yang aktif (ter-embed dari .rbot-version)
 rbot help       # tampilkan bantuan
 ```
@@ -136,43 +137,59 @@ Benchmark ini merupakan pengukuran pada environment pengujian yang sama dan
 bukan klaim performa universal. Hasil dapat berbeda tergantung hardware,
 filesystem, toolchain, jumlah source, dan environment runtime.
 
+### Optimasi environment proot
+
+Pada proot-distro (Termux) tiap syscall melewati ptrace sehingga biayanya
+puluhan kali lebih mahal dari Linux biasa. Optimasi berbasis pengurangan
+syscall pada project uji 151 source / 30 header (kernel
+`6.17.0-PRoot-Distro`):
+
+| Aspek | Sebelum | Sesudah |
+|---|---|---|
+| No-op build | 0.80–0.94 s | **0.33–0.58 s** |
+| Total syscall | 4800 | **1453** |
+| openat (file dibuka) | 670 | **50** |
+| read (byte dibaca) | 1339 | **95** |
+
+Penghematan utama: snapshot hash lookup O(1) via hash table, cache edges
+`!e/!k` di `.rbot/deps.cache` (file `.d` tidak dibuka ulang selama mtime
+sama), header anak edges `.d` diverifikasi shallow tanpa dibuka, dan pass
+rekam memakai hash terekam selama mtime sama (build no-op = nol baca isi).
+
 ## Buildfile
 
-`rbot init` akan membuat `Buildfile` default berikut di project kamu:
+`rbot init` akan membuat `Buildfile` default berikut di project kamu
+(format baru `use alias`; format lama berbasis section `key:` juga tetap
+diterima — lihat bagian di bawah):
 
 ```yaml
-root: .
+use alias
 
-clean:
-  - build: false
-  - compdb: false # compile_commands.json (dulu: compileCommands)
+clean as c
+output as o
 
-sources:
-  - src
+root = .
 
-flags:
-  - Wall
-  - Wextra
+c.build = false
+c.compdb = false # compile_commands.json
 
-std: gnu11
+sources = src
 
-headers:
-  - include
-  - I.
+flags = Wall, Wextra, MMD, MP # MMD: dep file <obj>.d (GNU/Clang); MP: phony target
 
-compiler:
-  - gcc
-  - clang
+std = gnu11
 
-progress:
-  bar: true
-  error: always
+headers = include, I.
 
-output:
-  - binaryName: rbot
-  - binaryDir: bin
-  - buildDir: build
-  - compileCommands: auto # compile_commands.json (beda dari clean.compdb)
+compiler = gcc, clang
+
+progress.bar = true
+progress.error = always
+
+o.binaryName = app
+o.binaryDir = bin
+o.buildDir = build
+o.compileCommands = auto # compile_commands.json
 ```
 
 Bagian yang sering disesuaikan:
@@ -185,18 +202,31 @@ Bagian yang sering disesuaikan:
   MSVC: `/ARCH` bila perlu) — juga tercatat di `compile_commands.json`.
 
   ```yaml
-  target: arm64
+  target = arm64
   ```
 
 - **headers** — tiap entri menjadi `-I<dir>`; `I.` shorthand untuk `-I.`
   (di MSVC otomatis menjadi `/I<dir>`).
+- **flags** — flag compiler. Direkomendasikan untuk pelacakan header penuh:
+
+  ```yaml
+  flags = Wall, Wextra, MMD, MP # MMD: dep file <obj>.d (GNU/Clang); MP: phony target
+  ```
+
+  Dengan `-MMD`, tiap kompilasi menghasilkan `<obj>.d` di build dir —
+  berguna untuk editor/IDE dan debugger build. rbot sendiri tidak bergantung
+  pada file itu untuk keputusan incremental (lihat pelacakan header di
+  bawah); di MSVC flag `-M*` dilewati otomatis.
 - **library** _(opsional, tidak ada di default)_ — tiap entri menjadi
   `-l<nama>`, contoh `ssl` → `-lssl` (di MSVC otomatis menjadi `ssl.lib`).
-- **output.binaryName / binaryDir** — nama & lokasi binary hasil build.
+  Di format baru: `library = ssl, crypto`, atau per platform
+  `library.linux = m, pthread`.
+- **o.binaryName / o.binaryDir** (alias kanonik `output.*`) — nama & lokasi
+  binary hasil build.
 - **foreground** _(opsional, default `true`)_ — kendali Ctrl+C:
 
   ```yaml
-  foreground: false
+  foreground = false
   ```
 
   Saat `true` (default), child build berbagi process group dengan rbot —
@@ -220,6 +250,114 @@ Mirip `make -j`: hanya fase kompilasi yang diparalelkan; link, embedded,
 dan fase library tetap berurutan. Setiap job mendapat process group
 sendiri sehingga Ctrl+C diteruskan ke semua compiler yang sedang berjalan
 dan build berhenti dengan rapi (exit code 130).
+
+## Buildfile format baru (`use alias`)
+
+Buildfile format baru tetap bernama `Buildfile` — cukup diawali baris
+`use alias`, dan rbot membacanya otomatis tanpa opsi apa pun. Opsi
+`-f <file>` hanya diperlukan bila memakai nama file konfigurasi lain
+(bentuk rapat `-f<file>` juga bisa):
+
+```bash
+rbot                # Buildfile (format baru maupun lama) terbaca otomatis
+rbot -f lain        # pakai nama file lain, bila memang diperlukan
+rbot -flain clean   # bentuk rapat; command apa pun menghormati -f
+```
+
+File konfigurasi diawali baris `use alias` memakai format flat
+`key = value` (kualifikasi dengan titik) plus definisi alias `X as Y`.
+Semantiknya seperti alias pada umumnya: **nama kanonik tetap berlaku**,
+alias hanya nama kedua — dan bisa berantai:
+
+```yaml
+use alias
+
+clean as c                # c.build = ... juga berarti clean.build
+embedded.modules as mod   # mod.src = ... berarti embedded.modules.src
+mod.archive as archive    # chain: archive.name = ... -> e.modules.archive
+
+root = .
+c.build = false
+sources = src, tools
+flags = Wall, O2, MMD, MP
+
+o.binaryName = app
+o.binaryDir = bin
+```
+
+Kunci `key` tanpa titik pada baris menjorok mewarisi prefix section yang
+terbaru; komentar `//` didukung di format ini (komentar `#` didukung di
+semua format). `Buildfile` di repo ini sendiri memakai format baru —
+lihat isinya untuk contoh nyata.
+
+Tanpa baris `use alias`, parser lama berbasis section/indentasi tetap
+dipakai persis seperti biasa — kedua format tidak saling mengganggu.
+`-f` dengan path yang memuat direktori membuat rbot masuk ke direktori
+tersebut dulu (gaya `make -C`), jadi sources/headers/output tetap
+relatif terhadap lokasi Buildfile.
+
+## Lintas konfigurasi (`-xf` / `-xcf`)
+
+rbot bisa meniru project yang sudah punya `build.ninja` (hasil CMake
+generator Ninja, atau tulisan tangan): file itu dikonversi menjadi
+Buildfile format baru, lalu command dijalankan dengan Buildfile hasil
+konversi.
+
+```bash
+rbot -xf nbuild/build.ninja       # konversi -> build -> hapus Buildfile
+rbot -xcf nbuild/build.ninja      # konversi -> build, Buildfile tetap ada
+rbot -xf nbuild/build.ninja clean # bekerja untuk command apa pun
+```
+
+Aturan translasi:
+
+- tiap edge compile (`-c ... -o <obj>.o`) jadi source rbot; flag
+  `-D/-O/-W/-f` diteruskan, `-std=...` jadi `std`, `-I` jadi `headers`;
+- edge link dipakai menebak `o.binaryName`;
+- path absolut di bawah cwd di-relatif-kan; rule template CMake
+  (`$FLAGS`, `$INCLUDES`, `${...}`, `include rules.ninja`) diekspansi;
+- edge custom command (ar, ld, cmake -E, dsb.) diabaikan — link & library
+  dikerjakan rbot sendiri.
+
+`-xf` menghapus Buildfile sementara setelah command selesai (project asli
+tidak tersentuh); `-xcf` menyimpan hasilnya agar bisa dijadikan titik awal
+migrasi ke Buildfile.
+
+## Pelacakan header (incremental)
+
+Mengubah header tidak lagi mengharuskan build penuh yang membabi buta.
+
+Sumber dependensi header dipilih otomatis per source:
+
+1. **file `.d` dari compiler** — dengan flag `-MMD -MP` (GNU/Clang),
+   daftar header yang ditulis compiler dipakai langsung. Paling akurat:
+   compiler yang meresolusi `#if`, makro, dan computed include, sehingga
+   header yang tidak benar-benar dipakai (mis. di balik `#if 0`) tidak
+   memicu kompilasi ulang. Bila `.d` basi (source lebih baru) atau belum
+   ada, rbot jatuh ke pemindai `#include`.
+2. **pemindai `#include` (fallback)** — dipakai untuk build pertama,
+   MSVC (tanpa `-MMD`), atau saat `.d` belum ada. Hasilnya bisa sedikit
+   berlebih (mengabaikan `#if`), tidak pernah kurang.
+
+Keputusan build dua lapis:
+
+1. **mtime** — object dianggap usang bila salah satu header dependensi
+   lebih baru daripada object.
+2. **konten** — bila mtime mengatakan stale (mis. setelah `touch include/app.h`),
+   hash isi source + seluruh dependensinya dibandingkan dengan snapshot dari
+   build sukses terakhir (`.rbot/deps.cache`). Isi tidak berubah → build
+   dilewati, tanpa kompilasi ulang.
+
+```text
+> Headers   : 4 source(s) skipped (touched, content unchanged)
+Compiled : 0
+Skipped  : 5
+```
+
+Snapshot hanya direkam setelah build sukses, jadi object yang gagal
+kompilasi tidak pernah dianggap segar. `rbot clean` menghapusnya juga —
+verifikasi hash pada build berikutnya dimulai dari nol, lalu snapshot
+direkam ulang saat build sukses.
 
 ## Interrupt (Ctrl+C)
 

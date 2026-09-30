@@ -19,7 +19,7 @@ foreach(config IN ITEMS RELEASE RELWITHDEBINFO MINSIZEREL DEBUG)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config} ${CMAKE_BINARY_DIR}/bin)
 endforeach()
 
-# Mirror Buildfile: sources: - src (scan rekursif semua .c di bawah src/)
+# Mirror Buildfile: sources = src (scan rekursif semua .c di bawah src/)
 file(GLOB_RECURSE RBOT_SOURCES CONFIGURE_DEPENDS src/*.c)
 
 # Mirror Buildfile: output.binaryName: rbot

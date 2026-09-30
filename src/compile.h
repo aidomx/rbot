@@ -30,6 +30,9 @@ char *compileCmd(const Config *c, const char *inc, const char *wf, const char *s
 /* src/x/y.c -> build/y.o mapping per source root, meniru Makefile. */
 bool objectPathFor(const Config *c, const char *src, char *out, size_t n);
 
+/* src/x/y.c -> build/y.d — file dependensi (-MMD) milik object-nya. */
+bool dotDPathFor(const Config *c, const char *src, char *out, size_t n);
+
 bool compileOne(const Config *c, const char *inc, const char *wf, const char *src,
                 const char *obj);
 

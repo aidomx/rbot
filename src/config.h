@@ -74,6 +74,13 @@ typedef struct {
 
   List excludes;       /* nama/path file yang dilepas dari build (mis. main.c) */
 
+  /*
+   * Alias "canonical\talias" (format "use alias", lihat config.c). Hanya
+   * terisi saat parse Buildfile — tidak di-cache (cache menyimpan config
+   * final yang key-nya sudah kanonik).
+   */
+  List aliases;
+
   char outBinaryName[128];
   char outBinaryDir[MAX_PATH];
   char outBuildDir[MAX_PATH];

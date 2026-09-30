@@ -18,3 +18,7 @@ int rbotRun(int argc, const char *argv[]);
  * benar di mana pun dijalankan, tidak tergantung direktori kerja.
  */
 const char *rbotVersion(void);
+
+/* uji .d */
+
+/* t */

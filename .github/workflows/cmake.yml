@@ -90,3 +90,20 @@ jobs:
         working-directory: ${{ steps.strings.outputs.build-output-dir }}
         shell: bash
         run: ./bin/rbot version
+
+      # cl.exe tidak ada di PATH bash default runner — impor env vcvars
+      # (PATH/INCLUDE/LIB) agar rbot bisa memanggil cl langsung.
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.c_compiler == 'cl'
+
+      # rbot membangun dirinya sendiri dari Buildfile — di Windows/MSVC ini
+      # menguji jalur tanpa file .d (pemindai #include), translasi flag, dan
+      # link MSVC; di MinGW/Lin/macOS menguji jalur .d (-MMD) end-to-end.
+      - name: Self-host build (Buildfile)
+        shell: bash
+        run: ./build/bin/rbot -j4
+
+      - name: Self-host incremental (semua up-to-date)
+        shell: bash
+        run: ./build/bin/rbot

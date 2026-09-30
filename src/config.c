@@ -6,6 +6,60 @@
 #include <string.h>
 
 #include "portability.h"
+#include "util.h"
+
+/* ==================== Alias (format "use alias") ==================== */
+
+/*
+ * Format baru Buildfile diawali baris `use alias`. Baris `X as Y` berarti
+ * alias Y untuk X — sama persis semantik `make`/`git config`: X tetap
+ * valid, Y hanya nama kedua. Alias bisa berantai: `embedded.modules as
+ * e.modules` lalu `e.modules.archive as archive`. Resolver iteratif: setiap
+ * segmen diganti selama masih ada pasangan alias yang cocok (dengan batas
+ * iterasi anti-siklus; batas tercapai berarti siklus — dibiarkan apa adanya,
+ * key tak dikenal memang diabaikan).
+ */
+#define SECTION_LEN 64
+#define ALIAS_MAX 32
+#define ALIAS_KEY_MAX 256          /* key terqualifikasi yang diterima */
+#define ALIAS_BUF_MAX (4 * SECTION_LEN) /* "canonical\talias" & hasil resolve */
+
+static void aliasListAdd(List *l, const char *canonical, const char *alias) {
+  if (!canonical || !*canonical || !alias || !*alias || !strcmp(canonical, alias)) return;
+  if (l->count >= ALIAS_MAX) return;
+  for (int i = 0; i < l->count; i++) {
+    const char *tab = strchr(l->items[i], '\t');
+    if (tab && strcmp(tab + 1, alias) == 0) return; /* alias pertama menang */
+  }
+  char buf[ALIAS_BUF_MAX];
+  snprintf(buf, sizeof(buf), "%s\t%s", canonical, alias);
+  listAdd(l, buf);
+}
+
+static bool aliasResolveOnce(const List *l, char *key, size_t cap) {
+  for (int i = 0; i < l->count; i++) {
+    const char *tab = strchr(l->items[i], '\t');
+    if (!tab) continue;
+    size_t cl = (size_t)(tab - l->items[i]);
+    const char *al = tab + 1;
+    size_t alLen = strlen(al);
+    size_t kLen = strlen(key);
+    if (kLen < alLen || strncmp(key, al, alLen) != 0) continue;
+    if (alLen < kLen && key[alLen] != '.') continue;
+
+    char out[ALIAS_BUF_MAX + ALIAS_KEY_MAX];
+    snprintf(out, sizeof(out), "%.*s%s", (int)cl, l->items[i], key + alLen);
+    if (strcmp(out, key) == 0) continue;
+    copyStr(key, cap, out);
+    return true;
+  }
+  return false;
+}
+
+static void aliasResolve(const Config *c, char *key, size_t cap) {
+  for (int guard = 0; guard < 8 && aliasResolveOnce(&c->aliases, key, cap); guard++) {
+  }
+}
 
 /* ==================== Default & finalisasi ==================== */
 
@@ -22,7 +76,8 @@ Config configDefaults(void) {
   copyStr(c.outBinaryDir, sizeof(c.outBinaryDir), "bin");
   copyStr(c.outBuildDir, sizeof(c.outBuildDir), "build");
   copyStr(c.outCompileCommands, sizeof(c.outCompileCommands), "auto");
-  copyStr(c.outLibDir, sizeof(c.outLibDir), "lib");
+  copyStr(  c.outLibDir, sizeof(c.outLibDir), "lib");
+  /* c.aliases zero-init via Config c = {0} — List tanpa konstruktor. */
   /* default embedded per-entri; tidak ada yang di-preset di sini */
   return c;
 }
@@ -214,12 +269,95 @@ static void listForSection(Config *c, const char *section, const char *sub, cons
   }
 }
 
-#define SECTION_LEN 64
 
 static void parseLine(Config *c, char *section, char *sub, char *subsub, int *subIndent,
-                      int *subsubIndent, char *text, int indent) {
+                      int *subsubIndent, char *text, int indent, bool useAlias) {
   bool isItem = text[0] == '-';
   if (isItem) text = trim(text + 1);
+
+  /* ---- format "use alias": key = value (kualifikasi titik, alias aktif) ----
+     Baris `X as Y` = definisi alias, bukan pengaturan. Baris `a = b`:
+     key tanpa titik mewarisi prefix section aktif (baris menjorok), lalu
+     alias di-resolve, dan hasilnya dirutekan ke configApply/listForSection
+     yang sama dengan format lama — tidak ada jalur konfigurasi kedua. */
+  if (useAlias && !isItem) {
+    /* Format baru menerima komentar // (selain # yang sudah dibuang
+       loadConfig). Dipotong sebelum apapun — nilai berisi "//" (URL) tak
+       didukung di format ini. */
+    char *slash2 = strstr(text, "//");
+    if (slash2) *slash2 = '\0';
+    if (!*trim(text)) return;
+
+    char *as = strstr(text, " as ");
+    if (as) {
+      *as = '\0';
+      aliasListAdd(&c->aliases, trim(text), trim(as + 4));
+      return;
+    }
+    char *eq = strchr(text, '=');
+    if (eq) {
+      *eq = '\0';
+      char *k = trim(text);
+      char *v = trim(eq + 1);
+      if (!*k) return;
+
+      char key[ALIAS_KEY_MAX];
+      if (strlen(k) >= sizeof(key)) return; /* key tidak masuk akal — abaikan */
+      copyStr(key, sizeof(key), k);
+      if (indent > 0 && section[0] && !strchr(key, '.')) {
+        char qual[3 * SECTION_LEN + 4];
+        if (subsub[0])
+          snprintf(qual, sizeof(qual), "%s.%s.%s", section, sub, subsub);
+        else if (sub[0])
+          snprintf(qual, sizeof(qual), "%s.%s", section, sub);
+        else
+          snprintf(qual, sizeof(qual), "%s", section);
+        char full[sizeof(qual) + sizeof(key)];
+        snprintf(full, sizeof(full), "%s.%s", qual, key);
+        copyStr(key, sizeof(key), full);
+      }
+      aliasResolve(c, key, sizeof(key));
+
+      char *parts[8];
+      int np = 0;
+      for (char *tok = key; tok && np < 8;) {
+        char *dot = strchr(tok, '.');
+        parts[np++] = tok;
+        if (!dot) break;
+        *dot = '\0';
+        tok = dot + 1;
+      }
+
+      bool isListSection = strcmp(parts[0], "sources") == 0 || strcmp(parts[0], "flags") == 0 ||
+                           strcmp(parts[0], "compiler") == 0 || strcmp(parts[0], "exclude") == 0 ||
+                           strcmp(parts[0], "headers") == 0 || strcmp(parts[0], "library") == 0;
+      if (isListSection) {
+        if (!*v) return;
+        for (char *save = v;;) {
+          char *comma = strchr(save, ',');
+          if (comma) *comma = '\0';
+          char *item = trim(save);
+          if (*item) listForSection(c, parts[0], np >= 2 ? parts[1] : NULL, item);
+          if (!comma) break;
+          save = comma + 1;
+        }
+        return;
+      }
+
+      if (np == 1)
+        configApply(c, NULL, NULL, NULL, parts[0], v);
+      else if (np == 2)
+        configApply(c, parts[0], NULL, NULL, parts[1], v);
+      else if (np == 3)
+        configApply(c, parts[0], parts[1], NULL, parts[2], v);
+      else if (np == 4)
+        configApply(c, parts[0], parts[1], parts[2], parts[3], v);
+      else if (np >= 5 && strcmp(parts[np - 2], "with") == 0)
+        configApply(c, parts[0], parts[1], "with", parts[np - 1], v);
+      return;
+    }
+    /* tanpa '=' dan tanpa ' as ': jatuh ke jalur parse lama di bawah */
+  }
 
   char *colon = strchr(text, ':');
   if (!colon) {
@@ -421,14 +559,26 @@ static void buildfileCachePath(const char *path, char *out, size_t n) {
   const char *backslash = strrchr(path, '\\');
   if (!slash || (backslash && backslash > slash)) slash = backslash;
 #endif
+  const char *base = slash ? slash + 1 : path;
+
+  /* Nama cache per-file konfigurasi: "Buildfile" memakai nama lama
+     (kompatibel dengan cache yang sudah ada), selain itu <basename>.cache
+     agar `rbot -f lain` tidak berbagi cache dengan default. */
+  const char *cacheName = strcmp(base, "Buildfile") == 0 ? CONFIG_CACHE_FILE : NULL;
+  char nameBuf[64];
+  if (!cacheName) {
+    snprintf(nameBuf, sizeof(nameBuf), "%s.cache", base);
+    cacheName = nameBuf;
+  }
+
   if (slash) {
     size_t dirLen = (size_t)(slash - path);
     if (dirLen == 0)
-      snprintf(out, n, "/%s/%s", CONFIG_CACHE_DIR, CONFIG_CACHE_FILE);
+      snprintf(out, n, "/%s/%s", CONFIG_CACHE_DIR, cacheName);
     else
-      snprintf(out, n, "%.*s/%s/%s", (int)dirLen, path, CONFIG_CACHE_DIR, CONFIG_CACHE_FILE);
+      snprintf(out, n, "%.*s/%s/%s", (int)dirLen, path, CONFIG_CACHE_DIR, cacheName);
   } else {
-    snprintf(out, n, "%s/%s", CONFIG_CACHE_DIR, CONFIG_CACHE_FILE);
+    snprintf(out, n, "%s/%s", CONFIG_CACHE_DIR, cacheName);
   }
 }
 
@@ -516,6 +666,7 @@ bool loadConfig(Config *c, const char *path) {
   char sub[SECTION_LEN] = {0};
   char subsub[SECTION_LEN] = {0};
   int subIndent = 0, subsubIndent = 0;
+  bool useAlias = false; /* format baru `use alias` — tanpa baris ini, parse lama */
   while (fgets(line, sizeof(line), fp)) {
     char *comment = strchr(line, '#');
     if (comment) *comment = '\0';
@@ -526,7 +677,11 @@ bool loadConfig(Config *c, const char *path) {
 
     char *text = trim(line);
     if (!*text) continue;
-    parseLine(c, section, sub, subsub, &subIndent, &subsubIndent, text, indent);
+    if (indent == 0 && strcmp(text, "use alias") == 0) {
+      useAlias = true;
+      continue;
+    }
+    parseLine(c, section, sub, subsub, &subIndent, &subsubIndent, text, indent, useAlias);
   }
   fclose(fp);
   configFinalize(c);

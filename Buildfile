@@ -1,36 +1,33 @@
-root: .
+use alias
 
-foreground: false # SIGINT dikendalikan rbot, lalu diteruskan ke child build
+clean as c
+output as o
 
-clean:
-  - build: false
-  - compdb: true
+root = .
 
-sources:
-  - src
+# SIGINT dikendalikan rbot, lalu diteruskan ke child build
+foreground = false 
 
-flags:
-  - Wall
-  - Wextra
-  - O2
+c.build = false
+c.compdb = true
 
-std: gnu11
+sources = src
 
-headers:
-  - include
-  - I.
-  - build # build/version.h & build/embedded.h (dihasilkan saat build)
+# MMD: dep file <obj>.d; MP: phony target (GNU/Clang)
+flags = Wall, Wextra, O2, MMD, MP 
 
-compiler:
-  - gcc
-  - clang
+std = gnu11
 
-progress:
-  bar: true
-  error: always
+# build: version.h & embedded.h (dihasilkan saat build)
+headers = include, I., build 
 
-output:
-  - binaryName: rbot
-  - binaryDir: bin
-  - buildDir: build
-  - compileCommands: auto # compile_commands.json
+compiler = gcc, clang
+
+progress.bar = true
+progress.error = always
+
+o.binaryName = rbot
+o.binaryDir = bin
+o.buildDir = build
+# auto generate compile_commands.json
+o.compileCommands = auto 
