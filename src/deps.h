@@ -46,6 +46,10 @@ void depsFree(DepCache *dc);
  */
 int64_t depsNewestHeaderMTime(DepCache *dc, const char *src);
 
+/* Sama, tetapi pemanggil yang sudah men-stat `src` menyerahkan mtime-nya
+   (ns; -1 = tidak ada) sehingga tidak di-stat ulang. -2 = tidak diketahui. */
+int64_t depsNewestHeaderMTimeAt(DepCache *dc, const char *src, int64_t srcMTimeNs);
+
 /*
  * Verifikasi konten (anti recompile tanpa perubahan isi, mis. setelah
  * `touch`): `true` bila snapshot hash source + seluruh dependensinya dari
@@ -61,6 +65,13 @@ bool depsContentUpToDate(DepCache *dc, const char *src);
  * depsSave() (format teks: <path> <hash> per baris).
  */
 void depsRecordUpdate(DepCache *dc, const char *src);
+
+/*
+ * true bila snapshot belum menutupi seluruh state (deps.cache tidak ada,
+ * ada file belum direkam, atau cache edges meleset). Bila false dan tidak
+ * ada yang dikompilasi, pass rekam setelah build sukses boleh dilewati.
+ */
+bool depsSnapshotIncomplete(const DepCache *dc);
 
 /* Tulis snapshot ke .rbot/deps.cache (atomik; diam bila gagal). */
 void depsSave(DepCache *dc);

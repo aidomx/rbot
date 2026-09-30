@@ -8,9 +8,29 @@
 
 /* ==================== List & string helpers ==================== */
 
-void listAdd(List *l, const char *s) {
-  if (!l || !s || !*s || l->count >= MAX_LIST) return;
-  l->items[l->count++] = strdup(s);
+bool listAdd(List *l, const char *s) {
+  if (!l || !s || !*s) return false;
+  if (l->count == l->capacity) {
+    if (l->capacity > 0x3fffffff) return false;
+    int next = l->capacity ? l->capacity * 2 : 8;
+    char **items = realloc(l->items, (size_t)next * sizeof(*items));
+    if (!items) return false;
+    l->items = items;
+    l->capacity = next;
+  }
+  char *copy = strdup(s);
+  if (!copy) return false;
+  l->items[l->count++] = copy;
+  return true;
+}
+
+void listFree(List *l) {
+  if (!l) return;
+  for (int i = 0; i < l->count; i++) free(l->items[i]);
+  free(l->items);
+  l->items = NULL;
+  l->count = 0;
+  l->capacity = 0;
 }
 
 void copyStr(char *dst, size_t n, const char *src) {
@@ -61,7 +81,13 @@ void mkparent(const char *path) {
   char *slash = strrchr(tmp, '/');
   if (!slash) return;
   *slash = '\0';
+  /* Object satu direktori berturut-turut (walkDir mengelompokkan per
+     direktori): lewati mkdir berulang — tiap mkdirs() = satu syscall per
+     komponen path, mahal di proot. */
+  static char last[MAX_PATH];
+  if (last[0] && strcmp(last, tmp) == 0) return;
   mkdirs(tmp);
+  if (fsDirExists(tmp)) snprintf(last, sizeof(last), "%s", tmp);
 }
 
 /* Recursively collect paths under `dir` whose name ends with `ext`.
@@ -75,6 +101,8 @@ void walkDir(const char *dir, const char *ext, List *out) {
       listAdd(out, dirs.items[i]);
     for (int i = 0; i < dirs.count; i++)
       walkDir(dirs.items[i], ext, out);
+    listFree(&dirs);
+    listFree(&files);
     return;
   }
   for (int i = 0; i < files.count; i++) {
@@ -84,6 +112,8 @@ void walkDir(const char *dir, const char *ext, List *out) {
   }
   for (int i = 0; i < dirs.count; i++)
     walkDir(dirs.items[i], ext, out);
+  listFree(&dirs);
+  listFree(&files);
 }
 
 bool newerThan(const char *a, const char *b) {

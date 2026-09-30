@@ -67,6 +67,7 @@ static bool embArchiveFresh(const EmbeddedEntry *e) {
     time_t mt = fsMTime(files.items[i]);
     if (mt != (time_t)-1 && mt > newest) newest = mt;
   }
+  listFree(&files);
   return newest <= at;
 }
 

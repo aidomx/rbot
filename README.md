@@ -146,15 +146,42 @@ syscall pada project uji 151 source / 30 header (kernel
 
 | Aspek | Sebelum | Sesudah |
 |---|---|---|
-| No-op build | 0.80–0.94 s | **0.33–0.58 s** |
-| Total syscall | 4800 | **1453** |
-| openat (file dibuka) | 670 | **50** |
-| read (byte dibaca) | 1339 | **95** |
+| No-op build | 0.80–0.94 s | **0.33–0.72 s** |
+| Total syscall | 4800 | **~1500** |
+| openat (file dibuka) | 670 | **50–80** |
+| read (byte dibaca) | 1339 | **~100** |
 
-Penghematan utama: snapshot hash lookup O(1) via hash table, cache edges
-`!e/!k` di `.rbot/deps.cache` (file `.d` tidak dibuka ulang selama mtime
-sama), header anak edges `.d` diverifikasi shallow tanpa dibuka, dan pass
-rekam memakai hash terekam selama mtime sama (build no-op = nol baca isi).
+Penghematan utama:
+
+- `.rbot/deps.cache` dimuat **satu pass** (snapshot hash + cache edges
+  sekaligus, tidak dibuka dua kali);
+- cache edges `!e/!k` — file `.d` tidak dibuka ulang selama mtime sama
+  (satu stat menggantikan open+read per source);
+- header anak edges `.d` diverifikasi shallow tanpa dibuka/dipindai;
+- pass rekam setelah build sukses **dilewati pada no-op murni** (tidak ada
+  yang berubah sejak rekam terakhir) — membuang DFS + ribuan pembaruan
+  snapshot yang murni CPU; dan pass rekam memakai hash terekam selama
+  mtime sama (build no-op = nol baca isi).
+
+### Optimasi kinerja (clean & no-op)
+
+- **Clean build paralel secara default** — kompilasi memakai semua core CPU
+  tanpa perlu `-j` (`-j1` untuk serial).
+- **Tanpa `/bin/sh` per job** — command kompilasi/link yang polos (tanpa
+  quote, variabel, glob, pipe) dijalankan langsung lewat `posix_spawn`: satu
+  `exec` per job, bukan dua (shell + compiler), dan tanpa menyalin page table
+  proses rbot. Command yang butuh shell tetap lewat `sh -c` seperti dulu.
+- **No-op tidak lagi menulis apa pun** — cache edges (`!e/!k`) kini selalu
+  ter-indeks penuh; sebelumnya sebagian entri terlewat sehingga file `.d`
+  dibuka ulang dan `.rbot/deps.cache` ditulis ulang di setiap build.
+- Source tanpa header project (hanya header sistem) sekarang tercatat sah di
+  cache (`!e <src> <mtime> 0`), tidak lagi dianggap "cache meleset".
+- Object (`.o`) tidak lagi tercatat sebagai dependensi source-nya sendiri
+  (bug offset pada pengecekan target `.o` di parser `.d`): satu `stat` lebih
+  sedikit per source, dan isi object tidak lagi di-hash ke snapshot.
+- `stat` per entri direktori diganti `d_type` dari `readdir`; `mkdir` berulang
+  per object dilewati; mtime object/source dari fase klasifikasi dipakai ulang
+  saat keputusan link, jadi no-op tidak men-stat ulang semua object.
 
 ## Buildfile
 
@@ -239,9 +266,14 @@ Bagian yang sering disesuaikan:
 
 ## Build paralel (-jN)
 
+Tanpa opsi `-j`, rbot langsung paralel sebanyak core CPU (seperti `ninja`).
+Pakai `-j1` untuk build serial.
+
 ```bash
-rbot -j         # paralel, default sejumlah core CPU
+rbot            # paralel, sejumlah core CPU (default)
+rbot -j         # sama seperti di atas
 rbot -j4        # paralel, 4 job
+rbot -j1        # serial
 rbot --jobs=4
 rbot clean -j2  # opsi boleh sebelum/sesudah command
 ```
@@ -469,6 +501,10 @@ output:
   (Linux), `.dylib` (macOS), `<name>.dll` (Windows). Saat aktif, semua
   source otomatis dikompilasi dengan `-fPIC` sehingga object tetap bisa
   dipakai link binary.
+- Setiap varian dicek **terpisah**: bila seluruh object inputnya lebih
+  lama dari target, varian itu dilewati (`up-to-date`) tanpa menjalankan
+  `ar`/linker lagi — menghapus `.so` saja tidak meng-rebuild `.a`, dan
+  build no-op tidak menyentuh library sama sekali.
 - **exclude** — melepas source dari pengemasan library tanpa memengaruhi
   binary (mis. `main.c` milik executable):
 

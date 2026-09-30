@@ -6,16 +6,17 @@
 
 /* ==================== Batas ukuran umum ==================== */
 
-#define MAX_LIST 512
 #define MAX_PATH 1024
 
 /* Daftar string dinamis sederhana (dipakai untuk sources, flags, dst). */
 typedef struct {
-  char *items[MAX_LIST];
+  char **items;
   int count;
+  int capacity;
 } List;
 
-void listAdd(List *l, const char *s);
+bool listAdd(List *l, const char *s);
+void listFree(List *l);
 void copyStr(char *dst, size_t n, const char *src);
 
 char *trim(char *s);

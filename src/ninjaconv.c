@@ -22,6 +22,7 @@
 #include "ninjaconv.h"
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -56,27 +57,60 @@ static char *ncNextTok(char **cursor) {
   return tok;
 }
 
+/* Append tanpa fixed buffer: mencegah truncation dan underflow ukuran snprintf. */
+static bool ncAppendText(char **buf, size_t *len, size_t *cap, const char *text) {
+  size_t add = strlen(text);
+  if (add > SIZE_MAX - *len - 1) return false;
+  size_t need = *len + add + 1;
+  if (need > *cap) {
+    size_t next = *cap ? *cap : 128;
+    while (next < need) {
+      if (next > SIZE_MAX / 2) { next = need; break; }
+      next *= 2;
+    }
+    char *grown = realloc(*buf, next);
+    if (!grown) return false;
+    *buf = grown;
+    *cap = next;
+  }
+  memcpy(*buf + *len, text, add + 1);
+  *len += add;
+  return true;
+}
+
 /* ==================== kumpulan string unik ==================== */
 
-#define NC_MAX 512
-
 typedef struct {
-  char *items[NC_MAX];
+  char **items;
   int count;
+  int capacity;
 } NcList;
 
-static void ncAdd(NcList *l, const char *s) {
-  if (!s || !*s) return;
+static bool ncAdd(NcList *l, const char *s) {
+  if (!l || !s || !*s) return false;
   for (int i = 0; i < l->count; i++)
-    if (strcmp(l->items[i], s) == 0) return;
-  if (l->count >= NC_MAX) return;
-  l->items[l->count++] = ncStrndup(s, s + strlen(s));
+    if (strcmp(l->items[i], s) == 0) return true;
+  if (l->count == l->capacity) {
+    if (l->capacity > 0x3fffffff) return false;
+    int next = l->capacity ? l->capacity * 2 : 8;
+    char **items = realloc(l->items, (size_t)next * sizeof(*items));
+    if (!items) return false;
+    l->items = items;
+    l->capacity = next;
+  }
+  char *copy = ncStrndup(s, s + strlen(s));
+  if (!copy) return false;
+  l->items[l->count++] = copy;
+  return true;
 }
 
 static void ncFree(NcList *l) {
   for (int i = 0; i < l->count; i++)
     free(l->items[i]);
+  free(l->items);
+  l->items = NULL;
   l->count = 0;
+  l->capacity = 0;
 }
 
 /* ==================== model file ninja ==================== */
@@ -210,7 +244,14 @@ static void ncFixIncludeTok(const char *tok, const char *ninjaDir, bool fixedIn,
     }
     char dir[MAX_PATH * 2];
     ncFixPath(tok + 2, ninjaDir, dir, sizeof(dir));
-    snprintf(out, cap, "-I%s", dir);
+    size_t len = strlen(dir);
+    if (len > cap || cap - len < 3) {
+      if (cap) out[0] = '\0';
+      return;
+    }
+    out[0] = '-';
+    out[1] = 'I';
+    memcpy(out + 2, dir, len + 1);
     return;
   }
   snprintf(out, cap, "%s", tok);
@@ -282,15 +323,20 @@ static char *ncExpand(const NcFile *f, const char *tpl, const char *in, const ch
       if (!v) v = "";
 
       size_t vl = strlen(v);
-      if (w + vl < cap) {
-        memcpy(res + w, v, vl);
-        w += vl;
+      if (vl >= cap - w) {
+        free(res); /* jangan hasilkan command yang diam-diam terpotong */
+        return NULL;
       }
+      memcpy(res + w, v, vl);
+      w += vl;
       p += skip;
       continue;
     }
-    if (w + 1 < cap) res[w++] = *p;
-    p++;
+    if (w + 1 >= cap) {
+      free(res);
+      return NULL;
+    }
+    res[w++] = *p++;
   }
   res[w] = '\0';
   return res;
@@ -301,7 +347,7 @@ static char *ncExpand(const NcFile *f, const char *tpl, const char *in, const ch
 typedef struct {
   NcList flags;
   NcList includes;
-  char std[64];
+  char std[MAX_PATH * 4];
   char src[MAX_PATH * 2];
   char obj[MAX_PATH * 2];
 } NcCompile;
@@ -632,7 +678,7 @@ bool ninjaToBuildfile(const char *ninjaPath, const char *outPath, char *err, siz
   NcList srcs = {0};
   NcList allFlags = {0};
   NcList allIncs = {0};
-  char std[64] = {0};
+  char std[MAX_PATH * 4] = {0};
   char binGuess[128] = {0};
   int converted = 0;
 
@@ -650,24 +696,36 @@ bool ninjaToBuildfile(const char *ninjaPath, const char *outPath, char *err, siz
     }
 
     /* include edge: path -I dibuat relatif sebelum substitusi */
-    char incsFixed[MAX_PATH * 4] = "";
+    char *incsFixed = NULL;
+    size_t incsLen = 0, incsCap = 0;
+    bool incsOk = true;
     if (e->incs) {
       char *dup = ncStrndup(e->incs, e->incs + strlen(e->incs));
-      char *cur = dup, *tok, acc = 0;
-      size_t off = 0;
-      while ((tok = ncNextTok(&cur)) != NULL) {
+      if (!dup) incsOk = false;
+      char *cur = dup, *tok;
+      while (incsOk && (tok = ncNextTok(&cur)) != NULL) {
         char fixed[MAX_PATH * 2];
         ncFixIncludeTok(tok, ninjaDir, true, fixed, sizeof(fixed)); /* sudah pre-fix */
-        off += (size_t)snprintf(incsFixed + off, sizeof(incsFixed) - off, "%s%s", acc ? " " : "",
-                                fixed);
-        acc = 1;
+        if (incsLen && !ncAppendText(&incsFixed, &incsLen, &incsCap, " "))
+          incsOk = false;
+        if (incsOk && !ncAppendText(&incsFixed, &incsLen, &incsCap, fixed))
+          incsOk = false;
         free(tok);
       }
       free(dup);
     }
+    if (!incsOk) {
+      free(incsFixed);
+      continue;
+    }
+    if (!incsFixed) {
+      incsFixed = calloc(1, 1);
+      if (!incsFixed) continue;
+    }
 
     char *cmd = ncExpand(&f, r->command, e->in, e->out, e->flags, incsFixed, e->defs,
                          e->depfile);
+    free(incsFixed);
     if (!cmd) continue;
 
     NcCompile cc;

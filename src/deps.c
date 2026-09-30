@@ -1,5 +1,6 @@
 #include "deps.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,12 +64,18 @@ struct DepCache {
     int64_t dm;
     char **kids;
     int nkids;
-    bool used; /* edge ini sudah dipasang ke node run ini */
+    int expect; /* jumlah kids yang dijanjikan baris "!e" (-1 = format lama,
+                   tak diketahui) — mendeteksi cache terpotong */
+    bool used;  /* edge ini sudah dipasang ke node run ini */
   } *edges;
   int edgeCount, edgeCap;
   int *ebucket;
   int ebcap;
   bool edgeDirty;
+  bool edgesLoaded;     /* section !e/!k sudah dicoba dimuat (sekali per run) */
+  bool snapIncomplete;  /* ada file yang tak tertutup snapshot (deps.cache
+                           hilang / file baru terlihat saat verifikasi) —
+                           pass rekam wajib jalan setelah build sukses */
 };
 
 // hash
@@ -176,7 +183,7 @@ static int nodeFind(const DepCache *dc, const char *path) {
   }
 }
 
-static int nodeAdd(DepCache *dc, const char *path) {
+static int nodeAddM(DepCache *dc, const char *path, int64_t mtime) {
   if (dc->count >= DEPS_MAX_NODES) return -1;
   if (dc->count == dc->cap) {
     int ncap = dc->cap ? dc->cap * 2 : 64;
@@ -188,7 +195,7 @@ static int nodeAdd(DepCache *dc, const char *path) {
   DepNode *n = &dc->nodes[dc->count];
   memset(n, 0, sizeof(*n));
   n->path = strdup(path);
-  n->mtime = fsMTimeNs(path);
+  n->mtime = mtime;
   int idx = dc->count++;
 
   /* daftarkan ke hash table; tumbuh saat load factor > 0.75 */
@@ -199,6 +206,10 @@ static int nodeAdd(DepCache *dc, const char *path) {
   dc->hbucket[i] = idx + 1;
 
   return idx;
+}
+
+static int nodeAdd(DepCache *dc, const char *path) {
+  return nodeAddM(dc, path, fsMTimeNs(path));
 }
 
 static int nodeGet(DepCache *dc, const char *path) {
@@ -384,11 +395,15 @@ static void parseNodeIfNeeded(DepCache *dc, int idx) {
 }
 
 /* DFS iteratif-rekursif: mtime terbaru di subtree, tiap node sekali per
-   source. Kids disalin dulu agar aman dari realloc dc->nodes. */
+   source. Kids disalin dulu agar aman dari realloc dc->nodes. Dependensi
+   HILANG (mtime -1) dikembalikan sebagai INT64_MAX agar source dipaksa
+   stale: compiler menampilkan error include yang jelas, bukan build
+   "sukses" di atas state yang tidak konsisten (semantik make -MP). */
 static int64_t newestUnder(DepCache *dc, int idx) {
   parseNodeIfNeeded(dc, idx);
   dc->nodes[idx].mark = dc->gen;
   int64_t best = dc->nodes[idx].mtime;
+  if (best < 0) return INT64_MAX; /* file hilang */
 
   int nkids = dc->nodes[idx].nkids;
   int *kids = malloc((size_t)(nkids > 0 ? nkids : 1) * sizeof(int));
@@ -482,14 +497,20 @@ static void dotdProcessLine(DepCache *dc, int idx, char *line, bool *isTarget) {
   char *deps = colon + 1;
 
   size_t tl = strlen(q);
-  if (tl >= 3 && (strcmp(q + tl - 3, ".o") == 0 || strcmp(q + tl - 3, ".O") == 0))
-    return; /* target object GNU/Clang */
+  /* NB: ".o" = 2 karakter → tl - 2. Offset lama (tl - 3) tidak pernah cocok,
+     sehingga object ikut tercatat sebagai dependensi source-nya sendiri
+     (stat ekstra per source + isi .o ikut di-hash ke snapshot). */
+  if (tl >= 3 && q[tl - 2] == '.' && (q[tl - 1] == 'o' || q[tl - 1] == 'O')) {
+    /* target object GNU/Clang: dependensi di baris yang sama tetap diproses */
+    goto deps_of_line;
+  }
   if (tl >= 4 && q[tl - 4] == '.' && (q[tl - 3] == 'o' || q[tl - 3] == 'O') &&
       (q[tl - 2] == 'b' || q[tl - 2] == 'B') && (q[tl - 1] == 'j' || q[tl - 1] == 'J'))
-    return; /* target object MSVC */
+    goto deps_of_line; /* target object MSVC */
 
   dotdAddDep(dc, idx, q); /* target non-object: header phony hasil -MP dsb. */
 
+deps_of_line:;
   /* dependensi di baris yang sama, setelah ':' */
   char *tok = deps;
   while (*tok) {
@@ -518,6 +539,14 @@ static void dotdProcessLine(DepCache *dc, int idx, char *line, bool *isTarget) {
  * biasa, lalu direkam ulang saat build sukses.
  */
 
+/* true bila path berakhiran .o / .obj (file object bukan dependensi source). */
+static bool isObjectPath(const char *p) {
+  size_t n = strlen(p);
+  if (n >= 3 && p[n - 2] == '.' && (p[n - 1] == 'o' || p[n - 1] == 'O')) return true;
+  return n >= 5 && p[n - 4] == '.' && (p[n - 3] == 'o' || p[n - 3] == 'O') &&
+         (p[n - 2] == 'b' || p[n - 2] == 'B') && (p[n - 1] == 'j' || p[n - 1] == 'J');
+}
+
 static int edgeFind(const DepCache *dc, const char *src) {
   if (!dc->ebcap) return -1;
   int mask = dc->ebcap - 1;
@@ -531,64 +560,32 @@ static int edgeFind(const DepCache *dc, const char *src) {
   }
 }
 
-static void edgesLoad(DepCache *dc) {
-  if (dc->edgeCount > 0 || dc->edgeCap > 0) return; /* sekali saja */
-
-  FILE *fp = fopen(DEPS_SNAPSHOT_FILE, "r");
-  if (!fp) return;
-  char line[MAX_PATH + 128];
-  int cur = -1;
-  while (fgets(line, sizeof(line), fp)) {
-    if (line[0] == '!' && line[1] == 'e' && line[2] == ' ') {
-      char src[MAX_PATH];
-      unsigned long long dm = 0;
-      if (sscanf(line + 3, "%1023s %16llx", src, &dm) != 2) continue;
-      if (dc->edgeCount == dc->edgeCap) {
-        int ncap = dc->edgeCap ? dc->edgeCap * 2 : 128;
-        void *nn = realloc(dc->edges, (size_t)ncap * sizeof(*dc->edges));
-        if (!nn) break;
-        dc->edges = nn;
-        dc->edgeCap = ncap;
-      }
-      int idx = dc->edgeCount;
-      dc->edges[idx].src = strdup(src);
-      if (!dc->edges[idx].src) break;
-      dc->edges[idx].dm = (int64_t)dm;
-      dc->edges[idx].kids = NULL;
-      dc->edges[idx].nkids = 0;
-      dc->edges[idx].used = false;
-      dc->edgeCount++;
-      cur = idx;
-
-      /* hash table edges tumbuh saat load > 0.75 */
-      if (!dc->ebcap || dc->edgeCount * 4 > dc->ebcap * 3) {
-        int ncap = dc->ebcap ? dc->ebcap * 2 : 256;
-        int *nb = calloc((size_t)ncap, sizeof(int));
-        if (nb) {
-          free(dc->ebucket);
-          dc->ebucket = nb;
-          dc->ebcap = ncap;
-          int mask = ncap - 1;
-          for (int k = 0; k < dc->edgeCount; k++) {
-            int j = (int)(pathHash(dc->edges[k].src) & (uint64_t)mask);
-            while (nb[j]) j = (j + 1) & mask;
-            nb[j] = k + 1;
-          }
-        }
-      }
-    } else if (line[0] == '!' && line[1] == 'k' && line[2] == ' ') {
-      if (cur < 0 || cur >= dc->edgeCount) continue;
-      char path[MAX_PATH];
-      if (sscanf(line + 3, "%1023s", path) != 1) continue;
-      char **nk =
-          realloc(dc->edges[cur].kids, (size_t)(dc->edges[cur].nkids + 1) * sizeof(char *));
-      if (!nk) continue;
-      dc->edges[cur].kids = nk;
-      dc->edges[cur].kids[dc->edges[cur].nkids] = strdup(path);
-      if (dc->edges[cur].kids[dc->edges[cur].nkids]) dc->edges[cur].nkids++;
-    }
+/* Bangun tabel hash edges dari seluruh entri yang ada (kapasitas pangkat
+   dua, load <= 0.5). Dipanggil sekali setelah deps.cache selesai dimuat. */
+static void edgesHashBuild(DepCache *dc) {
+  int ncap = 256;
+  while (ncap < dc->edgeCount * 2)
+    ncap *= 2;
+  int *nb = calloc((size_t)ncap, sizeof(int));
+  if (!nb) return;
+  free(dc->ebucket);
+  dc->ebucket = nb;
+  dc->ebcap = ncap;
+  int mask = ncap - 1;
+  for (int k = 0; k < dc->edgeCount; k++) {
+    int j = (int)(pathHash(dc->edges[k].src) & (uint64_t)mask);
+    while (nb[j]) j = (j + 1) & mask;
+    nb[j] = k + 1;
   }
-  fclose(fp);
+}
+
+static bool snapshotLoad(DepCache *dc); /* forward: edgesLoad memicu ini */
+
+/* Section !e/!k dimuat oleh snapshotLoad dalam pass yang sama (satu buka
+   file per run). Fungsi ini hanya memastikan load sudah terjadi. */
+static void edgesLoad(DepCache *dc) {
+  if (dc->edgesLoaded) return;
+  snapshotLoad(dc);
 }
 
 /* Catat edges source idx (dari .d yang barusan diparse) untuk run berikutnya. */
@@ -624,6 +621,7 @@ static void edgesRecord(DepCache *dc, int idx, int64_t dm) {
     dc->edges[ei].src = strdup(src);
     dc->edges[ei].kids = NULL;
     dc->edges[ei].nkids = 0;
+    dc->edges[ei].expect = -1;
     dc->edges[ei].dm = 0;
     if (dc->ebcap) {
       int mask = dc->ebcap - 1;
@@ -656,6 +654,7 @@ static void edgesRecord(DepCache *dc, int idx, int64_t dm) {
     dc->edges[ei].nkids = k + 1;
   }
   dc->edges[ei].dm = dm;
+  dc->edges[ei].expect = -1;
   dc->edges[ei].used = true;
   dc->edgeDirty = true;
 }
@@ -664,8 +663,11 @@ static void edgesRecord(DepCache *dc, int idx, int64_t dm) {
    cache edges ter-pangkas otomatis tiap kali ditulis. */
 static void edgesSave(FILE *fp, const DepCache *dc) {
   for (int i = 0; i < dc->edgeCount; i++) {
-    if (!dc->edges[i].used || dc->edges[i].nkids == 0) continue;
-    fprintf(fp, "!e %s %016llx\n", dc->edges[i].src, (unsigned long long)dc->edges[i].dm);
+    /* Source tanpa header project (nkids == 0) sah disimpan: jumlah kids ikut
+       ditulis agar cache terpotong tidak salah dibaca sebagai "tanpa header". */
+    if (!dc->edges[i].used) continue;
+    fprintf(fp, "!e %s %016llx %d\n", dc->edges[i].src, (unsigned long long)dc->edges[i].dm,
+            dc->edges[i].nkids);
     for (int k = 0; k < dc->edges[i].nkids; k++)
       fprintf(fp, "!k %s\n", dc->edges[i].kids[k]);
   }
@@ -703,7 +705,21 @@ bool depsLoadDotD(DepCache *dc, const char *src) {
      file .d TIDAK dibuka (satu stat menggantikan open+read per source). */
   edgesLoad(dc);
   int ei = edgeFind(dc, srcNorm);
-  if (ei >= 0 && dc->edges[ei].dm == dm && dc->edges[ei].nkids > 0) {
+  if (ei >= 0 && dc->edges[ei].dm == dm &&
+      (dc->edges[ei].expect >= 0 ? dc->edges[ei].nkids == dc->edges[ei].expect
+                                 : dc->edges[ei].nkids > 0)) {
+    /* cache versi lama menyimpan object sebagai "dependensi" (bug offset .o):
+       buang di tempat; cache ditulis ulang sekali, bersih. */
+    int w = 0;
+    for (int k = 0; k < dc->edges[ei].nkids; k++) {
+      if (isObjectPath(dc->edges[ei].kids[k])) {
+        free(dc->edges[ei].kids[k]);
+        dc->edgeDirty = true;
+        continue;
+      }
+      dc->edges[ei].kids[w++] = dc->edges[ei].kids[k];
+    }
+    dc->edges[ei].nkids = w;
     for (int k = 0; k < dc->edges[ei].nkids; k++) {
       int kid = nodeGet(dc, dc->edges[ei].kids[k]);
       if (kid < 0 || kid == idx) continue;
@@ -712,6 +728,8 @@ bool depsLoadDotD(DepCache *dc, const char *src) {
     dc->edges[ei].used = true;
     return true;
   }
+  dc->snapIncomplete = true; /* cache meleset — state .d berubah sejak
+                                rekaman terakhir: paksa pass rekam */
 
   size_t len = 0;
   char *buf = readWhole(dpath, &len);
@@ -778,8 +796,7 @@ void depsFree(DepCache *dc) {
     free(dc->edges[i].kids);
   }
   free(dc->edges);
-  for (int i = 0; i < dc->incDirs.count; i++)
-    free(dc->incDirs.items[i]);
+  listFree(&dc->incDirs);
   for (int i = 0; i < dc->snapCount; i++)
     free(dc->snap[i].path);
   free(dc->snap);
@@ -836,16 +853,85 @@ static bool snapshotLoad(DepCache *dc) {
   dc->snapLoaded = true;
 
   FILE *fp = fopen(DEPS_SNAPSHOT_FILE, "r");
-  if (!fp) return false;
+  if (!fp) {
+    dc->snapIncomplete = true; /* belum ada snapshot — wajib direkam */
+    return false;
+  }
+
+  /* Satu pass untuk SEMUA section: snapshot hash + cache edges (!e/!k).
+     Sebelumnya edgesLoad membuka & mem-parsing file ini lagi — dua kali
+     baca+parsesetiap run, terasa di proot maupun termux. */
+  bool wantEdges = !dc->edgesLoaded;
+  dc->edgesLoaded = true;
+  int curEdge = -1;
 
   char line[MAX_PATH + 128];
   while (fgets(line, sizeof(line), fp)) {
-    if (line[0] == '!') continue; /* section edges (!e/!k) — milik edgesLoad */
+    if (line[0] == '!') {
+      if (!wantEdges) continue;
+      if (line[1] == 'e' && line[2] == ' ') {
+        char src[MAX_PATH];
+        unsigned long long dm = 0;
+        int cnt = -1;
+        int got = sscanf(line + 3, "%1023s %16llx %d", src, &dm, &cnt);
+        if (got < 2) continue;
+        if (got < 3) cnt = -1;
+        if (dc->edgeCount == dc->edgeCap) {
+          int ncap = dc->edgeCap ? dc->edgeCap * 2 : 128;
+          void *nn = realloc(dc->edges, (size_t)ncap * sizeof(*dc->edges));
+          if (!nn) continue;
+          dc->edges = nn;
+          dc->edgeCap = ncap;
+        }
+        int idx = dc->edgeCount;
+        dc->edges[idx].src = strdup(src);
+        if (!dc->edges[idx].src) continue;
+        dc->edges[idx].dm = (int64_t)dm;
+        dc->edges[idx].kids = NULL;
+        dc->edges[idx].nkids = 0;
+        dc->edges[idx].expect = cnt;
+        dc->edges[idx].used = false;
+        dc->edgeCount++;
+        curEdge = idx;
+        /* hash table dibangun SEKALI setelah semua baris dibaca (di bawah).
+           Dulu tabel hanya dibangun ulang saat load > 0.75, sehingga entri
+           yang dimuat setelah rebuild terakhir tidak pernah masuk tabel:
+           edgeFind meleset, file .d dibuka ulang dan deps.cache ditulis
+           ulang pada SETIAP build, termasuk no-op. */
+      } else if (line[1] == 'k' && line[2] == ' ') {
+        if (curEdge < 0 || curEdge >= dc->edgeCount) continue;
+        /* Baris "!k <path>": ambil sisa baris apa adanya (tanpa sscanf —
+           ~1800 baris pada project 200 source). Path dengan spasi ikut utuh. */
+        char *path = line + 3;
+        size_t pl = strlen(path);
+        while (pl && (path[pl - 1] == '\n' || path[pl - 1] == '\r')) path[--pl] = '\0';
+        if (!pl) continue;
+        /* kapasitas kids tumbuh geometris: 4, 8, 16, ... (bukan realloc per
+           kid). Kapasitas tersirat dari nkids: 4 untuk nkids 0..3, lalu
+           digandakan tiap nkids mencapai pangkat dua >= 4. */
+        int nk0 = dc->edges[curEdge].nkids;
+        if (nk0 == 0 || (nk0 >= 4 && (nk0 & (nk0 - 1)) == 0)) {
+          size_t ncap = nk0 == 0 ? 4 : (size_t)nk0 * 2;
+          char **nk = realloc(dc->edges[curEdge].kids, ncap * sizeof(char *));
+          if (!nk) continue;
+          dc->edges[curEdge].kids = nk;
+        }
+        char *dup = strdup(path);
+        if (!dup) continue;
+        dc->edges[curEdge].kids[nk0] = dup;
+        dc->edges[curEdge].nkids = nk0 + 1;
+      }
+      continue;
+    }
     char path[MAX_PATH];
     unsigned long long h = 0;
     unsigned long long m = 0;
     int got = sscanf(line, "%1023s %16llx %16llx", path, &m, &h);
     if (got == 2) { h = m; m = 0; } /* versi 1: path hash */
+    if (got >= 2 && isObjectPath(path)) {
+      dc->snapDirty = true; /* entri object peninggalan bug lama: buang */
+      continue;
+    }
     if (got >= 2) {
       if (dc->snapCount == dc->snapCap) {
         int ncap = dc->snapCap ? dc->snapCap * 2 : 256;
@@ -862,6 +948,7 @@ static bool snapshotLoad(DepCache *dc) {
     }
   }
   fclose(fp);
+  edgesHashBuild(dc);
   return true;
 }
 
@@ -910,7 +997,10 @@ static bool nodeUpToDateShallow(DepCache *dc, int idx) {
 
   int64_t recordedM = 0;
   uint64_t recorded = snapshotHashOf(dc, dc->nodes[idx].path, &recordedM);
-  if (recorded == 0) return false; /* belum pernah direkam */
+  if (recorded == 0) {
+    dc->snapIncomplete = true; /* file tak tertutup snapshot */
+    return false;              /* belum pernah direkam */
+  }
 
   if (dc->nodes[idx].mtime != recordedM) {
     /* mtime beda: `touch` atau konten benar-benar berubah — cek hash */
@@ -1015,6 +1105,16 @@ bool depsContentUpToDate(DepCache *dc, const char *src) {
   return subtreeUpToDate(dc, root);
 }
 
+/*
+ * true bila snapshot hash belum menutupi seluruh state saat ini (deps.cache
+ * tidak ada, ada file yang belum pernah direkam, atau cache edges meleset).
+ * Bila false DAN tidak ada yang dikompilasi, pass rekam setelah build boleh
+ * dilewati — tidak ada informasi baru yang bisa direkam (no-op murni).
+ */
+bool depsSnapshotIncomplete(const DepCache *dc) {
+  return !dc || dc->snapIncomplete;
+}
+
 void depsRecordUpdate(DepCache *dc, const char *src) {
   if (!dc || !src) return;
   char path[MAX_PATH];
@@ -1056,11 +1156,16 @@ void depsSave(DepCache *dc) {
 
 
 int64_t depsNewestHeaderMTime(DepCache *dc, const char *src) {
+  return depsNewestHeaderMTimeAt(dc, src, -2);
+}
+
+int64_t depsNewestHeaderMTimeAt(DepCache *dc, const char *src, int64_t srcMTimeNs) {
   if (!dc || !src) return 0;
   char path[MAX_PATH];
   snprintf(path, sizeof(path), "%s", src);
   normalizePath(path);
-  int root = nodeGet(dc, path);
+  int root = nodeFind(dc, path);
+  if (root < 0) root = srcMTimeNs >= -1 ? nodeAddM(dc, path, srcMTimeNs) : nodeAdd(dc, path);
   if (root < 0) return 0;
 
   dc->gen++;
@@ -1074,6 +1179,7 @@ int64_t depsNewestHeaderMTime(DepCache *dc, const char *src) {
     int64_t best = 0;
     for (int i = 0; i < dc->nodes[root].nkids; i++) {
       int64_t m = dc->nodes[dc->nodes[root].kids[i]].mtime;
+      if (m < 0) return INT64_MAX; /* dependensi hilang -> stale (lihat newestUnder) */
       if (m > best) best = m;
     }
     return best;

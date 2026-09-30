@@ -1,6 +1,7 @@
 #include "commands.h"
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,7 +22,7 @@ void showHelp(void) {
   printf("%-8s%s\n", "-f <f>", "- pakai <f> sebagai Buildfile (default: Buildfile)");
   printf("%-8s%s\n", "-xf <n>", "- konversi build.ninja <n> -> Buildfile sementara, lalu jalankan command");
   printf("%-8s%s\n", "-xcf <n>", "- sama seperti -xf, tapi Buildfile hasil konversi tetap ada");
-  printf("%-8s%s\n", "-j[N]", "- build paralel, N job (default: jumlah core CPU)");
+  printf("%-8s%s\n", "-j[N]", "- build paralel, N job (tanpa -j: jumlah core CPU; -j1 = serial)");
   printf("%-8s%s\n", "init", "- create a default Buildfile if none exists yet");
   printf("%-8s%s\n", "clean", "- clean build artifacts (Buildfile: clean)");
   printf("%-8s%s\n", "", "- output.libraryName/libraryShared membangun lib<name>.a + .so");
@@ -107,18 +108,7 @@ static void libSharedPath(const Config *c, char *out, size_t n) {
 #endif
 }
 
-static void printLibSummary(const Config *c) {
-  if (!c->libRequested) return;
-  char libp[MAX_PATH * 2];
-  if (c->libStatic) {
-    libStaticPath(c, libp, sizeof(libp));
-    printf("Library  : %s\n", libp);
-  }
-  if (c->libShared) {
-    libSharedPath(c, libp, sizeof(libp));
-    printf("Library  : %s\n", libp);
-  }
-}
+static bool libVariantUpToDate(const Config *c, bool isStatic, const List *srcs);
 
 /*
  * Kompilasi paralel (rbot -jN, mirip make). Baris status tiap job dicetak
@@ -221,6 +211,23 @@ static bool runParallelJobs(const Config *c, const char *inc, const char *wf, co
 static bool buildLibrary(const Config *c, const List *srcs) {
   if (!c->libRequested) return true;
 
+  /* Jalur no-op: hindari membangun daftar object, alokasi string, dan mkdir
+     bila kedua varian library sudah mutakhir. */
+  bool staticUpToDate = !c->libStatic || libVariantUpToDate(c, true, srcs);
+  bool sharedUpToDate = !c->libShared || libVariantUpToDate(c, false, srcs);
+  if (staticUpToDate && sharedUpToDate) {
+    char target[MAX_PATH * 2];
+    if (c->libStatic) {
+      libStaticPath(c, target, sizeof(target));
+      printf("> Library   : %s (up-to-date)\n", target);
+    }
+    if (c->libShared) {
+      libSharedPath(c, target, sizeof(target));
+      printf("> Library   : %s (up-to-date)\n", target);
+    }
+    return true;
+  }
+
   List objs = {0};
   char obj[MAX_PATH];
   for (int i = 0; i < srcs->count; i++) {
@@ -235,6 +242,7 @@ static bool buildLibrary(const Config *c, const List *srcs) {
 
   if (objs.count == 0) {
     fprintf(stderr, "rbot: library requested but no object files found\n");
+    listFree(&objs);
     return false;
   }
 
@@ -245,26 +253,35 @@ static bool buildLibrary(const Config *c, const List *srcs) {
 
   if (c->libStatic) {
     libStaticPath(c, target, sizeof(target));
-    size_t n = 64;
-    for (int i = 0; i < objs.count; i++)
-      n += strlen(objs.items[i]) + 3;
-    char *cmd = malloc(n);
-    if (compilerIsMSVC(c))
-      snprintf(cmd, n, "lib /nologo /OUT:%s", target);
-    else
-      snprintf(cmd, n, "ar rcs %s", target);
-    for (int i = 0; i < objs.count; i++) {
-      strcat(cmd, " ");
-      strcat(cmd, objs.items[i]);
+    if (staticUpToDate) {
+      printf("> Library   : %s (up-to-date)\n", target);
+    } else {
+      size_t n = 64;
+      for (int i = 0; i < objs.count; i++)
+        n += strlen(objs.items[i]) + 3;
+      char *cmd = malloc(n);
+      if (compilerIsMSVC(c))
+        snprintf(cmd, n, "lib /nologo /OUT:%s", target);
+      else
+        snprintf(cmd, n, "ar rcs %s", target);
+      for (int i = 0; i < objs.count; i++) {
+        strcat(cmd, " ");
+        strcat(cmd, objs.items[i]);
+      }
+      printf("> Library   : %s\n", target);
+      staticDone = runCmd(cmd);
+      free(cmd);
+      if (!staticDone) fprintf(stderr, "rbot: static library build failed\n");
     }
-    printf("> Library   : %s\n", target);
-    staticDone = runCmd(cmd);
-    free(cmd);
-    if (!staticDone) fprintf(stderr, "rbot: static library build failed\n");
   }
 
   if (c->libShared) {
     libSharedPath(c, target, sizeof(target));
+    if (sharedUpToDate) {
+      printf("> Library   : %s (up-to-date)\n", target);
+      listFree(&objs);
+      return staticDone; /* .so dilewati; hasil .a tetap dihormati */
+    }
     size_t n = strlen(c->cc) + strlen(target) + 96;
     for (int i = 0; i < objs.count; i++)
       n += strlen(objs.items[i]) + 3;
@@ -311,37 +328,35 @@ static bool buildLibrary(const Config *c, const List *srcs) {
     if (!sharedDone) fprintf(stderr, "rbot: shared library build failed\n");
   }
 
+  listFree(&objs);
   return staticDone && sharedDone;
 }
 
-/* True bila semua varian library yang diminta sudah ada dan lebih baru
-   daripada seluruh object inputnya — fase library boleh dilewati. */
-static bool libTargetsUpToDate(const Config *c, const List *srcs) {
+/* True bila SATU varian library (statis/shared) sudah ada dan lebih baru
+   daripada seluruh object inputnya — varian itu boleh dilewati. Dipakai
+   per varian di buildLibrary: menghapus .so saja tidak meng-rebuild .a. */
+static bool libVariantUpToDate(const Config *c, bool isStatic, const List *srcs) {
   char obj[MAX_PATH];
   char target[MAX_PATH * 2];
 
-  for (int v = 0; v < 2; v++) {
-    bool isStatic = v == 0;
-    if (isStatic ? !c->libStatic : !c->libShared) continue;
-    if (isStatic)
-      libStaticPath(c, target, sizeof(target));
-    else
-      libSharedPath(c, target, sizeof(target));
+  if (isStatic)
+    libStaticPath(c, target, sizeof(target));
+  else
+    libSharedPath(c, target, sizeof(target));
 
-    int64_t mtime = fsMTimeNs(target);
-    if (mtime < 0) return false; /* target belum ada */
+  int64_t mtime = fsMTimeNs(target);
+  if (mtime < 0) return false; /* target belum ada */
 
-    for (int i = 0; i < srcs->count; i++) {
-      if (excludedSource(c, srcs->items[i])) continue;
-      if (!objectPathFor(c, srcs->items[i], obj, sizeof(obj))) continue;
-      int64_t om = fsMTimeNs(obj);
-      if (om < 0 || om > mtime) return false;
-    }
-    for (int i = 0; i < c->embCount; i++) {
-      if (!c->emb[i].enable) continue;
-      int64_t om = fsMTimeNs(c->emb[i].objectPath);
-      if (om < 0 || om > mtime) return false;
-    }
+  for (int i = 0; i < srcs->count; i++) {
+    if (excludedSource(c, srcs->items[i])) continue;
+    if (!objectPathFor(c, srcs->items[i], obj, sizeof(obj))) continue;
+    int64_t om = fsMTimeNs(obj);
+    if (om < 0 || om > mtime) return false;
+  }
+  for (int i = 0; i < c->embCount; i++) {
+    if (!c->emb[i].enable) continue;
+    int64_t om = fsMTimeNs(c->emb[i].objectPath);
+    if (om < 0 || om > mtime) return false;
   }
   return true;
 }
@@ -398,6 +413,104 @@ static bool emitVersionHeader(const Config *c, bool *changed) {
   return true;
 }
 
+/* ==================== Fingerprint build state ==================== */
+
+#define BUILD_FP_FILE ".rbot/build.fingerprint"
+
+typedef struct {
+  uint64_t compile;
+  uint64_t link;
+  uint64_t sources;
+} BuildFingerprint;
+
+static uint64_t fpBytes(uint64_t h, const void *data, size_t n) {
+  const unsigned char *p = (const unsigned char *)data;
+  for (size_t i = 0; i < n; i++) {
+    h ^= p[i];
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
+static uint64_t fpString(uint64_t h, const char *s) {
+  const unsigned char sep = 0xff;
+  if (s) h = fpBytes(h, s, strlen(s));
+  return fpBytes(h, &sep, 1);
+}
+
+static uint64_t fpList(uint64_t h, const List *list) {
+  for (int i = 0; i < list->count; i++) h = fpString(h, list->items[i]);
+  const unsigned char end = 0xfe;
+  return fpBytes(h, &end, 1);
+}
+
+static BuildFingerprint makeBuildFingerprint(const Config *c, const List *srcs) {
+  BuildFingerprint fp;
+  fp.compile = 14695981039346656037ULL;
+  fp.compile = fpString(fp.compile, c->cc);
+  fp.compile = fpString(fp.compile, c->std);
+  fp.compile = fpString(fp.compile, c->target);
+  fp.compile = fpString(fp.compile, c->outBuildDir);
+  fp.compile = fpList(fp.compile, &c->flags);
+  fp.compile = fpList(fp.compile, &c->headerPublic);
+  /* Shared library objects need -fPIC, so this changes compile output. */
+  fp.compile = fpString(fp.compile, c->libShared ? "pic" : "no-pic");
+
+  fp.sources = 14695981039346656037ULL;
+  for (int i = 0; i < srcs->count; i++) {
+    char obj[MAX_PATH];
+    fp.sources = fpString(fp.sources, srcs->items[i]);
+    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj)))
+      fp.sources = fpString(fp.sources, obj);
+  }
+
+  fp.link = 14695981039346656037ULL;
+  fp.link = fpString(fp.link, c->cc);
+  fp.link = fpString(fp.link, c->outBinaryDir);
+  fp.link = fpString(fp.link, c->outBinaryName);
+  fp.link = fpList(fp.link, &c->libraries);
+  fp.link = fpString(fp.link, c->libRequested ? "lib" : "no-lib");
+  fp.link = fpString(fp.link, c->libStatic ? "static" : "no-static");
+  fp.link = fpString(fp.link, c->libShared ? "shared" : "no-shared");
+  fp.link = fpString(fp.link, c->outLibDir);
+  fp.link = fpString(fp.link, c->outLibName);
+  for (int i = 0; i < c->embCount; i++) {
+    fp.link = fpString(fp.link, c->emb[i].enable ? "enabled" : "disabled");
+    fp.link = fpString(fp.link, c->emb[i].objectPath);
+  }
+  return fp;
+}
+
+static bool loadBuildFingerprint(BuildFingerprint *fp) {
+  FILE *f = fopen(BUILD_FP_FILE, "r");
+  if (!f) return false;
+  unsigned long long c = 0, l = 0, s = 0;
+  bool ok = fscanf(f, "%llx %llx %llx", &c, &l, &s) == 3;
+  fclose(f);
+  if (!ok) return false;
+  fp->compile = (uint64_t)c;
+  fp->link = (uint64_t)l;
+  fp->sources = (uint64_t)s;
+  return true;
+}
+
+static void saveBuildFingerprint(const BuildFingerprint *fp) {
+  mkdirs(".rbot");
+  FILE *f = fopen(BUILD_FP_FILE ".tmp", "w");
+  if (!f) return;
+  fprintf(f, "%016llx %016llx %016llx\n", (unsigned long long)fp->compile,
+          (unsigned long long)fp->link, (unsigned long long)fp->sources);
+  bool ok = fclose(f) == 0;
+  if (ok) {
+#ifdef _WIN32
+    fsRemoveFile(BUILD_FP_FILE);
+#endif
+    if (rename(BUILD_FP_FILE ".tmp", BUILD_FP_FILE) != 0) fsRemoveFile(BUILD_FP_FILE ".tmp");
+  } else {
+    fsRemoveFile(BUILD_FP_FILE ".tmp");
+  }
+}
+
 int cmdBuild(int jobs, const char *buildfilePath) {
   Config c = configDefaults();
   if (!loadConfig(&c, buildfilePath)) return 1;
@@ -424,6 +537,19 @@ int cmdBuild(int jobs, const char *buildfilePath) {
     fprintf(stderr, "rbot: no source files found in sources\n");
     return 1;
   }
+
+  BuildFingerprint currentFp = makeBuildFingerprint(&c, &srcs);
+  BuildFingerprint previousFp = {0};
+  bool haveBuildFp = loadBuildFingerprint(&previousFp);
+  bool compileConfigChanged = !haveBuildFp || previousFp.compile != currentFp.compile;
+  bool sourceSetChanged = !haveBuildFp || previousFp.sources != currentFp.sources;
+  bool linkConfigChanged = !haveBuildFp || previousFp.link != currentFp.link;
+  if (haveBuildFp && compileConfigChanged)
+    printf("> Fingerprint: compile configuration changed; rebuilding objects\n");
+  if (haveBuildFp && sourceSetChanged)
+    printf("> Fingerprint: source set changed; refreshing link inputs\n");
+  if (haveBuildFp && linkConfigChanged)
+    printf("> Fingerprint: link configuration changed; relinking\n");
 
   mkdirs(c.outBuildDir);
   mkdirs(c.outBinaryDir);
@@ -472,13 +598,21 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   List pending = {0};
   DepCache *deps = depsNew(&c);
   int headerStale = 0, headerTouched = 0;
+  /* mtime object terbesar & apakah ada object yang hilang — dikumpulkan di
+     sini agar keputusan link (no-op) tidak men-stat ulang semua object. */
+  int64_t maxObjM = -1;
+  bool anyObjMissing = false;
   for (int i = 0; i < srcs.count; i++) {
     const char *src = srcs.items[i];
     if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
     int64_t srcM = fsMTimeNs(src);
     int64_t objM = fsMTimeNs(obj); /* -1 = object belum ada (sekali stat) */
-    if (objM >= 0 && srcM >= 0 && objM >= srcM) {
-      if (depsNewestHeaderMTime(deps, src) > objM) {
+    if (objM < 0)
+      anyObjMissing = true;
+    else if (objM > maxObjM)
+      maxObjM = objM;
+    if (!compileConfigChanged && objM >= 0 && srcM >= 0 && objM >= srcM) {
+      if (depsNewestHeaderMTimeAt(deps, src, srcM) > objM) {
         /* header lebih baru — tapi mungkin hanya `touch`: cek konten */
         if (depsContentUpToDate(deps, src)) {
           headerTouched++;
@@ -528,6 +662,9 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   }
 
   if (interrupted > 0) {
+    /* Jangan percaya fingerprint lama setelah sebagian object mungkin telah
+       ditulis dengan konfigurasi baru sebelum interupsi. */
+    if (compileConfigChanged) fsRemoveFile(BUILD_FP_FILE);
     fprintf(stderr, "\nrbot: build interrupted; stopping\n");
     free(inc);
     free(wf);
@@ -535,6 +672,9 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   }
 
   if (failed > 0) {
+    /* Sebagian object bisa berhasil dibuat sebelum object lain gagal. Hapus
+       state agar build berikutnya tidak melewatkan rebuild konfigurasi penuh. */
+    if (compileConfigChanged) fsRemoveFile(BUILD_FP_FILE);
     fprintf(stderr, "\nrbot: build failed with %d error(s); linking skipped\n", failed);
     free(inc);
     free(wf);
@@ -562,16 +702,22 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   }
 #endif
 
-  bool linkNeeded = !fsFileExists(target);
+  bool linkNeeded = !fsFileExists(target) || linkConfigChanged || sourceSetChanged || compiled > 0;
   if (!linkNeeded) {
     int64_t targetMtime = fsMTimeNs(target);
     if (targetMtime < 0) {
       linkNeeded = true;
     } else {
-      for (int i = 0; i < srcs.count && !linkNeeded; i++) {
-        if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
-        int64_t objectMtime = fsMTimeNs(obj);
-        if (objectMtime < 0 || objectMtime > targetMtime) linkNeeded = true;
+      if (compiled == 0 && !anyObjMissing) {
+        /* Tidak ada object yang ditulis ulang sejak fase 1: mtime yang sudah
+           dikumpulkan masih berlaku — nol stat tambahan pada build no-op. */
+        if (maxObjM > targetMtime) linkNeeded = true;
+      } else {
+        for (int i = 0; i < srcs.count && !linkNeeded; i++) {
+          if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
+          int64_t objectMtime = fsMTimeNs(obj);
+          if (objectMtime < 0 || objectMtime > targetMtime) linkNeeded = true;
+        }
       }
 
       for (int i = 0; i < c.embCount && !linkNeeded; i++) {
@@ -590,20 +736,27 @@ int cmdBuild(int jobs, const char *buildfilePath) {
     printf("> Linking   : %s (up-to-date)\n", target);
     /* Library bisa jadi masih perlu dibangun (baru diaktifkan di
        Buildfile / terhapus manual) meski binary sudah up-to-date. */
-    if (c.libRequested && !libTargetsUpToDate(&c, &srcs) && !buildLibrary(&c, &srcs)) {
+    if (c.libRequested && !buildLibrary(&c, &srcs)) {
       free(inc);
       free(wf);
       return 1;
     }
-    printLibSummary(&c);
     free(inc);
     free(wf);
     /* Build sukses: rekam snapshot hash source + dependensi agar build
-       berikutnya bisa membedakan `touch` (isi sama) dari perubahan konten. */
-    for (int i = 0; i < srcs.count; i++)
-      depsRecordUpdate(deps, srcs.items[i]);
+       berikutnya bisa membedakan `touch` (isi sama) dari perubahan konten.
+       No-op murni (tidak ada kompilasi, tidak ada yang berubah sejak rekam
+       terakhir) melewatinya — DFS + ribuan snapshotSet murni CPU sia-sia
+       pada project besar. depsSave tetap dipanggil: verifikasi konten
+       (kasus touch) memperbarui mtime snapshot, dan depsSave sendiri murah
+       bila tidak ada yang berubah. */
+    if (compiled > 0 || depsSnapshotIncomplete(deps)) {
+      for (int i = 0; i < srcs.count; i++)
+        depsRecordUpdate(deps, srcs.items[i]);
+    }
     depsSave(deps);
     depsFree(deps);
+    saveBuildFingerprint(&currentFp);
     printf("\n> Summary\n");
     long long sizeBytes = fsFileSize(target);
     double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
@@ -687,13 +840,15 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   if (!buildLibrary(&c, &srcs)) {
     return 1;
   }
-  printLibSummary(&c);
 
   /* Build sukses: rekam snapshot hash (lihat jalur up-to-date di atas). */
-  for (int i = 0; i < srcs.count; i++)
-    depsRecordUpdate(deps, srcs.items[i]);
+  if (compiled > 0 || depsSnapshotIncomplete(deps)) {
+    for (int i = 0; i < srcs.count; i++)
+      depsRecordUpdate(deps, srcs.items[i]);
+  }
   depsSave(deps);
   depsFree(deps);
+  saveBuildFingerprint(&currentFp);
 
   long long sizeBytes = fsFileSize(target);
   double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;

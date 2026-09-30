@@ -68,7 +68,7 @@ int rbotRun(int argc, const char *argv[]) {
      Buildfile hasil konversi tetap ada. */
   enum { CONV_NONE, CONV_DELETE, CONV_KEEP } conv = CONV_NONE;
   const char *convFile = NULL;
-  int jobs = 1;
+  int jobs = 0; /* 0 = otomatis: jumlah core CPU (di bawah); -j1 = serial */
   const char *cmd = NULL;
   const char *buildfile = "Buildfile"; /* -f <file> untuk memakai yang lain */
 
@@ -123,6 +123,7 @@ int rbotRun(int argc, const char *argv[]) {
 
     if (!cmd) cmd = a; /* command pertama non-opsi */
   }
+  if (jobs < 1) jobs = cpuCount(); /* tanpa -j: paralel sebanyak core, seperti ninja */
 
   /* -f menunjuk file di luar cwd (mis. `rbot -f ../proj/Buildfile.example`):
      masuk ke direktori file itu dulu — sources/headers/output di Buildfile

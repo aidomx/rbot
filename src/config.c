@@ -1,6 +1,7 @@
 #include "config.h"
 
 #include <stdint.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -447,11 +448,11 @@ static bool cacheWriteList(FILE *fp, const List *l) {
 
 static bool cacheReadList(FILE *fp, List *l) {
   uint32_t count = 0;
-  if (!cacheReadU32(fp, &count) || count > MAX_LIST) return false;
+  if (!cacheReadU32(fp, &count) || count > INT_MAX) return false;
   for (uint32_t i = 0; i < count; i++) {
     char item[MAX_PATH * 2];
     if (!cacheReadString(fp, item, sizeof(item))) return false;
-    listAdd(l, item);
+    if (!listAdd(l, item)) return false;
   }
   return true;
 }

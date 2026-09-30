@@ -14,10 +14,13 @@
 #include <shellapi.h>
 #else
 #include <dirent.h>
+#include <spawn.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+extern char **environ;
 #endif
 
 /* ==================== Util path ==================== */
@@ -506,10 +509,88 @@ bool procSetForeground(bool foreground) {
 
 bool procInterrupted(void) { return g_wantInterrupt != 0; }
 
+/*
+ * Jalankan command langsung (tanpa `/bin/sh -c`) bila command "polos": hanya
+ * kata dipisah spasi, tanpa quote/variabel/glob/redirect/pipe — persis bentuk
+ * command kompilasi & link yang disusun rbot. Menghemat SATU exec per job
+ * (shell) dan memakai posix_spawn (vfork-style, tanpa menyalin page table
+ * proses induk); keduanya mahal di proot/Termux. Return pid, atau -1 bila
+ * command butuh shell / spawn gagal — pemanggil jatuh ke jalur fork+sh lama
+ * sehingga perilaku tidak berubah untuk kasus tepi.
+ */
+static bool cmdIsPlain(const char *cmd) {
+  for (const char *p = cmd; *p; p++) {
+    switch (*p) {
+      case '"': case '\'': case '\\': case '$': case '`': case ';': case '&': case '|':
+      case '<': case '>': case '(': case ')': case '*': case '?': case '[': case ']':
+      case '{': case '}': case '~': case '#': case '!': case '\n': case '\r':
+        return false;
+      default:
+        break;
+    }
+  }
+  return true;
+}
+
+static pid_t spawnDirect(const char *cmd, bool ownGroup) {
+  if (!cmdIsPlain(cmd)) return -1;
+
+  size_t len = strlen(cmd);
+  char *buf = malloc(len + 1);
+  char **argv = malloc((len / 2 + 2) * sizeof(char *));
+  if (!buf || !argv) {
+    free(buf);
+    free(argv);
+    return -1;
+  }
+  memcpy(buf, cmd, len + 1);
+
+  int argc = 0;
+  for (char *p = buf; *p;) {
+    while (*p == ' ' || *p == '\t') p++;
+    if (!*p) break;
+    argv[argc++] = p;
+    while (*p && *p != ' ' && *p != '\t') p++;
+    if (*p) *p++ = '\0';
+  }
+  argv[argc] = NULL;
+
+  pid_t pid = -1;
+  /* token pertama berbentuk VAR=nilai = assignment milik shell */
+  if (argc > 0 && !strchr(argv[0], '=')) {
+    posix_spawnattr_t at;
+    if (posix_spawnattr_init(&at) == 0) {
+      sigset_t defs;
+      sigemptyset(&defs);
+      sigaddset(&defs, SIGINT);
+      sigaddset(&defs, SIGQUIT);
+      sigaddset(&defs, SIGHUP);
+      sigaddset(&defs, SIGTERM);
+      short flags = POSIX_SPAWN_SETSIGDEF; /* setara reset SIG_DFL di child lama */
+      posix_spawnattr_setsigdefault(&at, &defs);
+      if (ownGroup) {
+        flags |= POSIX_SPAWN_SETPGROUP; /* setara setpgid(0, 0) */
+        posix_spawnattr_setpgroup(&at, 0);
+      }
+      posix_spawnattr_setflags(&at, flags);
+      pid_t np;
+      if (posix_spawnp(&np, argv[0], NULL, &at, argv, environ) == 0) pid = np;
+      posix_spawnattr_destroy(&at);
+    }
+  }
+  free(argv);
+  free(buf);
+  return pid;
+}
+
 bool procStart(const char *cmd, ProcHandle *out) {
   if (!cmd || !*cmd || !out) return false;
 
-  pid_t pid = fork();
+  /* Job paralel selalu di process group sendiri. */
+  pid_t pid = spawnDirect(cmd, true);
+  if (pid >= 0) goto started;
+
+  pid = fork();
   if (pid < 0) return false;
 
   if (pid == 0) {
@@ -532,6 +613,7 @@ bool procStart(const char *cmd, ProcHandle *out) {
      (EACCES setelah exec diabaikan secara diam). */
   setpgid(pid, pid);
 
+started:
   out->pid = pid;
   out->finished = false;
   out->ok = false;
@@ -613,7 +695,8 @@ bool procRun(const char *cmd) {
   if (!cmd || !*cmd) return false;
 
   bool separateGroup = !g_foregroundMode;
-  pid_t pid = fork();
+  pid_t pid = spawnDirect(cmd, separateGroup);
+  if (pid < 0) pid = fork();
   if (pid < 0) return false;
 
   if (pid == 0) {
@@ -764,6 +847,8 @@ bool fsRemoveTree(const char *path) {
   for (int i = 0; i < dirs.count; i++) {
     if (!fsRemoveTree(dirs.items[i])) ok = false;
   }
+  listFree(&dirs);
+  listFree(&files);
   return ok && rmdir(path) == 0;
 }
 
@@ -775,9 +860,23 @@ void fsListDir(const char *dir, List *dirs, List *files) {
     if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
     char path[MAX_PATH];
     snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
-    struct stat st;
-    if (stat(path, &st) != 0) continue;
-    if (S_ISDIR(st.st_mode)) {
+    bool isDir;
+#ifdef DT_DIR
+    /* d_type sudah diberikan readdir: tanpa stat per entri (satu syscall per
+       file/direktori yang dipindai). DT_UNKNOWN/DT_LNK/lainnya jatuh ke stat
+       agar symlink tetap diikuti seperti sebelumnya. */
+    if (ent->d_type == DT_DIR) {
+      isDir = true;
+    } else if (ent->d_type == DT_REG) {
+      isDir = false;
+    } else
+#endif
+    {
+      struct stat st;
+      if (stat(path, &st) != 0) continue;
+      isDir = S_ISDIR(st.st_mode);
+    }
+    if (isDir) {
       if (dirs) listAdd(dirs, path);
     } else {
       if (files) listAdd(files, path);
