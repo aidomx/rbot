@@ -16,7 +16,7 @@ static int g_ldAvailable = -1;
 /* Cek apakah 'ld' yang ada di PATH adalah GNU ld (bukan LLD/LLD-compatible).
  * GNU ld mendukung '-r -b binary', LLD tidak. */
 static bool isGnuLd(void) {
-  FILE *fp = popen("ld --version 2>&1", "r");
+  FILE *fp = popenRB("ld --version 2>&1");
   if (!fp) return false;
 
   char buf[512];
@@ -34,7 +34,7 @@ static bool isGnuLd(void) {
       /* Jangan break — lanjut baca untuk pastikan tidak ada "LLD" di baris berikutnya */
     }
   }
-  pclose(fp);
+  pcloseRB(fp);
   return gnu;
 }
 
@@ -279,24 +279,40 @@ static bool buildEmbeddedEntry(const Config *c, const EmbeddedEntry *e) {
   }
 
   if (!embArchiveFresh(e)) {
-    mkparent(e->archivePath);
+    /* Arsip ditulis ke file SEMENTARA di luar e->src lalu di-rename: tar
+       yang mengarsipkan direktorinya sendiri membaca file yang sedang
+       ditulis -> "file changed as we read it" (kasus dir = modules/
+       tempat arsip ditaruh). Temp di cwd '.' dijamin di luar src
+       relatif mana pun (src tidak pernah '.'). */
+    char tmpArchive[MAX_PATH * 2 + 32];
+    snprintf(tmpArchive, sizeof(tmpArchive), ".rbot-embed-%s.tmp", e->name);
+    fsRemoveFile(tmpArchive);
     bool ok;
     if (e->tar) {
       /* tar dengan gzip opsional (-z) saat with.ext = gz */
       const char *z = (strcmp(e->ext, "gz") == 0) ? "z" : "";
-      char *cmd = malloc(strlen(e->archivePath) + strlen(e->src) + 64);
-      sprintf(cmd, "tar c%sf %s -C %s .", z, e->archivePath, e->src);
+      char *cmd = malloc(strlen(tmpArchive) + strlen(e->src) + 64);
+      sprintf(cmd, "tar c%sf %s -C %s .", z, tmpArchive, e->src);
       ok = runCmd(cmd);
       free(cmd);
     } else {
       /* tanpa tar: gzip langsung pohon direktorinya (with.ext = gz) */
-      char *cmd = malloc(strlen(e->archivePath) + strlen(e->src) + 64);
-      sprintf(cmd, "tar czf %s -C %s .", e->archivePath, e->src);
+      char *cmd = malloc(strlen(tmpArchive) + strlen(e->src) + 64);
+      sprintf(cmd, "tar czf %s -C %s .", tmpArchive, e->src);
       ok = runCmd(cmd);
       free(cmd);
     }
     if (!ok) {
+      fsRemoveFile(tmpArchive);
       fprintf(stderr, "rbot: %s: failed to archive %s\n", e->name, e->src);
+      return false;
+    }
+    mkparent(e->archivePath);
+    fsRemoveFile(e->archivePath);
+    if (rename(tmpArchive, e->archivePath) != 0) {
+      fsRemoveFile(tmpArchive);
+      fprintf(stderr, "rbot: %s: cannot move archive into place (%s)\n", e->name,
+              e->archivePath);
       return false;
     }
   }

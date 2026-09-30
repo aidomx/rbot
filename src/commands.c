@@ -1,7 +1,7 @@
 #include "commands.h"
 
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,8 +20,10 @@ void showHelp(void) {
   printf("> rbot [-f <file>] [-jN] <command>\n\n");
   printf("%-8s%s\n", "", "- build project from Buildfile (default, no command needed)");
   printf("%-8s%s\n", "-f <f>", "- pakai <f> sebagai Buildfile (default: Buildfile)");
-  printf("%-8s%s\n", "-xf <n>", "- konversi build.ninja <n> -> Buildfile sementara, lalu jalankan command");
-  printf("%-8s%s\n", "-xcf <n>", "- sama seperti -xf, tapi Buildfile hasil konversi tetap ada");
+  printf("%-8s%s\n", "-xf <n>",
+         "- konversi build.ninja <n> -> Buildfile.xf.tmp (sementara; Buildfile tak disentuh)");
+  printf("%-8s%s\n", "-xcf <n>",
+         "- sama seperti -xf, tapi hasil konversi ditulis ke Buildfile (konfirmasi bila ada)");
   printf("%-8s%s\n", "-j[N]", "- build paralel, N job (tanpa -j: jumlah core CPU; -j1 = serial)");
   printf("%-8s%s\n", "init", "- create a default Buildfile if none exists yet");
   printf("%-8s%s\n", "clean", "- clean build artifacts (Buildfile: clean)");
@@ -380,7 +382,8 @@ static bool emitVersionHeader(const Config *c, bool *changed) {
   while (n && (raw[n - 1] == '\n' || raw[n - 1] == '\r' || raw[n - 1] == ' ' || raw[n - 1] == '\t'))
     raw[--n] = '\0';
   char *s = raw;
-  while (*s == ' ' || *s == '\t') s++;
+  while (*s == ' ' || *s == '\t')
+    s++;
   if (!*s) return true; /* kosong: jangan terbitkan apa pun */
 
   char body[192];
@@ -439,7 +442,8 @@ static uint64_t fpString(uint64_t h, const char *s) {
 }
 
 static uint64_t fpList(uint64_t h, const List *list) {
-  for (int i = 0; i < list->count; i++) h = fpString(h, list->items[i]);
+  for (int i = 0; i < list->count; i++)
+    h = fpString(h, list->items[i]);
   const unsigned char end = 0xfe;
   return fpBytes(h, &end, 1);
 }
@@ -460,8 +464,7 @@ static BuildFingerprint makeBuildFingerprint(const Config *c, const List *srcs) 
   for (int i = 0; i < srcs->count; i++) {
     char obj[MAX_PATH];
     fp.sources = fpString(fp.sources, srcs->items[i]);
-    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj)))
-      fp.sources = fpString(fp.sources, obj);
+    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) fp.sources = fpString(fp.sources, obj);
   }
 
   fp.link = 14695981039346656037ULL;
@@ -511,7 +514,287 @@ static void saveBuildFingerprint(const BuildFingerprint *fp) {
   }
 }
 
+/* ==================== Fast no-op snapshot ==================== */
+#define BUILD_STATE_FILE ".rbot/build.state"
+#define BUILD_STATE_MAGIC "RBOTFAST2"
+
+typedef struct {
+  char kind;
+  char path[MAX_PATH];
+  int64_t mtime;
+  long long size;
+} FastStamp;
+
+typedef struct {
+  char cwd[MAX_PATH];
+  char buildfile[MAX_PATH];
+  int64_t buildfileMtime;
+  long long buildfileSize;
+  char target[MAX_PATH * 2];
+  int64_t targetMtime;
+  long long targetSize;
+  int compiled;
+  int skipped;
+  int count;
+  FastStamp *stamps;
+  /* Ringkasan library: no-op berikutnya tetap menampilkan status lib. */
+  bool libRequested, libStaticUp, libSharedUp;
+  char libStaticPath[MAX_PATH * 2];
+  char libSharedPath[MAX_PATH * 2];
+  long long libStaticSize, libSharedSize;
+} FastState;
+
+static void fastStateFree(FastState *s) {
+  free(s->stamps);
+  memset(s, 0, sizeof(*s));
+}
+
+static bool fastStampAdd(List *paths, const char *path) {
+  for (int i = 0; i < paths->count; i++)
+    if (strcmp(paths->items[i], path) == 0) return true;
+  return listAdd(paths, path);
+}
+
+static void fastCollectTree(const char *dir, List *paths) {
+  if (!fsDirExists(dir)) return;
+  fastStampAdd(paths, dir);
+  List dirs = {0}, files = {0};
+  fsListDir(dir, &dirs, &files);
+  for (int i = 0; i < files.count; i++)
+    fastStampAdd(paths, files.items[i]);
+  for (int i = 0; i < dirs.count; i++)
+    fastCollectTree(dirs.items[i], paths);
+  listFree(&dirs);
+  listFree(&files);
+}
+
+static bool fastStateLoad(FastState *s) {
+  memset(s, 0, sizeof(*s));
+  FILE *f = fopen(BUILD_STATE_FILE, "r");
+  if (!f) return false;
+  char magic[32];
+  long long bfm = 0, tm = 0;
+  int libReq = 0, libSt = 0, libSh = 0;
+  if (fscanf(f, "%31s", magic) != 1 || strcmp(magic, BUILD_STATE_MAGIC) != 0 ||
+      fscanf(f,
+             "%1023s %1023s %lld %lld %2047s %lld %lld %d %d %d %d %d %d %2047s %2047s %lld %lld",
+             s->cwd, s->buildfile, &bfm, &s->buildfileSize, s->target, &tm, &s->targetSize,
+             &s->compiled, &s->skipped, &s->count, &libReq, &libSt, &libSh, s->libStaticPath,
+             s->libSharedPath, &s->libStaticSize, &s->libSharedSize) != 17 ||
+      s->count < 0 || s->count > 200000) {
+    fclose(f);
+    return false;
+  }
+  s->buildfileMtime = (int64_t)bfm;
+  s->targetMtime = (int64_t)tm;
+  s->libRequested = libReq != 0;
+  s->libStaticUp = libSt != 0;
+  s->libSharedUp = libSh != 0;
+  /* placeholder "-" = varian library tidak aktif (path kosong tidak bisa
+     dibaca %s) */
+  if (strcmp(s->libStaticPath, "-") == 0) s->libStaticPath[0] = '\0';
+  if (strcmp(s->libSharedPath, "-") == 0) s->libSharedPath[0] = '\0';
+  s->stamps = calloc((size_t)s->count, sizeof(FastStamp));
+  if (s->count && !s->stamps) {
+    fclose(f);
+    return false;
+  }
+  for (int i = 0; i < s->count; i++) {
+    long long mt = 0, sz = 0;
+    if (fscanf(f, " %c %lld %lld %4095s", &s->stamps[i].kind, &mt, &sz, s->stamps[i].path) != 4) {
+      fclose(f);
+      fastStateFree(s);
+      return false;
+    }
+    s->stamps[i].mtime = (int64_t)mt;
+    s->stamps[i].size = sz;
+  }
+  fclose(f);
+  return true;
+}
+
+static bool fastStateValid(const char *buildfilePath) {
+  FastState s;
+  if (!fastStateLoad(&s)) return false;
+  char cwd[MAX_PATH];
+  bool ok =
+      fsGetCwd(cwd, sizeof(cwd)) && strcmp(cwd, s.cwd) == 0 &&
+      strcmp(buildfilePath && *buildfilePath ? buildfilePath : "Buildfile", s.buildfile) == 0 &&
+      fsMTimeNs(s.buildfile) == s.buildfileMtime && fsFileSize(s.buildfile) == s.buildfileSize &&
+      fsMTimeNs(s.target) == s.targetMtime && fsFileSize(s.target) == s.targetSize;
+  for (int i = 0; ok && i < s.count; i++) {
+    FastStamp *st = &s.stamps[i];
+    int64_t currentMtime = fsMTimeNs(st->path);
+    if (st->kind == 'M') {
+      if (currentMtime >= 0) {
+        ok = false;
+        break;
+      }
+      continue;
+    }
+    if (currentMtime != st->mtime) {
+      ok = false;
+      break;
+    }
+    if (st->kind == 'F' && fsFileSize(st->path) != st->size) {
+      ok = false;
+      break;
+    }
+  }
+  if (ok) {
+    printf("> Build with cached state (fingerprint unchanged)\n");
+    printf("> Linking   : %s (up-to-date)\n", s.target);
+    if (s.libRequested) {
+      if (s.libStaticPath[0])
+        printf("> Library   : %s%s\n", s.libStaticPath, s.libStaticUp ? " (up-to-date)" : "");
+      if (s.libSharedPath[0])
+        printf("> Library   : %s%s\n", s.libSharedPath, s.libSharedUp ? " (up-to-date)" : "");
+    }
+    printf("\n> Summary\n");
+    printf("Target   : %s\n", s.target);
+    printf("Size     : %.1fKB\n", s.targetSize > 0 ? (double)s.targetSize / 1024.0 : 0);
+    if (s.libRequested) {
+      if (s.libStaticPath[0])
+        printf("Library  : %s (%.1fKB)\n", s.libStaticPath,
+               s.libStaticSize > 0 ? (double)s.libStaticSize / 1024.0 : 0);
+      if (s.libSharedPath[0])
+        printf("Library  : %s (%.1fKB)\n", s.libSharedPath,
+               s.libSharedSize > 0 ? (double)s.libSharedSize / 1024.0 : 0);
+    }
+    printf("Compiled : %d\n", s.compiled);
+    printf("Skipped  : %d\n", s.skipped);
+    printf("Status   : Success\n");
+  }
+  fastStateFree(&s);
+  return ok;
+}
+
+static void fastStateSave(const Config *c, const List *srcs, const char *target,
+                          const char *buildfilePath) {
+  /* Fast path hanya aman bila root build sama dengan cwd. Untuk root khusus,
+     gunakan jalur normal sampai tersedia normalisasi path absolut. */
+  if (strcmp(c->root, ".") != 0) {
+    fsRemoveFile(BUILD_STATE_FILE);
+    return;
+  }
+  char cwd[MAX_PATH];
+  if (!fsGetCwd(cwd, sizeof(cwd))) return;
+  const char *bf = buildfilePath && *buildfilePath ? buildfilePath : "Buildfile";
+  int64_t bfm = fsMTimeNs(bf);
+  long long bfs = fsFileSize(bf);
+  int64_t tm = fsMTimeNs(target);
+  long long ts = fsFileSize(target);
+  if (bfm < 0 || tm < 0 || bfs < 0 || ts < 0) return;
+  /* Format cache is whitespace-delimited; disable it for paths with spaces. */
+  if (strpbrk(cwd, " \t\r\n") || strpbrk(bf, " \t\r\n") || strpbrk(target, " \t\r\n")) return;
+
+  /* Library: status up-to-date saat build sukses selesai — ditampilkan
+     lagi pada no-op berikutnya (dulu informasi ini hilang di fast path). */
+  char staticLib[MAX_PATH * 2] = {0}, sharedLib[MAX_PATH * 2] = {0};
+  bool staticUp = true, sharedUp = true;
+  long long staticSz = 0, sharedSz = 0;
+  if (c->libRequested) {
+    if (c->libStatic) {
+      libStaticPath(c, staticLib, sizeof(staticLib));
+      staticUp = libVariantUpToDate(c, true, srcs);
+      long long s1 = fsFileSize(staticLib);
+      if (s1 < 0) return; /* lib diwajibkan tapi belum ada — jangan simpan */
+      staticSz = s1;
+    }
+    if (c->libShared) {
+      libSharedPath(c, sharedLib, sizeof(sharedLib));
+      sharedUp = libVariantUpToDate(c, false, srcs);
+      long long s2 = fsFileSize(sharedLib);
+      if (s2 < 0) return;
+      sharedSz = s2;
+    }
+  }
+
+  List paths = {0};
+  for (int i = 0; i < c->sources.count; i++)
+    fastCollectTree(c->sources.items[i], &paths);
+  List incDirs = {0};
+  includeDirs(c, &incDirs);
+  for (int i = 0; i < incDirs.count; i++) {
+    const char *d = incDirs.items[i];
+    if (d && *d && strcmp(d, ".") != 0) fastCollectTree(d, &paths);
+  }
+  listFree(&incDirs);
+  /* Include file inputs that are not necessarily inside source/header roots. */
+  fastStampAdd(&paths, bf);
+  fastStampAdd(&paths, ".rbot-version");
+  if (compdbEnabled(c) && fsFileExists("compile_commands.json"))
+    fastStampAdd(&paths, "compile_commands.json");
+  for (int i = 0; i < srcs->count; i++) {
+    char obj[MAX_PATH];
+    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) fastStampAdd(&paths, obj);
+  }
+  for (int i = 0; i < c->embCount; i++)
+    if (c->emb[i].enable) fastStampAdd(&paths, c->emb[i].objectPath);
+  /* Library masuk stamp seperti file biasa ('F'): berubah -> fast path
+     batal dan jalur normal meng-rebuild varian yang perlu (per-varian). */
+  if (staticLib[0]) fastStampAdd(&paths, staticLib);
+  if (sharedLib[0]) fastStampAdd(&paths, sharedLib);
+
+  FastStamp *stamps = calloc((size_t)paths.count, sizeof(FastStamp));
+  if (paths.count && !stamps) {
+    listFree(&paths);
+    return;
+  }
+  int count = 0;
+  bool safePaths = true;
+  for (int i = 0; i < paths.count; i++) {
+    const char *path = paths.items[i];
+    if (strlen(path) >= sizeof(stamps[count].path) || strpbrk(path, " \t\r\n")) {
+      safePaths = false;
+      break;
+    }
+    /* Satu stat per path: mtime + ukuran sekaligus (fsStampNsSize). */
+    int64_t mt = 0;
+    long long sz = 0;
+    if (!fsStampNsSize(path, &mt, &sz)) {
+      mt = -1;
+      sz = 0;
+    }
+    stamps[count].kind = mt < 0 ? 'M' : (fsDirExists(path) ? 'D' : 'F');
+    snprintf(stamps[count].path, sizeof(stamps[count].path), "%s", path);
+    stamps[count].mtime = mt;
+    stamps[count].size = stamps[count].kind == 'F' ? sz : 0;
+    count++;
+  }
+  if (!safePaths) {
+    free(stamps);
+    listFree(&paths);
+    return;
+  }
+  listFree(&paths);
+  mkdirs(".rbot");
+  FILE *f = fopen(BUILD_STATE_FILE ".tmp", "w");
+  if (!f) {
+    free(stamps);
+    return;
+  }
+  fprintf(f, "%s\n%s %s %lld %lld %s %lld %lld %d %d %d %d %d %d %s %s %lld %lld\n",
+          BUILD_STATE_MAGIC, cwd, bf, (long long)bfm, bfs, target, (long long)tm, ts, 0,
+          srcs->count, count, c->libRequested ? 1 : 0, staticUp ? 1 : 0, sharedUp ? 1 : 0,
+          staticLib[0] ? staticLib : "-", sharedLib[0] ? sharedLib : "-", staticSz, sharedSz);
+  for (int i = 0; i < count; i++)
+    fprintf(f, "%c %lld %lld %s\n", stamps[i].kind, (long long)stamps[i].mtime, stamps[i].size,
+            stamps[i].path);
+  bool ok = fclose(f) == 0;
+  free(stamps);
+  if (ok) {
+#ifdef _WIN32
+    fsRemoveFile(BUILD_STATE_FILE);
+#endif
+    if (rename(BUILD_STATE_FILE ".tmp", BUILD_STATE_FILE) != 0)
+      fsRemoveFile(BUILD_STATE_FILE ".tmp");
+  } else
+    fsRemoveFile(BUILD_STATE_FILE ".tmp");
+}
+
 int cmdBuild(int jobs, const char *buildfilePath) {
+  if (fastStateValid(buildfilePath)) return 0;
   Config c = configDefaults();
   if (!loadConfig(&c, buildfilePath)) return 1;
   if (!resolveCompiler(&c)) return 1;
@@ -765,6 +1048,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
     printf("Compiled : %d\n", compiled);
     printf("Skipped  : %d\n", skipped);
     printf("Status   : Success\n");
+    fastStateSave(&c, &srcs, target, buildfilePath);
     return 0;
   }
 
@@ -793,11 +1077,12 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   if (compilerIsMSVC(&c)) {
     /* MSVC: object dikumpulkan dulu, opsi linker setelah token /link.
        /OUT menentukan target; link.exe untuk EXE tanpa /LD tidak menulis
-       .lib/.exp sampingan, jadi tidak perlu /IMPLIB. */
-    char target[MAX_PATH * 2];
-    snprintf(target, sizeof(target), "%s/%s", c.outBinaryDir, c.outBinaryName);
+       .lib/.exp sampingan, jadi tidak perlu /IMPLIB. (Nama variabel beda
+       dari `target` luar — MSVC /W4 memperingatkan shadowing, C4456.) */
+    char linkTarget[MAX_PATH * 2];
+    snprintf(linkTarget, sizeof(linkTarget), "%s/%s", c.outBinaryDir, c.outBinaryName);
     strcat(cmd, " /link /nologo /INCREMENTAL:NO /OUT:");
-    strcat(cmd, target);
+    strcat(cmd, linkTarget);
     for (int i = 0; i < c.libraries.count; i++) {
       const char *lib = c.libraries.items[i];
       if (lib[0] == '-') lib++; /* -lssl -> ssl */
@@ -859,6 +1144,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   printf("Compiled : %d\n", compiled);
   printf("Skipped  : %d\n", skipped);
   printf("Status   : Success\n");
+  fastStateSave(&c, &srcs, target, buildfilePath);
   return 0;
 }
 
@@ -876,13 +1162,26 @@ int cmdClean(const char *buildfilePath) {
       printf("> Removed   : %s (sebagian gagal dihapus)\n", c.outBuildDir);
     any = true;
   }
-  /*if (c.cleanBuildDir && c.libRequested && safeRelative(c.outLibDir)) {*/
-  /*if (fsRemoveTree(c.outLibDir))*/
-  /*printf("> Removed   : %s\n", c.outLibDir);*/
-  /*else*/
-  /*printf("> Removed   : %s (sebagian gagal dihapus)\n", c.outLibDir);*/
-  /*any = true;*/
-  /*}*/
+  /* Hapus FILE library (.a/.so/.dll), bukan foldernya — dulu fsRemoveTree
+     pada outLibDir menghapus folder lib/ sekaligus isinya. Folder tetap
+     ada; build berikutnya membuat ulang isinya bila diminta. */
+  if (c.cleanBuildDir && c.libRequested && safeRelative(c.outLibDir)) {
+    char libPath[MAX_PATH * 2];
+    if (c.libStatic) {
+      libStaticPath(&c, libPath, sizeof(libPath));
+      if (fsRemoveFile(libPath)) {
+        printf("> Removed   : %s\n", libPath);
+        any = true;
+      }
+    }
+    if (c.libShared) {
+      libSharedPath(&c, libPath, sizeof(libPath));
+      if (fsRemoveFile(libPath)) {
+        printf("> Removed   : %s\n", libPath);
+        any = true;
+      }
+    }
+  }
   if (c.cleanCompileCommands && fsFileExists("compile_commands.json")) {
     fsRemoveFile("compile_commands.json");
     printf("> Removed   : compile_commands.json\n");

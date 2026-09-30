@@ -26,6 +26,11 @@ const char *rbotVersion(void) {
 #endif
 }
 
+/* -xf TIDAK pernah menulis Buildfile: konversi masuk file sementara ini
+   (dihapus setelah command selesai), sehingga Buildfile project tak mungkin
+   tertimpa oleh hasil konversi. */
+#define XF_TMP "Buildfile.xf.tmp"
+
 /* ---------- Opsi CLI: -jN / -j / --jobs=N ---------- */
 
 static bool parseJobsArg(const char *inlineVal, bool hasInline, int *outJobs, const char **err) {
@@ -125,6 +130,21 @@ int rbotRun(int argc, const char *argv[]) {
   }
   if (jobs < 1) jobs = cpuCount(); /* tanpa -j: paralel sebanyak core, seperti ninja */
 
+  /* build.ninja relatif dievaluasi terhadap cwd PEMANGGIL — absolut-kan
+     sebelum chdir -f di bawah. */
+  char convAbs[MAX_PATH * 2] = {0};
+  if (conv != CONV_NONE) {
+    if (convFile[0] == '/') {
+      snprintf(convAbs, sizeof(convAbs), "%s", convFile);
+    } else {
+      char cwd0[MAX_PATH];
+      if (fsGetCwd(cwd0, sizeof(cwd0)))
+        snprintf(convAbs, sizeof(convAbs), "%s/%s", cwd0, convFile);
+      else
+        snprintf(convAbs, sizeof(convAbs), "%s", convFile);
+    }
+  }
+
   /* -f menunjuk file di luar cwd (mis. `rbot -f ../proj/Buildfile.example`):
      masuk ke direktori file itu dulu — sources/headers/output di Buildfile
      relatif terhadap lokasinya, bukan cwd pemanggil (gaya make -C /
@@ -148,16 +168,29 @@ int rbotRun(int argc, const char *argv[]) {
     }
   }
 
-  /* Konversi build.ninja -> Buildfile (di direktori file itu, setelah chdir). */
+  /* Konversi build.ninja -> Buildfile (di direktori kerja saat ini).
+     -xf  : selalu ke file SEMENTARA — Buildfile eksisting tidak disentuh.
+     -xcf : menulis Buildfile, tapi konfirmasi dulu bila sudah ada. */
   if (conv != CONV_NONE) {
     char err[256];
-    if (fsFileExists("Buildfile"))
-      printf("> Overwrite  : Buildfile (hasil konversi %s)\n", convFile);
-    if (!ninjaToBuildfile(convFile, "Buildfile", err, sizeof(err))) {
+    const char *dst = (conv == CONV_DELETE) ? XF_TMP : "Buildfile";
+    if (conv == CONV_KEEP && fsFileExists(dst)) {
+      printf("> '%s' sudah ada. Timpa dengan hasil konversi %s? [y/N] ", dst, convAbs);
+      fflush(stdout);
+      char ans[16] = {0};
+      if (!fgets(ans, sizeof(ans), stdin)) ans[0] = '\0';
+      if (ans[0] != 'y' && ans[0] != 'Y') {
+        printf("> Dibatalkan : %s tidak diubah\n", dst);
+        return 0;
+      }
+    }
+    if (!ninjaToBuildfile(convAbs, dst, err, sizeof(err))) {
       fprintf(stderr, "rbot: %s\n", err);
       return 1;
     }
-    buildfile = "Buildfile";
+    if (conv == CONV_DELETE)
+      printf("> Temporary  : %s (dihapus setelah command; Buildfile tak disentuh)\n", dst);
+    buildfile = dst;
   }
 
   int rc;
@@ -177,10 +210,11 @@ int rbotRun(int argc, const char *argv[]) {
     return 1;
   }
 
-  /* -xf: Buildfile sementara dihapus setelah command selesai. */
-  if (conv == CONV_DELETE && strcmp(buildfile, "Buildfile") == 0) {
-    fsRemoveFile("Buildfile");
-    printf("> Removed    : Buildfile (sementara, dari %s)\n", convFile);
+  /* -xf: hapus file sementara setelah command selesai. Buildfile asli
+     tidak pernah ditulis, jadi tidak ada yang berisiko hilang. */
+  if (conv == CONV_DELETE) {
+    fsRemoveFile(XF_TMP);
+    printf("> Removed    : %s (sementara, dari %s)\n", XF_TMP, convAbs);
   }
   return rc;
 }

@@ -60,6 +60,21 @@ bool parseBool(const char *s, bool *out) {
   return false;
 }
 
+/* ==================== popen/pclose portabel ==================== */
+
+#ifdef _WIN32
+/* MSVC: tidak ada popen/pclose (POSIX); _popen/_pclose setara (cmd.exe). */
+FILE *popenRB(const char *cmd) { return _popen(cmd, "r"); }
+void pcloseRB(FILE *fp) {
+  if (fp) _pclose(fp);
+}
+#else
+FILE *popenRB(const char *cmd) { return popen(cmd, "r"); }
+void pcloseRB(FILE *fp) {
+  if (fp) pclose(fp);
+}
+#endif
+
 /* ==================== Filesystem helpers ==================== */
 
 void mkdirs(const char *path) {

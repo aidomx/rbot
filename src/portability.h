@@ -91,6 +91,8 @@ bool fsDirExists(const char *path);
 time_t fsMTime(const char *path); /* (time_t)-1 bila tidak ada */
 int64_t fsMTimeNs(const char *path); /* -1 bila tidak ada */
 long long fsFileSize(const char *path);
+/* mtime ns + size dalam SATU stat (dipakai fastState validasi massal). */
+bool fsStampNsSize(const char *path, int64_t *mtimeNs, long long *size);
 bool fsNewerThan(const char *a, const char *b);
 bool fsRemoveFile(const char *path);
 bool fsRemoveTree(const char *path); /* rm -rf portabel */
