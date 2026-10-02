@@ -1,5 +1,8 @@
 #include "rbot.h"
 
+#include "uses/use.h"
+#include "uses/workspace.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +10,7 @@
 #include "commands.h"
 #include "ninjaconv.h"
 #include "portability.h"
+#include "prof/prof.h"
 
 #if __has_include("version.h")
 #include "version.h" /* build/version.h — dihasilkan dari .rbot-version */
@@ -22,7 +26,7 @@ const char *rbotVersion(void) {
 #ifdef RBOT_VERSION_EMBEDDED
   return RBOT_VERSION_EMBEDDED;
 #else
-  return "v0.1.2";
+  return "v0.1.8";
 #endif
 }
 
@@ -65,6 +69,7 @@ static bool parseJobsArg(const char *inlineVal, bool hasInline, int *outJobs, co
  * dan modul-modul lain di folder ini.
  */
 int rbotRun(int argc, const char *argv[]) {
+  profInit(); /* profil fase aktif bila RBOT_PROFILE=1 (stderr, tanpa syscall) */
   /* Opsi build paralel: -j[N] / --jobs[=N]. Opsi boleh berada sebelum atau
      sesudah command (mis. `rbot -j4`, `rbot clean -j2`); hanya build yang
      memakai jobs, command lain mengabaikannya. */
@@ -76,10 +81,28 @@ int rbotRun(int argc, const char *argv[]) {
   int jobs = 0; /* 0 = otomatis: jumlah core CPU (di bawah); -j1 = serial */
   const char *cmd = NULL;
   const char *buildfile = "Buildfile"; /* -f <file> untuk memakai yang lain */
+  bool wantWorkspace = false; /* -w: paksa mode workspace */
+  const char *wsOnly = NULL;  /* -w <nama>: hanya proyek itu */
 
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
     const char *err = NULL;
+
+    /* -w: mode workspace (Buildfile.workspace). `rbot -w` = semua proyek;
+       `rbot -w <nama>` = hanya proyek itu. OPSI, bukan command — argumen
+       setelahnya TIDAK diperlakukan sebagai command (rupakan dengan
+       dispatcher "command pertama non-opsi"). */
+    if (strcmp(a, "-w") == 0) {
+      wantWorkspace = true;
+      /* Kata berikutnya = nama proyek KECUALI command yang dikenal
+         (rbot -w clean harus tetap berarti clean, bukan proyek "clean"). */
+      if (i + 1 < argc && argv[i + 1][0] && argv[i + 1][0] != '-' &&
+          strcmp(argv[i + 1], "build") != 0 && strcmp(argv[i + 1], "clean") != 0 &&
+          strcmp(argv[i + 1], "init") != 0 && strcmp(argv[i + 1], "help") != 0 &&
+          strcmp(argv[i + 1], "version") != 0)
+        wsOnly = argv[++i];
+      continue;
+    }
 
     if (strcmp(a, "-xf") == 0 || strcmp(a, "-xcf") == 0) {
       conv = (a[2] == 'c') ? CONV_KEEP : CONV_DELETE;
@@ -191,6 +214,17 @@ int rbotRun(int argc, const char *argv[]) {
     if (conv == CONV_DELETE)
       printf("> Temporary  : %s (dihapus setelah command; Buildfile tak disentuh)\n", dst);
     buildfile = dst;
+  }
+
+  /* Mode workspace: -w eksplisit, atau auto-detect Buildfile.workspace
+     saat rbot polos di root workspace. init/help tetap jalur satu-project. */
+  bool wsAuto = !wantWorkspace && (!cmd || !*cmd) && workspaceFileExists();
+  if (wantWorkspace || (wsAuto)) {
+    if (cmd && *cmd && strcmp(cmd, "clean") != 0) {
+      fprintf(stderr, "rbot: command '%s' tidak berlaku di mode workspace (pakai build/clean)\n", cmd);
+      return 2;
+    }
+    return workspaceRun(cmd && *cmd ? cmd : "build", jobs, wsOnly);
   }
 
   int rc;

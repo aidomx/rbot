@@ -4,6 +4,8 @@ compile_commands.json
 debian
 .rbot
 shared
+design
 todos
 sys.tmp
+ws.tmp
 Buildfile.xf.tmp

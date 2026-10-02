@@ -52,20 +52,24 @@ static bool ldAvailable(void) {
 }
 
 static bool embArchiveFresh(const EmbeddedEntry *e) {
-  time_t at = fsMTime(e->archivePath);
-  if (at == (time_t)-1) return false;
+  /* Arsip jadi (embedded.<n>.file): cukup bandingkan mtime file — tidak
+     ada direktori sumber untuk discan. */
+  if (e->usePrebuilt) return fsFileExists(e->archivePath);
+  int64_t at = fsMTimeNs(e->archivePath);
+  if (at < 0) return false;
 
-  /* Scan freshness: file terbaru di bawah e->src (semua file, atau hanya
-     e->pattern jika diset) */
+  /* Scan freshness dengan resolusi nanodetik: perubahan source dan archive
+     dapat terjadi dalam detik yang sama, sehingga time_t/fsMTime() terlalu
+     kasar untuk invalidasi build. */
   List files = {0};
   if (e->pattern[0])
     walkDir(e->src, e->pattern, &files);
   else
     walkDir(e->src, "", &files);
-  time_t newest = 0;
+  int64_t newest = 0;
   for (int i = 0; i < files.count; i++) {
-    time_t mt = fsMTime(files.items[i]);
-    if (mt != (time_t)-1 && mt > newest) newest = mt;
+    int64_t mt = fsMTimeNs(files.items[i]);
+    if (mt >= 0 && mt > newest) newest = mt;
   }
   listFree(&files);
   return newest <= at;
@@ -115,10 +119,12 @@ bool emitEmbeddedHeader(const Config *c, bool *changed) {
     const char *slash = strrchr(e->archivePath, '/');
     const char *archiveFileName = slash ? slash + 1 : e->archivePath;
 
-    /* prefix macro dari nama entri, di-uppercase */
+    /* prefix macro dari embedded.<n>.variable bila diset, kalau tidak dari
+       nama entri; di-uppercase */
+    const char *baseName = e->variable[0] ? e->variable : e->name;
     char prefix[EMBED_NAME_LEN + 8] = {0};
     size_t k = 0;
-    for (const char *p = e->name; *p && k < sizeof(prefix) - 1; p++, k++) {
+    for (const char *p = baseName; *p && k < sizeof(prefix) - 1; p++, k++) {
       char ch = *p;
       if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 'a' + 'A');
       bool alnum = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9');
@@ -272,56 +278,64 @@ bool embedResourceCompile(const EmbeddedEntry *e, const Config *c) {
   return ok;
 }
 
-static bool buildEmbeddedEntry(const Config *c, const EmbeddedEntry *e) {
+static bool buildEmbeddedArchiveEntry(const EmbeddedEntry *e) {
+  if (e->usePrebuilt) {
+    return fsFileExists(e->archivePath);
+  }
   if (!fsDirExists(e->src)) {
-    printf("> Embedded  : %s: src '%s' not found, skipped\n", e->name, e->src);
-    return true;
+    fprintf(stderr, "rbot: %s: src '%s' not found\n", e->name, e->src);
+    return false;
   }
+  if (embArchiveFresh(e)) return true;
 
-  if (!embArchiveFresh(e)) {
-    /* Arsip ditulis ke file SEMENTARA di luar e->src lalu di-rename: tar
-       yang mengarsipkan direktorinya sendiri membaca file yang sedang
-       ditulis -> "file changed as we read it" (kasus dir = modules/
-       tempat arsip ditaruh). Temp di cwd '.' dijamin di luar src
-       relatif mana pun (src tidak pernah '.'). */
-    char tmpArchive[MAX_PATH * 2 + 32];
-    snprintf(tmpArchive, sizeof(tmpArchive), ".rbot-embed-%s.tmp", e->name);
+  char tmpArchive[MAX_PATH * 2 + 32];
+  snprintf(tmpArchive, sizeof(tmpArchive), ".rbot-embed-%s.tmp", e->name);
+  fsRemoveFile(tmpArchive);
+  bool ok;
+  if (e->tar) {
+    const char *z = (strcmp(e->ext, "gz") == 0) ? "z" : "";
+    char *cmd = malloc(strlen(tmpArchive) + strlen(e->src) + 64);
+    if (!cmd) return false;
+    sprintf(cmd, "tar c%sf %s -C %s .", z, tmpArchive, e->src);
+    ok = runCmd(cmd);
+    free(cmd);
+  } else {
+    char *cmd = malloc(strlen(tmpArchive) + strlen(e->src) + 64);
+    if (!cmd) return false;
+    sprintf(cmd, "tar czf %s -C %s .", tmpArchive, e->src);
+    ok = runCmd(cmd);
+    free(cmd);
+  }
+  if (!ok) {
     fsRemoveFile(tmpArchive);
-    bool ok;
-    if (e->tar) {
-      /* tar dengan gzip opsional (-z) saat with.ext = gz */
-      const char *z = (strcmp(e->ext, "gz") == 0) ? "z" : "";
-      char *cmd = malloc(strlen(tmpArchive) + strlen(e->src) + 64);
-      sprintf(cmd, "tar c%sf %s -C %s .", z, tmpArchive, e->src);
-      ok = runCmd(cmd);
-      free(cmd);
-    } else {
-      /* tanpa tar: gzip langsung pohon direktorinya (with.ext = gz) */
-      char *cmd = malloc(strlen(tmpArchive) + strlen(e->src) + 64);
-      sprintf(cmd, "tar czf %s -C %s .", tmpArchive, e->src);
-      ok = runCmd(cmd);
-      free(cmd);
-    }
-    if (!ok) {
-      fsRemoveFile(tmpArchive);
-      fprintf(stderr, "rbot: %s: failed to archive %s\n", e->name, e->src);
-      return false;
-    }
-    mkparent(e->archivePath);
-    fsRemoveFile(e->archivePath);
-    if (rename(tmpArchive, e->archivePath) != 0) {
-      fsRemoveFile(tmpArchive);
-      fprintf(stderr, "rbot: %s: cannot move archive into place (%s)\n", e->name,
-              e->archivePath);
-      return false;
-    }
+    fprintf(stderr, "rbot: %s: failed to archive %s\n", e->name, e->src);
+    return false;
+  }
+  mkparent(e->archivePath);
+  fsRemoveFile(e->archivePath);
+  if (rename(tmpArchive, e->archivePath) != 0) {
+    fsRemoveFile(tmpArchive);
+    fprintf(stderr, "rbot: %s: cannot move archive into place (%s)\n", e->name,
+            e->archivePath);
+    return false;
+  }
+  return true;
+}
+
+static bool buildEmbeddedEntry(const Config *c, const EmbeddedEntry *e) {
+  if (!buildEmbeddedArchiveEntry(e)) return false;
+
+  if (e->usePrebuilt) {
+    printf("> Embedded  : %s (file: %s)\n", e->name, e->archivePath);
+  } else if (ldAvailable() || fsFileExists(e->archivePath)) {
+    printf("> Embedded  : %s (archive: %s)\n", e->name, e->archivePath);
   }
 
-  if (!fsNewerThan(e->archivePath, e->objectPath)) return true; /* object sudah up-to-date */
+  if (!fsNewerThan(e->archivePath, e->objectPath)) return true;
 
   if (ldAvailable()) {
-    /* Jalur GNU: konversi arsip jadi object langsung via ld -r -b binary. */
     char *cmd = malloc(strlen(e->archivePath) + strlen(e->objectPath) + 64);
+    if (!cmd) return false;
     sprintf(cmd, "ld -r -b binary -o %s %s", e->objectPath, e->archivePath);
     bool ok = runCmd(cmd);
     free(cmd);
@@ -329,9 +343,15 @@ static bool buildEmbeddedEntry(const Config *c, const EmbeddedEntry *e) {
     return ok;
   }
 
-  /* Windows / tanpa GNU ld: konversi arsip jadi C array lalu kompilasi
-     dengan toolchain aktif — object hasilnya di-link cmdBuild(). */
   return embedResourceCompile(e, c);
+}
+
+bool buildEmbeddedArchives(const Config *c) {
+  for (int i = 0; i < c->embCount; i++) {
+    if (!c->emb[i].enable) continue;
+    if (!buildEmbeddedArchiveEntry(&c->emb[i])) return false;
+  }
+  return true;
 }
 
 bool buildEmbedded(const Config *c) {
@@ -340,4 +360,39 @@ bool buildEmbedded(const Config *c) {
     if (!buildEmbeddedEntry(c, &c->emb[i])) return false;
   }
   return true;
+}
+
+/* ==================== finalisasi entri ==================== */
+
+/*
+ * configFinalizeEntry — turunkan archivePath & objectPath dari setting
+ * arsip entri. Dipindah apa adanya dari config.c: pengetahuan penamaan
+ * arsip (<dir>/<name>[.tar.<ext>]) lebih cocok tinggal di modul embed;
+ * config.c tinggal memanggilnya dari configFinalize() per entri.
+ */
+void configFinalizeEntry(EmbeddedEntry *e, const char *buildDir) {
+  if (e->usePrebuilt && e->prebuiltPath[0]) {
+    /* Arsip jadi (embedded.<n>.file): jalurnya apa adanya; object tetap di
+       build dir dengan nama entri. */
+    copyStr(e->archivePath, sizeof(e->archivePath), e->prebuiltPath);
+    snprintf(e->objectPath, sizeof(e->objectPath), "%s/%s.o", buildDir, e->name);
+    return;
+  }
+
+  /* archive path: <archiveDir>/<n>[.tar.<ext>] tergantung with.tar/with.ext */
+  if (e->tar) {
+    if (e->ext[0])
+      snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s.tar.%s", e->archiveDir,
+               e->archiveName, e->ext);
+    else
+      snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s.tar", e->archiveDir, e->archiveName);
+  } else if (e->ext[0]) {
+    snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s.%s", e->archiveDir, e->archiveName,
+             e->ext);
+  } else {
+    snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s", e->archiveDir, e->archiveName);
+  }
+
+  /* object ada di bawah build dir, mis. build/rupa_modules.o */
+  snprintf(e->objectPath, sizeof(e->objectPath), "%s/%s.o", buildDir, e->archiveName);
 }

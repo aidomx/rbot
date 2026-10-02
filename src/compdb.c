@@ -40,6 +40,7 @@ static uint64_t hashString(uint64_t h, const char *s) {
 static uint64_t compdbFingerprint(const Config *c, List *srcs, const char *cwd) {
   uint64_t h = 1469598103934665603ULL;
   h = hashString(h, cwd);
+  h = hashString(h, "compdb-v2");
   h = hashString(h, c->cc);
   h = hashString(h, c->std);
   h = hashString(h, c->target);

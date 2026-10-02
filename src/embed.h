@@ -34,6 +34,13 @@ bool emitEmbeddedHeader(const Config *c, bool *changed);
    lalu kompilasi dengan toolchain aktif. */
 bool embedResourceCompile(const EmbeddedEntry *e, const Config *c);
 
+bool buildEmbeddedArchives(const Config *c);
 bool buildEmbedded(const Config *c);
+
+/* Finalisasi satu entri embedded: turunkan archivePath & objectPath dari
+   setting arsip (archiveDir/name/tar/ext atau file prebuilt). Dipanggil
+   configFinalize() di config.c; didefinisikan di embed.c agar pengetahuan
+   penamaan arsip tinggal di modul embed. */
+void configFinalizeEntry(EmbeddedEntry *e, const char *buildDir);
 
 #endif /* RBOT_V0_1_0_EMBED_H */

@@ -17,16 +17,62 @@
 #define EMBED_NAME_LEN 64
 #define EMBED_PATH_LEN 256
 
+/*
+ * pack: proyek pengemasan artefak build (Buildfile: pack.*).
+ *
+ * pack.files/pack.output menandai proyek pengemasan aktif. Dua artefak:
+ *   - tarball selalu dibuat di pack.output; kompresi dari pack.compress
+ *     bila diset, kalau tidak dari ekstensi (.tar.gz/.tgz/.tar.xz/
+ *     .tar.bz2/.tar).
+ *   - pack.format = deb menambah .deb di sampingnya (nama: ekstensi tar
+ *     pada pack.output diganti .deb) dengan metadata pack.deb.*; setiap
+ *     entri pack.files dipasang di <install_prefix>/<entri>.
+ * pack.checksum = sha256 menulis <artefak>.sha256 (format `sha256sum -c`).
+ *
+ * Di Buildfile.workspace, setting per proyek disintesis TANPA prefix
+ * projects.<nama>. — sehingga key bare (name, version, files, output,
+ * compress, checksum, format, deb.*) juga dirutekan ke pack di sini.
+ * Proyek pack tanpa sources otomatis output.binary = false (tidak ada
+ * yang dikompilasi); proyek dengan sources membangun binary dulu, baru
+ * mengemas.
+ */
 typedef struct {
-  char name[EMBED_NAME_LEN];       /* entry key; uppercase jadi prefix macro */
+  bool requested; /* diturunkan: pack.files/pack.output disebut */
+  char name[128];            /* default: output.binaryName */
+  char version[64];          /* default "0.0.0" */
+  List files;                /* file/folder yang masuk paket */
+  char output[MAX_PATH * 2]; /* template: {name} {version} {os} {arch} */
+  char compress[16];         /* "" = dari ekstensi; gzip|none|xz|bz2 */
+  char checksum[16];         /* "" = tanpa; sha256 */
+  char format[16];           /* "" = tar; deb menambah artefak .deb */
+  char debMaintainer[192];
+  char debDescription[512];
+  char debInstallPrefix[MAX_PATH];
+  char debArchitecture[32];  /* kosong = otomatis dari arsitektur host */
+} PackConfig;
+
+typedef struct {
+  char name[EMBED_NAME_LEN]; /* entry key; uppercase jadi prefix macro */
   bool enable;
-  char src[MAX_PATH];              /* direktori yang diarsipkan */
-  char extract[MAX_PATH];          /* direktori ekstraksi saat runtime (boleh kosong) */
-  char pattern[128];               /* pola scan freshness, default ".rp" tidak generik */
+  char src[MAX_PATH];     /* direktori yang diarsipkan */
+  char extract[MAX_PATH]; /* direktori ekstraksi saat runtime (boleh kosong) */
+  char pattern[128];      /* pola scan freshness, default ".rp" tidak generik */
   char archiveDir[EMBED_PATH_LEN];
   char archiveName[EMBED_NAME_LEN];
   bool tar;
   char ext[16];
+
+  /*
+   * Arsip jadi (embedded.<n>.file): bila diset, rbot TIDAK mengarsipkan
+   * <src> sendiri — <file> dipakai sebagai arsip input (mis. hasil proyek
+   * kemasan lain di workspace). Freshness tetap dicek terhadap mtime
+   * <file>. <src> boleh kosong dalam mode ini.
+   */
+  bool usePrebuilt;
+  char prebuiltPath[MAX_PATH];
+
+  /* Override prefix macro EMBED_<N>_ (embedded.<n>.variable). */
+  char variable[EMBED_NAME_LEN];
 
   /* diturunkan di configFinalizeEntry */
   char archivePath[MAX_PATH + 192]; /* <archiveDir>/<n>[.tar.<ext>] */
@@ -44,7 +90,7 @@ typedef struct {
   List librariesLinux;
   List librariesMacOS;
   List librariesWindows;
-  List compilers;      /* yang pertama tersedia menang */
+  List compilers; /* yang pertama tersedia menang */
 
   char std[32];
   char cc[128];
@@ -72,7 +118,7 @@ typedef struct {
    */
   bool foreground;
 
-  List excludes;       /* nama/path file yang dilepas dari build (mis. main.c) */
+  List excludes; /* nama/path file yang dilepas dari build (mis. main.c) */
 
   /*
    * Alias "canonical\talias" (format "use alias", lihat config.c). Hanya
@@ -80,6 +126,9 @@ typedef struct {
    * final yang key-nya sudah kanonik).
    */
   List aliases;
+
+  /* false akan mengabaikan menghasilkan binary */
+  bool binary;
 
   char outBinaryName[128];
   char outBinaryDir[MAX_PATH];
@@ -101,6 +150,11 @@ typedef struct {
   bool libShared;
   char outLibName[128];
   char outLibDir[MAX_PATH];
+
+  /*
+   * pack: pengemasan artefak (Buildfile: pack; lihat PackConfig di atas).
+   */
+  PackConfig pack;
 
   /*
    * embedded: entri bernama yang asetnya diarsipkan dan di-embed ke binary

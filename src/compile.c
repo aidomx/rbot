@@ -165,6 +165,17 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
       rest = src;
     else if (strncmp(src, root, rl) == 0 && (src[rl] == '/' || src[rl] == '\\'))
       rest = src + rl + 1;
+    else if (strcmp(src, root) == 0) {
+      /* Entri sources berupa FILE (mis. `sources = main.c` hasil `rbot
+         -xf` untuk build.ninja flat): object = nama file tanpa ekstensi
+         langsung di bawah build dir. */
+      char rel[MAX_PATH];
+      snprintf(rel, sizeof(rel), "%s", src);
+      char *dot = strrchr(rel, '.');
+      if (dot) *dot = '\0';
+      snprintf(out, n, "%s/%s.o", c->outBuildDir, rel);
+      return true;
+    }
     if (!rest) continue;
 
     char rel[MAX_PATH];

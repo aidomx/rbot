@@ -1,17 +1,26 @@
 #include "commands.h"
 
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "cmds/cmds_internal.h"
 #include "compdb.h"
 #include "compile.h"
 #include "config.h"
 #include "deps.h"
 #include "embed.h"
+#include "pack/pack.h"
 #include "portability.h"
+#include "prof/prof.h"
 #include "util.h"
+
+/*
+ * commands — command publik rbot (build/init/help; clean ada di
+ * cmds/cmds_state.c). Fase build yang berdiri sendiri dipisah modular:
+ *   - cmds/cmds_lib.c   : fase library, kompilasi paralel, header versi.
+ *   - cmds/cmds_state.c : fingerprint build, fast no-op snapshot, clean.
+ */
 
 /* ==================== help ==================== */
 
@@ -25,9 +34,12 @@ void showHelp(void) {
   printf("%-8s%s\n", "-xcf <n>",
          "- sama seperti -xf, tapi hasil konversi ditulis ke Buildfile (konfirmasi bila ada)");
   printf("%-8s%s\n", "-j[N]", "- build paralel, N job (tanpa -j: jumlah core CPU; -j1 = serial)");
+  printf("%-8s%s\n", "-w", "- mode workspace: build semua proyek (Buildfile.workspace)");
+  printf("%-8s%s\n", "", "- rbot -w <nama>: hanya proyek itu (+ dependency-nya)");
   printf("%-8s%s\n", "init", "- create a default Buildfile if none exists yet");
   printf("%-8s%s\n", "clean", "- clean build artifacts (Buildfile: clean)");
   printf("%-8s%s\n", "", "- output.libraryName/libraryShared membangun lib<name>.a + .so");
+  printf("%-8s%s\n", "", "- pack.* mengemas artefak: tar.gz + .deb + checksum sha256");
   printf("%-8s%s\n", "help", "- show this help");
   printf("%-8s%s\n", "version", "- show version of rbot");
 }
@@ -47,7 +59,7 @@ int cmdInit(const char *buildfilePath) {
     return 1;
   }
 
-  fputs("use alias\n"
+  fputs("use project\n"
         "\n"
         "clean as c\n"
         "output as o\n"
@@ -83,721 +95,12 @@ int cmdInit(const char *buildfilePath) {
 
 /* ==================== build ==================== */
 
-/* Nama file library sesuai toolchain: lib<name>.a / <name>.lib (statis). */
-static void libStaticPath(const Config *c, char *out, size_t n) {
-#ifdef _WIN32
-  if (compilerIsMSVC(c))
-    snprintf(out, n, "%s/%s.lib", c->outLibDir, c->outLibName);
-  else
-    snprintf(out, n, "%s/lib%s.a", c->outLibDir, c->outLibName);
-#else
-  (void)c;
-  snprintf(out, n, "%s/lib%s.a", c->outLibDir, c->outLibName);
-#endif
-}
-
-/* Nama file library dinamis: lib<name>.so / .dylib / <name>.dll. */
-static void libSharedPath(const Config *c, char *out, size_t n) {
-#if defined(_WIN32)
-  (void)c;
-  snprintf(out, n, "%s/%s.dll", c->outLibDir, c->outLibName);
-#elif defined(__APPLE__)
-  (void)c;
-  snprintf(out, n, "%s/lib%s.dylib", c->outLibDir, c->outLibName);
-#else
-  (void)c;
-  snprintf(out, n, "%s/lib%s.so", c->outLibDir, c->outLibName);
-#endif
-}
-
-static bool libVariantUpToDate(const Config *c, bool isStatic, const List *srcs);
-
-/*
- * Kompilasi paralel (rbot -jN, mirip make). Baris status tiap job dicetak
- * oleh parent tepat setelah job selesai — satu printf utuh per baris, jadi
- * tidak ada interleaving antar job. Return false bila ada yang gagal atau
- * build di-interupsi Ctrl+C.
- */
-typedef struct {
-  char src[MAX_PATH]; /* source yang dikompilasi slot ini */
-  double start;       /* untuk durasi per job */
-} JobSlot;
-
-static bool runParallelJobs(const Config *c, const char *inc, const char *wf, const List *srcs,
-                            char *objPath, size_t objCap, int jobs, int *outCompiled,
-                            int *outFailed, int *outInterrupted) {
-  JobSlot *slots = calloc((size_t)jobs, sizeof(JobSlot));
-  ProcHandle *handles = calloc((size_t)jobs, sizeof(ProcHandle));
-  if (!slots || !handles) {
-    free(slots);
-    free(handles);
-    return false;
-  }
-
-  /* -fPIC untuk library shared (GNU/Clang) — setara compileLibraryOne. */
-#ifndef _WIN32
-  char *picwf = (c->libShared && !compilerIsMSVC(c)) ? picWarningFlags(c) : NULL;
-  const char *wfUse = picwf ? picwf : wf;
-#else
-  const char *wfUse = wf;
-#endif
-
-  int total = srcs->count;
-  int compiled = 0, failed = 0, interrupted = 0;
-  int nextSrc = 0, active = 0;
-
-  while (nextSrc < total || active > 0) {
-    /* isi slot kosong dengan job baru (berhenti juga saat Ctrl+C) */
-    while (active < jobs && nextSrc < total && !procInterrupted()) {
-      const char *src = srcs->items[nextSrc];
-      if (!objectPathFor(c, src, objPath, objCap)) {
-        nextSrc++;
-        continue;
-      }
-      mkparent(objPath);
-      char *cmd = compileCmd(c, inc, wfUse, src, objPath);
-      bool started = procStart(cmd, &handles[active]);
-      free(cmd);
-      if (!started) {
-        fprintf(stderr, "rbot: cannot start compiler for %s\n", src);
-        failed++;
-        nextSrc++;
-        continue;
-      }
-      snprintf(slots[active].src, sizeof(slots[active].src), "%s", src);
-      slots[active].start = nowSeconds();
-      nextSrc++;
-      active++;
-    }
-    if (active == 0) break;
-
-    ProcHandle *fin = NULL;
-    int w = procWaitAny(handles, active, &fin);
-    if (w < 0) break; /* tidak ada job tersisa (atau wait gagal) */
-
-    double dt = nowSeconds() - slots[w].start;
-    compiled++;
-    const char *tag = fin->interrupted ? "INT" : (fin->ok ? "OK" : "FAIL");
-    printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, tag, dt, slots[w].src);
-    fflush(stdout);
-    if (!fin->ok) {
-      if (fin->interrupted)
-        interrupted++;
-      else
-        failed++;
-    }
-
-    /* kompakkan: pindahkan slot terakhir ke slot yang baru kosong */
-    handles[w] = handles[active - 1];
-    slots[w] = slots[active - 1];
-    active--;
-  }
-
-  free(slots);
-  free(handles);
-#ifndef _WIN32
-  free(picwf);
-#endif
-  *outCompiled = compiled;
-  *outFailed = failed;
-  *outInterrupted = interrupted;
-  return failed == 0 && interrupted == 0;
-}
-
-/*
- * Fase library: kumpulkan object hasil kompilasi (source + embedded),
- * kemas statis (ar / lib) dan/atau link shared (-shared / /LD).
- * Object perantara TIDAK dihapus — tetap dipakai link binary dan
- * agar build incremental berikutnya tidak kompilasi ulang total.
- */
-static bool buildLibrary(const Config *c, const List *srcs) {
-  if (!c->libRequested) return true;
-
-  /* Jalur no-op: hindari membangun daftar object, alokasi string, dan mkdir
-     bila kedua varian library sudah mutakhir. */
-  bool staticUpToDate = !c->libStatic || libVariantUpToDate(c, true, srcs);
-  bool sharedUpToDate = !c->libShared || libVariantUpToDate(c, false, srcs);
-  if (staticUpToDate && sharedUpToDate) {
-    char target[MAX_PATH * 2];
-    if (c->libStatic) {
-      libStaticPath(c, target, sizeof(target));
-      printf("> Library   : %s (up-to-date)\n", target);
-    }
-    if (c->libShared) {
-      libSharedPath(c, target, sizeof(target));
-      printf("> Library   : %s (up-to-date)\n", target);
-    }
-    return true;
-  }
-
-  List objs = {0};
-  char obj[MAX_PATH];
-  for (int i = 0; i < srcs->count; i++) {
-    /* exclude: source tidak ikut DIKEMAS ke library (mis. main.c milik
-       binary) — tetap dikompilasi untuk executable. */
-    if (excludedSource(c, srcs->items[i])) continue;
-    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) listAdd(&objs, obj);
-  }
-  for (int i = 0; i < c->embCount; i++)
-    if (c->emb[i].enable && fsFileExists(c->emb[i].objectPath))
-      listAdd(&objs, c->emb[i].objectPath);
-
-  if (objs.count == 0) {
-    fprintf(stderr, "rbot: library requested but no object files found\n");
-    listFree(&objs);
-    return false;
-  }
-
-  mkdirs(c->outLibDir);
-
-  bool staticDone = true, sharedDone = true;
-  char target[MAX_PATH * 2];
-
-  if (c->libStatic) {
-    libStaticPath(c, target, sizeof(target));
-    if (staticUpToDate) {
-      printf("> Library   : %s (up-to-date)\n", target);
-    } else {
-      size_t n = 64;
-      for (int i = 0; i < objs.count; i++)
-        n += strlen(objs.items[i]) + 3;
-      char *cmd = malloc(n);
-      if (compilerIsMSVC(c))
-        snprintf(cmd, n, "lib /nologo /OUT:%s", target);
-      else
-        snprintf(cmd, n, "ar rcs %s", target);
-      for (int i = 0; i < objs.count; i++) {
-        strcat(cmd, " ");
-        strcat(cmd, objs.items[i]);
-      }
-      printf("> Library   : %s\n", target);
-      staticDone = runCmd(cmd);
-      free(cmd);
-      if (!staticDone) fprintf(stderr, "rbot: static library build failed\n");
-    }
-  }
-
-  if (c->libShared) {
-    libSharedPath(c, target, sizeof(target));
-    if (sharedUpToDate) {
-      printf("> Library   : %s (up-to-date)\n", target);
-      listFree(&objs);
-      return staticDone; /* .so dilewati; hasil .a tetap dihormati */
-    }
-    size_t n = strlen(c->cc) + strlen(target) + 96;
-    for (int i = 0; i < objs.count; i++)
-      n += strlen(objs.items[i]) + 3;
-    for (int i = 0; i < c->libraries.count; i++)
-      n += strlen(c->libraries.items[i]) + 8;
-    char *cmd = malloc(n);
-    if (compilerIsMSVC(c)) {
-      snprintf(cmd, n, "cl /nologo /LD");
-      for (int i = 0; i < objs.count; i++) {
-        strcat(cmd, " ");
-        strcat(cmd, objs.items[i]);
-      }
-      strcat(cmd, " /link /nologo /INCREMENTAL:NO /OUT:");
-      strcat(cmd, target);
-      for (int i = 0; i < c->libraries.count; i++) {
-        const char *lib = c->libraries.items[i];
-        if (lib[0] == '-') lib++;
-        if (lib[0] == 'l') lib++;
-        strcat(cmd, " ");
-        strcat(cmd, lib);
-        strcat(cmd, ".lib");
-      }
-    } else {
-      snprintf(cmd, n, "%s -shared", c->cc);
-      for (int i = 0; i < objs.count; i++) {
-        strcat(cmd, " ");
-        strcat(cmd, objs.items[i]);
-      }
-      strcat(cmd, " -o ");
-      strcat(cmd, target);
-      for (int i = 0; i < c->libraries.count; i++) {
-        const char *lib = c->libraries.items[i];
-        strcat(cmd, " ");
-        if (lib[0] == '-' || lib[0] == 'l')
-          strcat(cmd, "-");
-        else
-          strcat(cmd, "-l");
-        strcat(cmd, lib);
-      }
-    }
-    printf("> Library   : %s\n", target);
-    sharedDone = runCmd(cmd);
-    free(cmd);
-    if (!sharedDone) fprintf(stderr, "rbot: shared library build failed\n");
-  }
-
-  listFree(&objs);
-  return staticDone && sharedDone;
-}
-
-/* True bila SATU varian library (statis/shared) sudah ada dan lebih baru
-   daripada seluruh object inputnya — varian itu boleh dilewati. Dipakai
-   per varian di buildLibrary: menghapus .so saja tidak meng-rebuild .a. */
-static bool libVariantUpToDate(const Config *c, bool isStatic, const List *srcs) {
-  char obj[MAX_PATH];
-  char target[MAX_PATH * 2];
-
-  if (isStatic)
-    libStaticPath(c, target, sizeof(target));
-  else
-    libSharedPath(c, target, sizeof(target));
-
-  int64_t mtime = fsMTimeNs(target);
-  if (mtime < 0) return false; /* target belum ada */
-
-  for (int i = 0; i < srcs->count; i++) {
-    if (excludedSource(c, srcs->items[i])) continue;
-    if (!objectPathFor(c, srcs->items[i], obj, sizeof(obj))) continue;
-    int64_t om = fsMTimeNs(obj);
-    if (om < 0 || om > mtime) return false;
-  }
-  for (int i = 0; i < c->embCount; i++) {
-    if (!c->emb[i].enable) continue;
-    int64_t om = fsMTimeNs(c->emb[i].objectPath);
-    if (om < 0 || om > mtime) return false;
-  }
-  return true;
-}
-
-/*
- * Terbitkan build/version.h dari .rbot-version (root project). Bila file
- * itu ada, project yang menambahkan build ke headers bisa memakai
- * RBOT_VERSION_EMBEDDED — versi ikut ter-embed ke binary saat build, bukan
- * dibaca ulang saat runtime, sehingga `rbot version` tetap benar di mana
- * pun binary dijalankan (tidak tergantung path lokal/repo). Header hanya
- * ditulis ulang saat isinya berubah; perubahan memaksa kompilasi ulang.
- */
-static bool emitVersionHeader(const Config *c, bool *changed) {
-  if (!fsFileExists(".rbot-version")) return true;
-
-  FILE *rf = fopen(".rbot-version", "rb");
-  if (!rf) return true;
-  char raw[64] = {0};
-  size_t n = fread(raw, 1, sizeof(raw) - 1, rf);
-  fclose(rf);
-  while (n && (raw[n - 1] == '\n' || raw[n - 1] == '\r' || raw[n - 1] == ' ' || raw[n - 1] == '\t'))
-    raw[--n] = '\0';
-  char *s = raw;
-  while (*s == ' ' || *s == '\t')
-    s++;
-  if (!*s) return true; /* kosong: jangan terbitkan apa pun */
-
-  char body[192];
-  snprintf(body, sizeof(body),
-           "/* Auto-generated by rbot from .rbot-version. Do not edit. */\n"
-           "#define RBOT_VERSION_EMBEDDED \"%s\"\n",
-           s);
-
-  char path[MAX_PATH + 16];
-  snprintf(path, sizeof(path), "%s/version.h", c->outBuildDir);
-  mkparent(path);
-
-  /* lewati penulisan ulang bila tidak berubah agar mtime tetap stabil */
-  char existing[192] = {0};
-  FILE *ef = fopen(path, "rb");
-  if (ef) {
-    size_t en = fread(existing, 1, sizeof(existing) - 1, ef);
-    fclose(ef);
-    if (en == strlen(body) && memcmp(existing, body, en) == 0) return true;
-  }
-
-  FILE *wf = fopen(path, "w");
-  if (!wf) {
-    fprintf(stderr, "rbot: cannot write %s\n", path);
-    return false;
-  }
-  fwrite(body, 1, strlen(body), wf);
-  fclose(wf);
-  if (changed) *changed = true;
-  return true;
-}
-
-/* ==================== Fingerprint build state ==================== */
-
-#define BUILD_FP_FILE ".rbot/build.fingerprint"
-
-typedef struct {
-  uint64_t compile;
-  uint64_t link;
-  uint64_t sources;
-} BuildFingerprint;
-
-static uint64_t fpBytes(uint64_t h, const void *data, size_t n) {
-  const unsigned char *p = (const unsigned char *)data;
-  for (size_t i = 0; i < n; i++) {
-    h ^= p[i];
-    h *= 1099511628211ULL;
-  }
-  return h;
-}
-
-static uint64_t fpString(uint64_t h, const char *s) {
-  const unsigned char sep = 0xff;
-  if (s) h = fpBytes(h, s, strlen(s));
-  return fpBytes(h, &sep, 1);
-}
-
-static uint64_t fpList(uint64_t h, const List *list) {
-  for (int i = 0; i < list->count; i++)
-    h = fpString(h, list->items[i]);
-  const unsigned char end = 0xfe;
-  return fpBytes(h, &end, 1);
-}
-
-static BuildFingerprint makeBuildFingerprint(const Config *c, const List *srcs) {
-  BuildFingerprint fp;
-  fp.compile = 14695981039346656037ULL;
-  fp.compile = fpString(fp.compile, c->cc);
-  fp.compile = fpString(fp.compile, c->std);
-  fp.compile = fpString(fp.compile, c->target);
-  fp.compile = fpString(fp.compile, c->outBuildDir);
-  fp.compile = fpList(fp.compile, &c->flags);
-  fp.compile = fpList(fp.compile, &c->headerPublic);
-  /* Shared library objects need -fPIC, so this changes compile output. */
-  fp.compile = fpString(fp.compile, c->libShared ? "pic" : "no-pic");
-
-  fp.sources = 14695981039346656037ULL;
-  for (int i = 0; i < srcs->count; i++) {
-    char obj[MAX_PATH];
-    fp.sources = fpString(fp.sources, srcs->items[i]);
-    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) fp.sources = fpString(fp.sources, obj);
-  }
-
-  fp.link = 14695981039346656037ULL;
-  fp.link = fpString(fp.link, c->cc);
-  fp.link = fpString(fp.link, c->outBinaryDir);
-  fp.link = fpString(fp.link, c->outBinaryName);
-  fp.link = fpList(fp.link, &c->libraries);
-  fp.link = fpString(fp.link, c->libRequested ? "lib" : "no-lib");
-  fp.link = fpString(fp.link, c->libStatic ? "static" : "no-static");
-  fp.link = fpString(fp.link, c->libShared ? "shared" : "no-shared");
-  fp.link = fpString(fp.link, c->outLibDir);
-  fp.link = fpString(fp.link, c->outLibName);
-  for (int i = 0; i < c->embCount; i++) {
-    fp.link = fpString(fp.link, c->emb[i].enable ? "enabled" : "disabled");
-    fp.link = fpString(fp.link, c->emb[i].objectPath);
-  }
-  return fp;
-}
-
-static bool loadBuildFingerprint(BuildFingerprint *fp) {
-  FILE *f = fopen(BUILD_FP_FILE, "r");
-  if (!f) return false;
-  unsigned long long c = 0, l = 0, s = 0;
-  bool ok = fscanf(f, "%llx %llx %llx", &c, &l, &s) == 3;
-  fclose(f);
-  if (!ok) return false;
-  fp->compile = (uint64_t)c;
-  fp->link = (uint64_t)l;
-  fp->sources = (uint64_t)s;
-  return true;
-}
-
-static void saveBuildFingerprint(const BuildFingerprint *fp) {
-  mkdirs(".rbot");
-  FILE *f = fopen(BUILD_FP_FILE ".tmp", "w");
-  if (!f) return;
-  fprintf(f, "%016llx %016llx %016llx\n", (unsigned long long)fp->compile,
-          (unsigned long long)fp->link, (unsigned long long)fp->sources);
-  bool ok = fclose(f) == 0;
-  if (ok) {
-#ifdef _WIN32
-    fsRemoveFile(BUILD_FP_FILE);
-#endif
-    if (rename(BUILD_FP_FILE ".tmp", BUILD_FP_FILE) != 0) fsRemoveFile(BUILD_FP_FILE ".tmp");
-  } else {
-    fsRemoveFile(BUILD_FP_FILE ".tmp");
-  }
-}
-
-/* ==================== Fast no-op snapshot ==================== */
-#define BUILD_STATE_FILE ".rbot/build.state"
-#define BUILD_STATE_MAGIC "RBOTFAST2"
-
-typedef struct {
-  char kind;
-  char path[MAX_PATH];
-  int64_t mtime;
-  long long size;
-} FastStamp;
-
-typedef struct {
-  char cwd[MAX_PATH];
-  char buildfile[MAX_PATH];
-  int64_t buildfileMtime;
-  long long buildfileSize;
-  char target[MAX_PATH * 2];
-  int64_t targetMtime;
-  long long targetSize;
-  int compiled;
-  int skipped;
-  int count;
-  FastStamp *stamps;
-  /* Ringkasan library: no-op berikutnya tetap menampilkan status lib. */
-  bool libRequested, libStaticUp, libSharedUp;
-  char libStaticPath[MAX_PATH * 2];
-  char libSharedPath[MAX_PATH * 2];
-  long long libStaticSize, libSharedSize;
-} FastState;
-
-static void fastStateFree(FastState *s) {
-  free(s->stamps);
-  memset(s, 0, sizeof(*s));
-}
-
-static bool fastStampAdd(List *paths, const char *path) {
-  for (int i = 0; i < paths->count; i++)
-    if (strcmp(paths->items[i], path) == 0) return true;
-  return listAdd(paths, path);
-}
-
-static void fastCollectTree(const char *dir, List *paths) {
-  if (!fsDirExists(dir)) return;
-  fastStampAdd(paths, dir);
-  List dirs = {0}, files = {0};
-  fsListDir(dir, &dirs, &files);
-  for (int i = 0; i < files.count; i++)
-    fastStampAdd(paths, files.items[i]);
-  for (int i = 0; i < dirs.count; i++)
-    fastCollectTree(dirs.items[i], paths);
-  listFree(&dirs);
-  listFree(&files);
-}
-
-static bool fastStateLoad(FastState *s) {
-  memset(s, 0, sizeof(*s));
-  FILE *f = fopen(BUILD_STATE_FILE, "r");
-  if (!f) return false;
-  char magic[32];
-  long long bfm = 0, tm = 0;
-  int libReq = 0, libSt = 0, libSh = 0;
-  if (fscanf(f, "%31s", magic) != 1 || strcmp(magic, BUILD_STATE_MAGIC) != 0 ||
-      fscanf(f,
-             "%1023s %1023s %lld %lld %2047s %lld %lld %d %d %d %d %d %d %2047s %2047s %lld %lld",
-             s->cwd, s->buildfile, &bfm, &s->buildfileSize, s->target, &tm, &s->targetSize,
-             &s->compiled, &s->skipped, &s->count, &libReq, &libSt, &libSh, s->libStaticPath,
-             s->libSharedPath, &s->libStaticSize, &s->libSharedSize) != 17 ||
-      s->count < 0 || s->count > 200000) {
-    fclose(f);
-    return false;
-  }
-  s->buildfileMtime = (int64_t)bfm;
-  s->targetMtime = (int64_t)tm;
-  s->libRequested = libReq != 0;
-  s->libStaticUp = libSt != 0;
-  s->libSharedUp = libSh != 0;
-  /* placeholder "-" = varian library tidak aktif (path kosong tidak bisa
-     dibaca %s) */
-  if (strcmp(s->libStaticPath, "-") == 0) s->libStaticPath[0] = '\0';
-  if (strcmp(s->libSharedPath, "-") == 0) s->libSharedPath[0] = '\0';
-  s->stamps = calloc((size_t)s->count, sizeof(FastStamp));
-  if (s->count && !s->stamps) {
-    fclose(f);
-    return false;
-  }
-  for (int i = 0; i < s->count; i++) {
-    long long mt = 0, sz = 0;
-    if (fscanf(f, " %c %lld %lld %4095s", &s->stamps[i].kind, &mt, &sz, s->stamps[i].path) != 4) {
-      fclose(f);
-      fastStateFree(s);
-      return false;
-    }
-    s->stamps[i].mtime = (int64_t)mt;
-    s->stamps[i].size = sz;
-  }
-  fclose(f);
-  return true;
-}
-
-static bool fastStateValid(const char *buildfilePath) {
-  FastState s;
-  if (!fastStateLoad(&s)) return false;
-  char cwd[MAX_PATH];
-  bool ok =
-      fsGetCwd(cwd, sizeof(cwd)) && strcmp(cwd, s.cwd) == 0 &&
-      strcmp(buildfilePath && *buildfilePath ? buildfilePath : "Buildfile", s.buildfile) == 0 &&
-      fsMTimeNs(s.buildfile) == s.buildfileMtime && fsFileSize(s.buildfile) == s.buildfileSize &&
-      fsMTimeNs(s.target) == s.targetMtime && fsFileSize(s.target) == s.targetSize;
-  for (int i = 0; ok && i < s.count; i++) {
-    FastStamp *st = &s.stamps[i];
-    int64_t currentMtime = fsMTimeNs(st->path);
-    if (st->kind == 'M') {
-      if (currentMtime >= 0) {
-        ok = false;
-        break;
-      }
-      continue;
-    }
-    if (currentMtime != st->mtime) {
-      ok = false;
-      break;
-    }
-    if (st->kind == 'F' && fsFileSize(st->path) != st->size) {
-      ok = false;
-      break;
-    }
-  }
-  if (ok) {
-    printf("> Build with cached state (fingerprint unchanged)\n");
-    printf("> Linking   : %s (up-to-date)\n", s.target);
-    if (s.libRequested) {
-      if (s.libStaticPath[0])
-        printf("> Library   : %s%s\n", s.libStaticPath, s.libStaticUp ? " (up-to-date)" : "");
-      if (s.libSharedPath[0])
-        printf("> Library   : %s%s\n", s.libSharedPath, s.libSharedUp ? " (up-to-date)" : "");
-    }
-    printf("\n> Summary\n");
-    printf("Target   : %s\n", s.target);
-    printf("Size     : %.1fKB\n", s.targetSize > 0 ? (double)s.targetSize / 1024.0 : 0);
-    if (s.libRequested) {
-      if (s.libStaticPath[0])
-        printf("Library  : %s (%.1fKB)\n", s.libStaticPath,
-               s.libStaticSize > 0 ? (double)s.libStaticSize / 1024.0 : 0);
-      if (s.libSharedPath[0])
-        printf("Library  : %s (%.1fKB)\n", s.libSharedPath,
-               s.libSharedSize > 0 ? (double)s.libSharedSize / 1024.0 : 0);
-    }
-    printf("Compiled : %d\n", s.compiled);
-    printf("Skipped  : %d\n", s.skipped);
-    printf("Status   : Success\n");
-  }
-  fastStateFree(&s);
-  return ok;
-}
-
-static void fastStateSave(const Config *c, const List *srcs, const char *target,
-                          const char *buildfilePath) {
-  /* Fast path hanya aman bila root build sama dengan cwd. Untuk root khusus,
-     gunakan jalur normal sampai tersedia normalisasi path absolut. */
-  if (strcmp(c->root, ".") != 0) {
-    fsRemoveFile(BUILD_STATE_FILE);
-    return;
-  }
-  char cwd[MAX_PATH];
-  if (!fsGetCwd(cwd, sizeof(cwd))) return;
-  const char *bf = buildfilePath && *buildfilePath ? buildfilePath : "Buildfile";
-  int64_t bfm = fsMTimeNs(bf);
-  long long bfs = fsFileSize(bf);
-  int64_t tm = fsMTimeNs(target);
-  long long ts = fsFileSize(target);
-  if (bfm < 0 || tm < 0 || bfs < 0 || ts < 0) return;
-  /* Format cache is whitespace-delimited; disable it for paths with spaces. */
-  if (strpbrk(cwd, " \t\r\n") || strpbrk(bf, " \t\r\n") || strpbrk(target, " \t\r\n")) return;
-
-  /* Library: status up-to-date saat build sukses selesai — ditampilkan
-     lagi pada no-op berikutnya (dulu informasi ini hilang di fast path). */
-  char staticLib[MAX_PATH * 2] = {0}, sharedLib[MAX_PATH * 2] = {0};
-  bool staticUp = true, sharedUp = true;
-  long long staticSz = 0, sharedSz = 0;
-  if (c->libRequested) {
-    if (c->libStatic) {
-      libStaticPath(c, staticLib, sizeof(staticLib));
-      staticUp = libVariantUpToDate(c, true, srcs);
-      long long s1 = fsFileSize(staticLib);
-      if (s1 < 0) return; /* lib diwajibkan tapi belum ada — jangan simpan */
-      staticSz = s1;
-    }
-    if (c->libShared) {
-      libSharedPath(c, sharedLib, sizeof(sharedLib));
-      sharedUp = libVariantUpToDate(c, false, srcs);
-      long long s2 = fsFileSize(sharedLib);
-      if (s2 < 0) return;
-      sharedSz = s2;
-    }
-  }
-
-  List paths = {0};
-  for (int i = 0; i < c->sources.count; i++)
-    fastCollectTree(c->sources.items[i], &paths);
-  List incDirs = {0};
-  includeDirs(c, &incDirs);
-  for (int i = 0; i < incDirs.count; i++) {
-    const char *d = incDirs.items[i];
-    if (d && *d && strcmp(d, ".") != 0) fastCollectTree(d, &paths);
-  }
-  listFree(&incDirs);
-  /* Include file inputs that are not necessarily inside source/header roots. */
-  fastStampAdd(&paths, bf);
-  fastStampAdd(&paths, ".rbot-version");
-  if (compdbEnabled(c) && fsFileExists("compile_commands.json"))
-    fastStampAdd(&paths, "compile_commands.json");
-  for (int i = 0; i < srcs->count; i++) {
-    char obj[MAX_PATH];
-    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) fastStampAdd(&paths, obj);
-  }
-  for (int i = 0; i < c->embCount; i++)
-    if (c->emb[i].enable) fastStampAdd(&paths, c->emb[i].objectPath);
-  /* Library masuk stamp seperti file biasa ('F'): berubah -> fast path
-     batal dan jalur normal meng-rebuild varian yang perlu (per-varian). */
-  if (staticLib[0]) fastStampAdd(&paths, staticLib);
-  if (sharedLib[0]) fastStampAdd(&paths, sharedLib);
-
-  FastStamp *stamps = calloc((size_t)paths.count, sizeof(FastStamp));
-  if (paths.count && !stamps) {
-    listFree(&paths);
-    return;
-  }
-  int count = 0;
-  bool safePaths = true;
-  for (int i = 0; i < paths.count; i++) {
-    const char *path = paths.items[i];
-    if (strlen(path) >= sizeof(stamps[count].path) || strpbrk(path, " \t\r\n")) {
-      safePaths = false;
-      break;
-    }
-    /* Satu stat per path: mtime + ukuran sekaligus (fsStampNsSize). */
-    int64_t mt = 0;
-    long long sz = 0;
-    if (!fsStampNsSize(path, &mt, &sz)) {
-      mt = -1;
-      sz = 0;
-    }
-    stamps[count].kind = mt < 0 ? 'M' : (fsDirExists(path) ? 'D' : 'F');
-    snprintf(stamps[count].path, sizeof(stamps[count].path), "%s", path);
-    stamps[count].mtime = mt;
-    stamps[count].size = stamps[count].kind == 'F' ? sz : 0;
-    count++;
-  }
-  if (!safePaths) {
-    free(stamps);
-    listFree(&paths);
-    return;
-  }
-  listFree(&paths);
-  mkdirs(".rbot");
-  FILE *f = fopen(BUILD_STATE_FILE ".tmp", "w");
-  if (!f) {
-    free(stamps);
-    return;
-  }
-  fprintf(f, "%s\n%s %s %lld %lld %s %lld %lld %d %d %d %d %d %d %s %s %lld %lld\n",
-          BUILD_STATE_MAGIC, cwd, bf, (long long)bfm, bfs, target, (long long)tm, ts, 0,
-          srcs->count, count, c->libRequested ? 1 : 0, staticUp ? 1 : 0, sharedUp ? 1 : 0,
-          staticLib[0] ? staticLib : "-", sharedLib[0] ? sharedLib : "-", staticSz, sharedSz);
-  for (int i = 0; i < count; i++)
-    fprintf(f, "%c %lld %lld %s\n", stamps[i].kind, (long long)stamps[i].mtime, stamps[i].size,
-            stamps[i].path);
-  bool ok = fclose(f) == 0;
-  free(stamps);
-  if (ok) {
-#ifdef _WIN32
-    fsRemoveFile(BUILD_STATE_FILE);
-#endif
-    if (rename(BUILD_STATE_FILE ".tmp", BUILD_STATE_FILE) != 0)
-      fsRemoveFile(BUILD_STATE_FILE ".tmp");
-  } else
-    fsRemoveFile(BUILD_STATE_FILE ".tmp");
-}
-
 int cmdBuild(int jobs, const char *buildfilePath) {
-  if (fastStateValid(buildfilePath)) return 0;
+  if (cmdsFastStateValid(buildfilePath)) return 0;
   Config c = configDefaults();
   if (!loadConfig(&c, buildfilePath)) return 1;
   if (!resolveCompiler(&c)) return 1;
+  profMark("startup+config");
 
   /* Mode sinyal: build paralel selalu butuh handler forward SIGINT karena
      tiap compiler ada di process group sendiri (Ctrl+C dari terminal hanya
@@ -813,20 +116,55 @@ int cmdBuild(int jobs, const char *buildfilePath) {
     return 1;
   }
 
+  /* Proyek kemasan (output.binary = false): SEBELUM koleksi source —
+     proyek kemasan sah tidak punya satu .c pun. Dua varian:
+       pack.*    -> pengemasan artefak (tar.gz/deb/checksum);
+       embedded  -> arsip aset untuk di-embed binary lain. */
+  if (!c.binary) {
+    if (c.pack.requested) return cmdsPackOnlyProject(&c);
+    if (c.embCount == 0) {
+      fprintf(stderr, "rbot: nothing to build (output.binary = false)\n");
+      return 1;
+    }
+    mkdirs(c.outBuildDir);
+    if (!buildEmbeddedArchives(&c)) return 1;
+    printf("\n> Summary\n");
+    for (int i = 0; i < c.embCount; i++) {
+      if (!c.emb[i].enable) continue;
+      printf("Archive  : %s%s\n", c.emb[i].archivePath,
+             fsFileExists(c.emb[i].archivePath) ? "" : " (missing)");
+    }
+    printf("Status   : Success\n");
+    return 0;
+  }
+
   List srcs = {0};
-  for (int i = 0; i < c.sources.count; i++)
-    walkDir(c.sources.items[i], ".c", &srcs);
+  for (int i = 0; i < c.sources.count; i++) {
+    const char *entry = c.sources.items[i];
+    /* Entri FILE .c (mis. hasil `rbot -xf` untuk build.ninja flat) masuk
+       langsung; selain itu dianggap folder dan discan rekursif. */
+    size_t elen = strlen(entry);
+    if (elen >= 2 && strcmp(entry + elen - 2, ".c") == 0 && fsFileExists(entry)) {
+      listAdd(&srcs, entry);
+      continue;
+    }
+    walkDir(entry, ".c", &srcs);
+  }
   if (srcs.count == 0) {
     fprintf(stderr, "rbot: no source files found in sources\n");
     return 1;
   }
 
-  BuildFingerprint currentFp = makeBuildFingerprint(&c, &srcs);
-  BuildFingerprint previousFp = {0};
-  bool haveBuildFp = loadBuildFingerprint(&previousFp);
+  CmdsBuildFingerprint currentFp;
+  cmdsFingerprintMake(&c, &srcs, &currentFp);
+  CmdsBuildFingerprint previousFp = {0};
+  bool haveBuildFp = cmdsFingerprintLoad(&previousFp);
   bool compileConfigChanged = !haveBuildFp || previousFp.compile != currentFp.compile;
   bool sourceSetChanged = !haveBuildFp || previousFp.sources != currentFp.sources;
   bool linkConfigChanged = !haveBuildFp || previousFp.link != currentFp.link;
+
+  profMark("fingerprint");
+
   if (haveBuildFp && compileConfigChanged)
     printf("> Fingerprint: compile configuration changed; rebuilding objects\n");
   if (haveBuildFp && sourceSetChanged)
@@ -840,7 +178,15 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   char *inc = includeFlags(&c);
   char *wf = warningFlags(&c);
 
-  if (compdbEnabled(&c)) writeCompdb(&c, &srcs);
+  /* compile_commands.json tidak perlu dihitung ulang pada setiap build.
+     Daftar command hanya berubah jika file belum ada, konfigurasi compile
+     berubah, atau set source berubah. Perubahan isi source/header tidak
+     mengubah command compile. */
+  if (compdbEnabled(&c)) {
+    bool compdbMissing = !fsFileExists("compile_commands.json");
+    if (compdbMissing || !haveBuildFp || compileConfigChanged || sourceSetChanged)
+      writeCompdb(&c, &srcs);
+  }
 
   /* Terbitkan build/embedded.h & build/version.h sebelum kompilasi agar
      konsumen melihat simbol/versi yang benar; jika salah satunya berubah,
@@ -848,7 +194,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   char obj[MAX_PATH];
   bool embHeaderChanged = false, verHeaderChanged = false;
   if (c.embCount > 0 && !emitEmbeddedHeader(&c, &embHeaderChanged)) return 1;
-  if (!emitVersionHeader(&c, &verHeaderChanged)) return 1;
+  if (!cmdsEmitVersionHeader(&c, &verHeaderChanged)) return 1;
   if (embHeaderChanged || verHeaderChanged) {
     if (verHeaderChanged)
       printf("> Version   : .rbot-version changed, recompiling all sources\n");
@@ -876,7 +222,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
    *
    * Edges header diambil dari file .d compiler (flag -MMD, GCC/Clang) —
    * akurat & lengkap; pemindai #include hanya fallback (build pertama,
-   * MSVC, .d belum ada). Lihat deps.c.
+   * MSVC, .d belum ada). Lihat deps/.
    */
   List pending = {0};
   DepCache *deps = depsNew(&c);
@@ -910,6 +256,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
     }
     listAdd(&pending, src);
   }
+  profMark("decide");
   if (headerTouched > 0)
     printf("> Headers   : %d source(s) skipped (touched, content unchanged)\n", headerTouched);
   if (headerStale > 0)
@@ -918,8 +265,8 @@ int cmdBuild(int jobs, const char *buildfilePath) {
 
   /* Fase 2: kompilasi hanya yang berubah — paralel (-jN) atau serial. */
   if (jobs != 1 && total > 0) {
-    runParallelJobs(&c, inc, wf, &pending, obj, sizeof(obj), jobs, &compiled, &failed,
-                    &interrupted);
+    cmdsRunParallelJobs(&c, inc, wf, &pending, obj, sizeof(obj), jobs, &compiled, &failed,
+                        &interrupted);
   } else {
     for (int i = 0; i < pending.count; i++) {
       const char *src = pending.items[i];
@@ -943,11 +290,12 @@ int cmdBuild(int jobs, const char *buildfilePath) {
         printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, ok ? "OK" : "FAIL", dt, src);
     }
   }
+  profMark("compile");
 
   if (interrupted > 0) {
     /* Jangan percaya fingerprint lama setelah sebagian object mungkin telah
        ditulis dengan konfigurasi baru sebelum interupsi. */
-    if (compileConfigChanged) fsRemoveFile(BUILD_FP_FILE);
+    if (compileConfigChanged) cmdsFingerprintInvalidate();
     fprintf(stderr, "\nrbot: build interrupted; stopping\n");
     free(inc);
     free(wf);
@@ -957,7 +305,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   if (failed > 0) {
     /* Sebagian object bisa berhasil dibuat sebelum object lain gagal. Hapus
        state agar build berikutnya tidak melewatkan rebuild konfigurasi penuh. */
-    if (compileConfigChanged) fsRemoveFile(BUILD_FP_FILE);
+    if (compileConfigChanged) cmdsFingerprintInvalidate();
     fprintf(stderr, "\nrbot: build failed with %d error(s); linking skipped\n", failed);
     free(inc);
     free(wf);
@@ -967,6 +315,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   if (!buildEmbedded(&c)) {
     free(inc);
     free(wf);
+    profReport();
     return 1;
   }
 
@@ -1019,13 +368,14 @@ int cmdBuild(int jobs, const char *buildfilePath) {
     printf("> Linking   : %s (up-to-date)\n", target);
     /* Library bisa jadi masih perlu dibangun (baru diaktifkan di
        Buildfile / terhapus manual) meski binary sudah up-to-date. */
-    if (c.libRequested && !buildLibrary(&c, &srcs)) {
+    if (c.libRequested && !cmdsBuildLibrary(&c, &srcs)) {
       free(inc);
       free(wf);
       return 1;
     }
     free(inc);
     free(wf);
+    profReport();
     /* Build sukses: rekam snapshot hash source + dependensi agar build
        berikutnya bisa membedakan `touch` (isi sama) dari perubahan konten.
        No-op murni (tidak ada kompilasi, tidak ada yang berubah sejak rekam
@@ -1033,13 +383,20 @@ int cmdBuild(int jobs, const char *buildfilePath) {
        pada project besar. depsSave tetap dipanggil: verifikasi konten
        (kasus touch) memperbarui mtime snapshot, dan depsSave sendiri murah
        bila tidak ada yang berubah. */
-    if (compiled > 0 || depsSnapshotIncomplete(deps)) {
+    if (depsSnapshotIncomplete(deps)) {
       for (int i = 0; i < srcs.count; i++)
         depsRecordUpdate(deps, srcs.items[i]);
+    } else if (compiled > 0) {
+      for (int i = 0; i < pending.count; i++)
+        depsRecordUpdate(deps, pending.items[i]);
     }
     depsSave(deps);
     depsFree(deps);
-    saveBuildFingerprint(&currentFp);
+    cmdsFingerprintSave(&currentFp);
+    /* Packaging (pack.*) sebelum summary; fast state disimpan di dalamnya
+       bila pack sukses — gagal kemasan tidak merekam state. */
+    bool fastSaved = false;
+    if (!cmdsPackAfterBinary(&c, &fastSaved, &srcs, target, buildfilePath)) return 1;
     printf("\n> Summary\n");
     long long sizeBytes = fsFileSize(target);
     double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
@@ -1048,7 +405,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
     printf("Compiled : %d\n", compiled);
     printf("Skipped  : %d\n", skipped);
     printf("Status   : Success\n");
-    fastStateSave(&c, &srcs, target, buildfilePath);
+    if (!fastSaved) cmdsFastStateSave(&c, &srcs, target, buildfilePath);
     return 0;
   }
 
@@ -1111,6 +468,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
 
   printf("> Linking   : %s/%s\n", c.outBinaryDir, c.outBinaryName);
   bool linked = runCmd(cmd);
+  profMark("link");
   free(cmd);
 
   free(inc);
@@ -1122,7 +480,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   }
 
   /* Library statis/shared dari object yang sama — object tidak dihapus. */
-  if (!buildLibrary(&c, &srcs)) {
+  if (!cmdsBuildLibrary(&c, &srcs)) {
     return 1;
   }
 
@@ -1133,7 +491,12 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   }
   depsSave(deps);
   depsFree(deps);
-  saveBuildFingerprint(&currentFp);
+  cmdsFingerprintSave(&currentFp);
+
+  /* Packaging (pack.*) setelah link & state — lihat jalur up-to-date. */
+  bool fastSaved = false;
+  if (!cmdsPackAfterBinary(&c, &fastSaved, &srcs, target, buildfilePath)) return 1;
+  profReport();
 
   long long sizeBytes = fsFileSize(target);
   double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
@@ -1144,56 +507,6 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   printf("Compiled : %d\n", compiled);
   printf("Skipped  : %d\n", skipped);
   printf("Status   : Success\n");
-  fastStateSave(&c, &srcs, target, buildfilePath);
-  return 0;
-}
-
-/* ==================== clean ==================== */
-
-int cmdClean(const char *buildfilePath) {
-  Config c = configDefaults();
-  if (!loadConfig(&c, buildfilePath)) return 1;
-
-  bool any = false;
-  if (c.cleanBuildDir && safeRelative(c.outBuildDir)) {
-    if (fsRemoveTree(c.outBuildDir))
-      printf("> Removed   : %s\n", c.outBuildDir);
-    else
-      printf("> Removed   : %s (sebagian gagal dihapus)\n", c.outBuildDir);
-    any = true;
-  }
-  /* Hapus FILE library (.a/.so/.dll), bukan foldernya — dulu fsRemoveTree
-     pada outLibDir menghapus folder lib/ sekaligus isinya. Folder tetap
-     ada; build berikutnya membuat ulang isinya bila diminta. */
-  if (c.cleanBuildDir && c.libRequested && safeRelative(c.outLibDir)) {
-    char libPath[MAX_PATH * 2];
-    if (c.libStatic) {
-      libStaticPath(&c, libPath, sizeof(libPath));
-      if (fsRemoveFile(libPath)) {
-        printf("> Removed   : %s\n", libPath);
-        any = true;
-      }
-    }
-    if (c.libShared) {
-      libSharedPath(&c, libPath, sizeof(libPath));
-      if (fsRemoveFile(libPath)) {
-        printf("> Removed   : %s\n", libPath);
-        any = true;
-      }
-    }
-  }
-  if (c.cleanCompileCommands && fsFileExists("compile_commands.json")) {
-    fsRemoveFile("compile_commands.json");
-    printf("> Removed   : compile_commands.json\n");
-    any = true;
-  }
-  /* Snapshot hash dependensi dihapus juga: verifikasi konten dimulai dari
-     nol pada build berikutnya (build sukses merekam ulang dari awal). */
-  if (fsFileExists(".rbot/deps.cache")) {
-    fsRemoveFile(".rbot/deps.cache");
-    printf("> Removed   : .rbot/deps.cache\n");
-    any = true;
-  }
-  if (!any) printf("> Nothing to clean (see Buildfile: clean)\n");
+  if (!fastSaved) cmdsFastStateSave(&c, &srcs, target, buildfilePath);
   return 0;
 }

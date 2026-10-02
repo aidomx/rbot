@@ -1,0 +1,32 @@
+use workspace
+
+# alias singkat
+projects.rupamod as mod
+projects.rupa as rupa
+
+projects = rupamod, rupa, ruka
+
+compiler = gcc, clang
+flags = Wall, Wextra
+std = gnu11
+
+# B. rupamod — proyek kemasan (archive)
+mod.output.binary = false
+mod.archive.src = stdlib
+mod.archive.pattern = .rp
+mod.archive.name = rupa_modules
+mod.archive.with.tar = true
+mod.archive.with.ext = gz
+mod.archive.dir = dist
+
+# A. rupa
+rupa.sources = src
+rupa.output.binaryName = rupa
+
+# C. ruka — embed arsip jadi dari rupamod
+ruka.sources = src
+ruka.output.binaryName = ruka
+ruka.depends_on = rupamod
+ruka.embedded.modules.file = ../rupamod/dist/rupa_modules.tar.gz
+ruka.embedded.modules.variable = MODULES
+ruka.headers = build, I.

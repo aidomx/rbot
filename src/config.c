@@ -1,66 +1,28 @@
 #include "config.h"
 
 #include <stdint.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "cfg/config_cache.h"
+#include "embed.h"
+#include "pack/pack_internal.h"
+#include "uses/alias.h"
+#include "uses/use.h"
+
+#define SECTION_LEN 64
+
 #include "portability.h"
 #include "util.h"
 
-/* ==================== Alias (format "use alias") ==================== */
-
 /*
- * Format baru Buildfile diawali baris `use alias`. Baris `X as Y` berarti
- * alias Y untuk X — sama persis semantik `make`/`git config`: X tetap
- * valid, Y hanya nama kedua. Alias bisa berantai: `embedded.modules as
- * e.modules` lalu `e.modules.archive as archive`. Resolver iteratif: setiap
- * segmen diganti selama masih ada pasangan alias yang cocok (dengan batas
- * iterasi anti-siklus; batas tercapai berarti siklus — dibiarkan apa adanya,
- * key tak dikenal memang diabaikan).
+ * ==================== Alias (format "use alias") ====================
+ *
+ * Mesin alias `X as Y` dipindah ke uses/alias.c agar dipakai bersama oleh
+ * `use project` (parser di bawah) dan `use workspace` (uses/workspace.c).
+ * Semantik tak berubah — lihat komentar di uses/alias.h.
  */
-#define SECTION_LEN 64
-#define ALIAS_MAX 32
-#define ALIAS_KEY_MAX 256          /* key terqualifikasi yang diterima */
-#define ALIAS_BUF_MAX (4 * SECTION_LEN) /* "canonical\talias" & hasil resolve */
-
-static void aliasListAdd(List *l, const char *canonical, const char *alias) {
-  if (!canonical || !*canonical || !alias || !*alias || !strcmp(canonical, alias)) return;
-  if (l->count >= ALIAS_MAX) return;
-  for (int i = 0; i < l->count; i++) {
-    const char *tab = strchr(l->items[i], '\t');
-    if (tab && strcmp(tab + 1, alias) == 0) return; /* alias pertama menang */
-  }
-  char buf[ALIAS_BUF_MAX];
-  snprintf(buf, sizeof(buf), "%s\t%s", canonical, alias);
-  listAdd(l, buf);
-}
-
-static bool aliasResolveOnce(const List *l, char *key, size_t cap) {
-  for (int i = 0; i < l->count; i++) {
-    const char *tab = strchr(l->items[i], '\t');
-    if (!tab) continue;
-    size_t cl = (size_t)(tab - l->items[i]);
-    const char *al = tab + 1;
-    size_t alLen = strlen(al);
-    size_t kLen = strlen(key);
-    if (kLen < alLen || strncmp(key, al, alLen) != 0) continue;
-    if (alLen < kLen && key[alLen] != '.') continue;
-
-    char out[ALIAS_BUF_MAX + ALIAS_KEY_MAX];
-    snprintf(out, sizeof(out), "%.*s%s", (int)cl, l->items[i], key + alLen);
-    if (strcmp(out, key) == 0) continue;
-    copyStr(key, cap, out);
-    return true;
-  }
-  return false;
-}
-
-static void aliasResolve(const Config *c, char *key, size_t cap) {
-  for (int guard = 0; guard < 8 && aliasResolveOnce(&c->aliases, key, cap); guard++) {
-  }
-}
 
 /* ==================== Default & finalisasi ==================== */
 
@@ -68,6 +30,7 @@ Config configDefaults(void) {
   Config c = {0};
   copyStr(c.root, sizeof(c.root), ".");
   copyStr(c.std, sizeof(c.std), "gnu11");
+  c.binary = true;
   c.cleanBuildDir = true;
   c.cleanCompileCommands = false;
   c.progressBar = true;
@@ -77,35 +40,21 @@ Config configDefaults(void) {
   copyStr(c.outBinaryDir, sizeof(c.outBinaryDir), "bin");
   copyStr(c.outBuildDir, sizeof(c.outBuildDir), "build");
   copyStr(c.outCompileCommands, sizeof(c.outCompileCommands), "auto");
-  copyStr(  c.outLibDir, sizeof(c.outLibDir), "lib");
+  copyStr(c.outLibDir, sizeof(c.outLibDir), "lib");
   /* c.aliases zero-init via Config c = {0} — List tanpa konstruktor. */
   /* default embedded per-entri; tidak ada yang di-preset di sini */
   return c;
-}
-
-static void configFinalizeEntry(EmbeddedEntry *e, const char *buildDir) {
-  /* archive path: <archiveDir>/<n>[.tar.<ext>] tergantung with.tar/with.ext */
-  if (e->tar) {
-    if (e->ext[0])
-      snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s.tar.%s", e->archiveDir,
-               e->archiveName, e->ext);
-    else
-      snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s.tar", e->archiveDir, e->archiveName);
-  } else if (e->ext[0]) {
-    snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s.%s", e->archiveDir, e->archiveName,
-             e->ext);
-  } else {
-    snprintf(e->archivePath, sizeof(e->archivePath), "%s/%s", e->archiveDir, e->archiveName);
-  }
-
-  /* object ada di bawah build dir, mis. build/rupa_modules.o */
-  snprintf(e->objectPath, sizeof(e->objectPath), "%s/%s.o", buildDir, e->archiveName);
 }
 
 static void appendLibraries(List *dst, const List *src) {
   for (int i = 0; i < src->count; i++)
     listAdd(dst, src->items[i]);
 }
+
+/* ==================== pack (pengemasan artefak) ==================== */
+
+/* Helper parsing pack.* (packSetStr/packAddFiles/packApplyDeb/packApply)
+   ada di pack/pack_config.c — dipakai lewat pack/pack_internal.h. */
 
 /* Pilih library nested berdasarkan target host. Library flat tetap selalu dipakai. */
 static void configFinalizeLibraries(Config *c) {
@@ -122,6 +71,22 @@ static void configFinalize(Config *c) {
   configFinalizeLibraries(c);
   for (int i = 0; i < c->embCount; i++)
     configFinalizeEntry(&c->emb[i], c->outBuildDir);
+
+  /* pack: nilai default + penanda proyek pengemasan. Key yang hanya
+     mengisi metadata (name/version/deb.*) tidak mengaktifkan pack —
+     cukup files/output yang disebut. */
+  if (c->pack.files.count > 0 || c->pack.output[0]) {
+    c->pack.requested = true;
+    if (!c->pack.name[0]) copyStr(c->pack.name, sizeof(c->pack.name), c->outBinaryName);
+    if (!c->pack.version[0]) copyStr(c->pack.version, sizeof(c->pack.version), "0.0.0");
+    if (!c->pack.output[0])
+      copyStr(c->pack.output, sizeof(c->pack.output), "dist/{name}-v{version}.tar.gz");
+    if (!c->pack.debInstallPrefix[0])
+      copyStr(c->pack.debInstallPrefix, sizeof(c->pack.debInstallPrefix), "/usr/local");
+    /* Proyek kemasan tanpa sources tidak punya yang bisa dikompilasi —
+       sama seperti archive.*, jalur !binary di cmdBuild yang menangani. */
+    if (c->sources.count == 0) c->binary = false;
+  }
 }
 
 /* ==================== Penerapan konfigurasi ==================== */
@@ -146,6 +111,14 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       c->foreground = b;
     else if (strcmp(key, "target") == 0)
       copyStr(c->target, sizeof(c->target), value);
+    /* Key bare hasil sintesis Buildfile.workspace (prefix projects.<n>. dan
+       aliasnya dilepas): name/version/files/output/... -> pack. Tanpa
+       files/output proyek biasa tidak terpengaruh (pack tak aktif). */
+    else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0 ||
+             strcmp(key, "output") == 0 || strcmp(key, "compress") == 0 ||
+             strcmp(key, "checksum") == 0 || strcmp(key, "format") == 0 ||
+             strcmp(key, "files") == 0)
+      packApply(c, key, value);
     return;
   }
 
@@ -169,6 +142,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
   }
 
   if (strcmp(section, "output") == 0) {
+    if (strcmp(key, "binary") == 0 && parseBool(value, &b)) c->binary = b;
     if (strcmp(key, "binaryName") == 0)
       copyStr(c->outBinaryName, sizeof(c->outBinaryName), value);
     else if (strcmp(key, "binaryDir") == 0)
@@ -233,7 +207,76 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       copyStr(e->archiveDir, sizeof(e->archiveDir), value);
     } else if (strcmp(key, "name") == 0) {
       copyStr(e->archiveName, sizeof(e->archiveName), value);
+    } else if (strcmp(key, "file") == 0) {
+      /* embedded.<n>.file: pakai arsip jadi (skip tar). Ditangani lebih
+         lanjut di configFinalizeEntry. */
+      e->usePrebuilt = true;
+      copyStr(e->prebuiltPath, sizeof(e->prebuiltPath), value);
+    } else if (strcmp(key, "variable") == 0) {
+      /* Override prefix macro EMBED_<N>_ — mis. BUILTIN_MODULES. */
+      copyStr(e->variable, sizeof(e->variable), value);
     }
+    return;
+  }
+
+  if (strcmp(section, "pack") == 0) {
+    /* Proyek pengemasan: pack.<key> (name/version/output/...),
+       pack.files (daftar koma), atau pack.deb.<key>. */
+    if (sub && strcmp(sub, "deb") == 0) {
+      packApplyDeb(c, key, value);
+      return;
+    }
+    packApply(c, key, value);
+    return;
+  }
+
+  if (strcmp(section, "deb") == 0) {
+    /* Key bare deb.<key> (hasil sintesis Buildfile.workspace: kunci
+       `deb.maintainer = ...` di-rute sebagai section "deb"). */
+    packApplyDeb(c, key, value);
+    return;
+  }
+
+  if (strcmp(section, "archive") == 0) {
+    /*
+     * Proyek kemasan (workspace): memproduksi arsip saja, tanpa binary.
+     * Key set ini MEMAKAI entri embedded sebagai penyimpanan setting tar
+     * (nama/with.tar/with.ext/dir), memakai arsip jadi via file, lalu
+     * menonaktifkan binary (output.binary = false secara implisit).
+     * Aset yang diarsipkan: archive.src.
+     */
+    if (!c->embCount) {
+      if (c->embCount >= MAX_EMBEDDED) return;
+      EmbeddedEntry *e = &c->emb[c->embCount++];
+      memset(e, 0, sizeof(*e));
+      copyStr(e->name, sizeof(e->name), "archive");
+      e->enable = true;
+      e->tar = true;
+      copyStr(e->archiveDir, sizeof(e->archiveDir), "dist");
+      copyStr(e->archiveName, sizeof(e->archiveName), "archive");
+      copyStr(e->ext, sizeof(e->ext), "gz");
+      copyStr(e->pattern, sizeof(e->pattern), "");
+    }
+    EmbeddedEntry *e = &c->emb[0];
+
+    if (subsub && strcmp(subsub, "with") == 0) {
+      if (strcmp(key, "tar") == 0 && parseBool(value, &b))
+        e->tar = b;
+      else if (strcmp(key, "ext") == 0)
+        copyStr(e->ext, sizeof(e->ext), value);
+      return;
+    }
+    if (strcmp(key, "src") == 0) {
+      copyStr(e->src, sizeof(e->src), value);
+    } else if (strcmp(key, "pattern") == 0) {
+      copyStr(e->pattern, sizeof(e->pattern), value);
+    } else if (strcmp(key, "name") == 0) {
+      copyStr(e->archiveName, sizeof(e->archiveName), value);
+    } else if (strcmp(key, "dir") == 0) {
+      copyStr(e->archiveDir, sizeof(e->archiveDir), value);
+    }
+    c->binary = false; /* proyek kemasan tidak memproduksi binary */
+    c->libRequested = false;
     return;
   }
 }
@@ -267,20 +310,25 @@ static void listForSection(Config *c, const char *section, const char *sub, cons
       listAdd(&c->headerInternal, item);
     else
       listAdd(&c->headerPublic, item);
+  } else if (strcmp(section, "pack") == 0) {
+    /* Format colon: section pack + item list = entri pack.files. */
+    listAdd(&c->pack.files, item);
   }
 }
-
 
 static void parseLine(Config *c, char *section, char *sub, char *subsub, int *subIndent,
                       int *subsubIndent, char *text, int indent, bool useAlias) {
   bool isItem = text[0] == '-';
   if (isItem) text = trim(text + 1);
 
-  /* ---- format "use alias": key = value (kualifikasi titik, alias aktif) ----
+  /* ---- format `use alias` / `use project`: key = value (kualifikasi
+     titik, alias aktif) ----
      Baris `X as Y` = definisi alias, bukan pengaturan. Baris `a = b`:
      key tanpa titik mewarisi prefix section aktif (baris menjorok), lalu
      alias di-resolve, dan hasilnya dirutekan ke configApply/listForSection
-     yang sama dengan format lama — tidak ada jalur konfigurasi kedua. */
+     yang sama dengan format lama — tidak ada jalur konfigurasi kedua.
+     `use project` adalah nama baru untuk jalur ini; `use alias` tetap
+     diterima (kompatibilitas). */
   if (useAlias && !isItem) {
     /* Format baru menerima komentar // (selain # yang sudah dibuang
        loadConfig). Dipotong sebelum apapun — nilai berisi "//" (URL) tak
@@ -289,12 +337,7 @@ static void parseLine(Config *c, char *section, char *sub, char *subsub, int *su
     if (slash2) *slash2 = '\0';
     if (!*trim(text)) return;
 
-    char *as = strstr(text, " as ");
-    if (as) {
-      *as = '\0';
-      aliasListAdd(&c->aliases, trim(text), trim(as + 4));
-      return;
-    }
+    if (aliasLineAdd(&c->aliases, text)) return;
     char *eq = strchr(text, '=');
     if (eq) {
       *eq = '\0';
@@ -317,7 +360,7 @@ static void parseLine(Config *c, char *section, char *sub, char *subsub, int *su
         snprintf(full, sizeof(full), "%s.%s", qual, key);
         copyStr(key, sizeof(key), full);
       }
-      aliasResolve(c, key, sizeof(key));
+      aliasResolve(&c->aliases, key, sizeof(key));
 
       char *parts[8];
       int np = 0;
@@ -398,260 +441,13 @@ static void parseLine(Config *c, char *section, char *sub, char *subsub, int *su
     configApply(c, section, sub, NULL, key, value);
 }
 
-/* ==================== Persistent Buildfile cache ==================== */
-
-#define CONFIG_CACHE_MAGIC "RBOTCFG1"
-#define CONFIG_CACHE_VERSION 4u
-#define CONFIG_CACHE_DIR ".rbot"
-#define CONFIG_CACHE_FILE "buildfile.cache"
-
-static bool cacheWriteBytes(FILE *fp, const void *p, size_t n) {
-  return fwrite(p, 1, n, fp) == n;
-}
-
-static bool cacheReadBytes(FILE *fp, void *p, size_t n) {
-  return fread(p, 1, n, fp) == n;
-}
-
-static bool cacheWriteU32(FILE *fp, uint32_t v) {
-  return cacheWriteBytes(fp, &v, sizeof(v));
-}
-static bool cacheReadU32(FILE *fp, uint32_t *v) {
-  return cacheReadBytes(fp, v, sizeof(*v));
-}
-static bool cacheWriteU8(FILE *fp, uint8_t v) {
-  return cacheWriteBytes(fp, &v, sizeof(v));
-}
-static bool cacheReadU8(FILE *fp, uint8_t *v) {
-  return cacheReadBytes(fp, v, sizeof(*v));
-}
-
-static bool cacheWriteString(FILE *fp, const char *s) {
-  uint32_t n = (uint32_t)(s ? strlen(s) : 0);
-  return cacheWriteU32(fp, n) && (!n || cacheWriteBytes(fp, s, n));
-}
-
-static bool cacheReadString(FILE *fp, char *dst, size_t cap) {
-  uint32_t n = 0;
-  if (!cacheReadU32(fp, &n) || n >= cap) return false;
-  if (n && !cacheReadBytes(fp, dst, n)) return false;
-  dst[n] = '\0';
-  return true;
-}
-
-static bool cacheWriteList(FILE *fp, const List *l) {
-  if (!cacheWriteU32(fp, (uint32_t)l->count)) return false;
-  for (int i = 0; i < l->count; i++)
-    if (!cacheWriteString(fp, l->items[i])) return false;
-  return true;
-}
-
-static bool cacheReadList(FILE *fp, List *l) {
-  uint32_t count = 0;
-  if (!cacheReadU32(fp, &count) || count > INT_MAX) return false;
-  for (uint32_t i = 0; i < count; i++) {
-    char item[MAX_PATH * 2];
-    if (!cacheReadString(fp, item, sizeof(item))) return false;
-    if (!listAdd(l, item)) return false;
-  }
-  return true;
-}
-
-static bool cacheWriteEmbedded(FILE *fp, const EmbeddedEntry *e) {
-  uint8_t b = e->enable ? 1 : 0;
-  uint8_t tar = e->tar ? 1 : 0;
-  return cacheWriteString(fp, e->name) && cacheWriteU8(fp, b) && cacheWriteString(fp, e->src) &&
-         cacheWriteString(fp, e->extract) && cacheWriteString(fp, e->pattern) &&
-         cacheWriteString(fp, e->archiveDir) && cacheWriteString(fp, e->archiveName) &&
-         cacheWriteU8(fp, tar) && cacheWriteString(fp, e->ext) &&
-         cacheWriteString(fp, e->archivePath) && cacheWriteString(fp, e->objectPath);
-}
-
-static bool cacheReadEmbedded(FILE *fp, EmbeddedEntry *e) {
-  uint8_t b = 0, tar = 0;
-  memset(e, 0, sizeof(*e));
-  if (!cacheReadString(fp, e->name, sizeof(e->name)) || !cacheReadU8(fp, &b) ||
-      !cacheReadString(fp, e->src, sizeof(e->src)) ||
-      !cacheReadString(fp, e->extract, sizeof(e->extract)) ||
-      !cacheReadString(fp, e->pattern, sizeof(e->pattern)) ||
-      !cacheReadString(fp, e->archiveDir, sizeof(e->archiveDir)) ||
-      !cacheReadString(fp, e->archiveName, sizeof(e->archiveName)) || !cacheReadU8(fp, &tar) ||
-      !cacheReadString(fp, e->ext, sizeof(e->ext)) ||
-      !cacheReadString(fp, e->archivePath, sizeof(e->archivePath)) ||
-      !cacheReadString(fp, e->objectPath, sizeof(e->objectPath)))
-    return false;
-  e->enable = b != 0;
-  e->tar = tar != 0;
-  return true;
-}
-
-static bool cacheWriteConfig(FILE *fp, const Config *c) {
-  uint8_t cleanBuild = c->cleanBuildDir ? 1 : 0;
-  uint8_t cleanCompdb = c->cleanCompileCommands ? 1 : 0;
-  uint8_t progress = c->progressBar ? 1 : 0;
-  uint8_t progressError = c->progressErrorAlways ? 1 : 0;
-  uint8_t foreground = c->foreground ? 1 : 0;
-
-  if (!cacheWriteString(fp, c->root) || !cacheWriteList(fp, &c->sources) ||
-      !cacheWriteList(fp, &c->flags) || !cacheWriteList(fp, &c->headerInternal) ||
-      !cacheWriteList(fp, &c->headerPublic) || !cacheWriteList(fp, &c->libraries) ||
-      !cacheWriteList(fp, &c->librariesLinux) || !cacheWriteList(fp, &c->librariesMacOS) ||
-      !cacheWriteList(fp, &c->librariesWindows) || !cacheWriteList(fp, &c->compilers) ||
-      !cacheWriteString(fp, c->std) || !cacheWriteString(fp, c->cc) ||
-      !cacheWriteString(fp, c->target) ||
-      !cacheWriteU8(fp, cleanBuild) || !cacheWriteU8(fp, cleanCompdb) ||
-      !cacheWriteU8(fp, progress) || !cacheWriteU8(fp, progressError) ||
-      !cacheWriteU8(fp, foreground) ||
-      !cacheWriteString(fp, c->outBinaryName) || !cacheWriteString(fp, c->outBinaryDir) ||
-      !cacheWriteString(fp, c->outBuildDir) || !cacheWriteString(fp, c->outCompileCommands) ||
-      !cacheWriteString(fp, c->outLibName) || !cacheWriteString(fp, c->outLibDir) ||
-      !cacheWriteU8(fp, c->libRequested ? 1 : 0) || !cacheWriteU8(fp, c->libStatic ? 1 : 0) ||
-      !cacheWriteU8(fp, c->libShared ? 1 : 0) || !cacheWriteList(fp, &c->excludes) ||
-      !cacheWriteU32(fp, (uint32_t)c->embCount))
-    return false;
-
-  for (int i = 0; i < c->embCount; i++)
-    if (!cacheWriteEmbedded(fp, &c->emb[i])) return false;
-  return true;
-}
-
-static bool cacheReadConfig(FILE *fp, Config *c) {
-  uint8_t cleanBuild = 0, cleanCompdb = 0, progress = 0, progressError = 0, foreground = 0;
-  uint8_t libRequested = 0, libStatic = 0, libShared = 0;
-  uint32_t embCount = 0;
-
-  if (!cacheReadString(fp, c->root, sizeof(c->root)) || !cacheReadList(fp, &c->sources) ||
-      !cacheReadList(fp, &c->flags) || !cacheReadList(fp, &c->headerInternal) ||
-      !cacheReadList(fp, &c->headerPublic) || !cacheReadList(fp, &c->libraries) ||
-      !cacheReadList(fp, &c->librariesLinux) || !cacheReadList(fp, &c->librariesMacOS) ||
-      !cacheReadList(fp, &c->librariesWindows) || !cacheReadList(fp, &c->compilers) ||
-      !cacheReadString(fp, c->std, sizeof(c->std)) || !cacheReadString(fp, c->cc, sizeof(c->cc)) ||
-      !cacheReadString(fp, c->target, sizeof(c->target)) ||
-      !cacheReadU8(fp, &cleanBuild) || !cacheReadU8(fp, &cleanCompdb) ||
-      !cacheReadU8(fp, &progress) || !cacheReadU8(fp, &progressError) ||
-      !cacheReadU8(fp, &foreground) ||
-      !cacheReadString(fp, c->outBinaryName, sizeof(c->outBinaryName)) ||
-      !cacheReadString(fp, c->outBinaryDir, sizeof(c->outBinaryDir)) ||
-      !cacheReadString(fp, c->outBuildDir, sizeof(c->outBuildDir)) ||
-      !cacheReadString(fp, c->outCompileCommands, sizeof(c->outCompileCommands)) ||
-      !cacheReadString(fp, c->outLibName, sizeof(c->outLibName)) ||
-      !cacheReadString(fp, c->outLibDir, sizeof(c->outLibDir)) || !cacheReadU8(fp, &libRequested) ||
-      !cacheReadU8(fp, &libStatic) || !cacheReadU8(fp, &libShared) ||
-      !cacheReadList(fp, &c->excludes) || !cacheReadU32(fp, &embCount) || embCount > MAX_EMBEDDED)
-    return false;
-
-  c->cleanBuildDir = cleanBuild != 0;
-  c->cleanCompileCommands = cleanCompdb != 0;
-  c->progressBar = progress != 0;
-  c->progressErrorAlways = progressError != 0;
-  c->foreground = foreground != 0;
-  c->libRequested = libRequested != 0;
-  c->libStatic = libStatic != 0;
-  c->libShared = libShared != 0;
-  c->embCount = (int)embCount;
-  for (int i = 0; i < c->embCount; i++)
-    if (!cacheReadEmbedded(fp, &c->emb[i])) return false;
-  return true;
-}
-
-static void buildfileCachePath(const char *path, char *out, size_t n) {
-  const char *slash = strrchr(path, '/');
-#ifdef _WIN32
-  const char *backslash = strrchr(path, '\\');
-  if (!slash || (backslash && backslash > slash)) slash = backslash;
-#endif
-  const char *base = slash ? slash + 1 : path;
-
-  /* Nama cache per-file konfigurasi: "Buildfile" memakai nama lama
-     (kompatibel dengan cache yang sudah ada), selain itu <basename>.cache
-     agar `rbot -f lain` tidak berbagi cache dengan default. */
-  const char *cacheName = strcmp(base, "Buildfile") == 0 ? CONFIG_CACHE_FILE : NULL;
-  char nameBuf[64];
-  if (!cacheName) {
-    snprintf(nameBuf, sizeof(nameBuf), "%s.cache", base);
-    cacheName = nameBuf;
-  }
-
-  if (slash) {
-    size_t dirLen = (size_t)(slash - path);
-    if (dirLen == 0)
-      snprintf(out, n, "/%s/%s", CONFIG_CACHE_DIR, cacheName);
-    else
-      snprintf(out, n, "%.*s/%s/%s", (int)dirLen, path, CONFIG_CACHE_DIR, cacheName);
-  } else {
-    snprintf(out, n, "%s/%s", CONFIG_CACHE_DIR, cacheName);
-  }
-}
-
-static bool loadConfigCache(Config *c, const char *path, const char *cachePath) {
-  FILE *fp = fopen(cachePath, "rb");
-  if (!fp) return false;
-
-  char magic[sizeof(CONFIG_CACHE_MAGIC) - 1];
-  uint32_t version = 0;
-  int64_t cachedMTimeNs = 0;
-  int64_t cachedSize = 0;
-  int64_t currentMTimeNs = fsMTimeNs(path);
-  long long currentSize = fsFileSize(path);
-
-  bool ok = cacheReadBytes(fp, magic, sizeof(magic)) &&
-            memcmp(magic, CONFIG_CACHE_MAGIC, sizeof(magic)) == 0 && cacheReadU32(fp, &version) &&
-            version == CONFIG_CACHE_VERSION &&
-            cacheReadBytes(fp, &cachedMTimeNs, sizeof(cachedMTimeNs)) &&
-            cacheReadBytes(fp, &cachedSize, sizeof(cachedSize)) && currentMTimeNs >= 0 &&
-            currentSize >= 0 && cachedMTimeNs == currentMTimeNs &&
-            cachedSize == (int64_t)currentSize && cacheReadConfig(fp, c);
-  fclose(fp);
-  return ok;
-}
-
-static void saveConfigCache(const Config *c, const char *path, const char *cachePath) {
-  int64_t mtimeNs = fsMTimeNs(path);
-  long long size = fsFileSize(path);
-  if (mtimeNs < 0 || size < 0) return;
-
-  char parent[MAX_PATH];
-  snprintf(parent, sizeof(parent), "%s", cachePath);
-  char *slash = strrchr(parent, '/');
-#ifdef _WIN32
-  char *backslash = strrchr(parent, '\\');
-  if (!slash || (backslash && backslash > slash)) slash = backslash;
-#endif
-  if (slash) {
-    *slash = '\0';
-    mkdirs(parent);
-  }
-
-  char tmp[MAX_PATH + 32];
-  snprintf(tmp, sizeof(tmp), "%s.tmp", cachePath);
-  FILE *fp = fopen(tmp, "wb");
-  if (!fp) return;
-
-  const char magic[] = CONFIG_CACHE_MAGIC;
-  bool ok = cacheWriteBytes(fp, magic, sizeof(magic) - 1) &&
-            cacheWriteU32(fp, CONFIG_CACHE_VERSION) &&
-            cacheWriteBytes(fp, &mtimeNs, sizeof(int64_t)) &&
-            cacheWriteBytes(fp, &size, sizeof(int64_t)) && cacheWriteConfig(fp, c);
-  if (fclose(fp) != 0) ok = false;
-  if (ok) {
-    /* POSIX rename is atomic; on Windows remove the old cache first because
-       the MSVCRT rename() refuses to replace an existing file. */
-#ifdef _WIN32
-    fsRemoveFile(cachePath);
-#endif
-    if (rename(tmp, cachePath) != 0) fsRemoveFile(tmp);
-  } else {
-    fsRemoveFile(tmp);
-  }
-}
-
 bool loadConfig(Config *c, const char *path) {
   char cachePath[MAX_PATH];
-  buildfileCachePath(path, cachePath, sizeof(cachePath));
+  cfgCachePathFor(path, cachePath, sizeof(cachePath));
 
   /* Cache validation only stats Buildfile; the Buildfile itself is not opened
      on a cache hit. */
-  if (loadConfigCache(c, path, cachePath)) return true;
+  if (cfgCacheLoad(c, path, cachePath)) return true;
 
   /* A corrupt/stale cache may have partially populated c before failing. */
   *c = configDefaults();
@@ -667,7 +463,9 @@ bool loadConfig(Config *c, const char *path) {
   char sub[SECTION_LEN] = {0};
   char subsub[SECTION_LEN] = {0};
   int subIndent = 0, subsubIndent = 0;
-  bool useAlias = false; /* format baru `use alias` — tanpa baris ini, parse lama */
+  /* Format baru: `use alias` (nama lama) atau `use project` (nama baru,
+     sinonim persis) — tanpa baris itu, parse lama. */
+  bool useAlias = false;
   while (fgets(line, sizeof(line), fp)) {
     char *comment = strchr(line, '#');
     if (comment) *comment = '\0';
@@ -678,14 +476,19 @@ bool loadConfig(Config *c, const char *path) {
 
     char *text = trim(line);
     if (!*text) continue;
-    if (indent == 0 && strcmp(text, "use alias") == 0) {
-      useAlias = true;
-      continue;
+    if (indent == 0) {
+      if (useLineMode(text) == USE_PROJECT) {
+        useAlias = true;
+        continue;
+      }
+      /* `use workspace` / `use` tak dikenal: baris `use` BUKAN setting —
+         jangan biarkan jatuh ke parse lama sebagai section. */
+      if (strncmp(text, "use", 3) == 0 && (text[3] == '\0' || text[3] == ' ')) continue;
     }
     parseLine(c, section, sub, subsub, &subIndent, &subsubIndent, text, indent, useAlias);
   }
   fclose(fp);
   configFinalize(c);
-  saveConfigCache(c, path, cachePath);
+  cfgCacheSave(c, path, cachePath);
   return true;
 }

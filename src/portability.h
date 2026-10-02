@@ -96,6 +96,14 @@ bool fsStampNsSize(const char *path, int64_t *mtimeNs, long long *size);
 bool fsNewerThan(const char *a, const char *b);
 bool fsRemoveFile(const char *path);
 bool fsRemoveTree(const char *path); /* rm -rf portabel */
+/* Set permission mode (POSIX: chmod; Windows: _chmod — hanya bit
+   read-only yang berarti). Dipakai pack saat menyiapkan staging .deb
+   (folder bin dan file .so perlu 0755). */
+bool fsSetMode(const char *path, unsigned mode);
+/* Baca permission mode file (POSIX: st_mode & 0777; Windows: bit
+   _S_IREAD/_S_IWRITE). 0 bila gagal. Dipakai pack untuk mempertahankan
+   bit executable file sumber ke paket. */
+unsigned fsGetMode(const char *path);
 
 /* Satu level isi direktori; subdirektori ke `dirs`, file biasa ke `files`
    (boleh NULL). Path hasil berformat '/' konsisten. */

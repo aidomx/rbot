@@ -33,7 +33,7 @@ cmake --build build
 rbot            # build project sesuai Buildfile (default, tanpa argumen)
 rbot -f lain    # build memakai file konfigurasi lain (bila diperlukan)
 rbot init       # buat Buildfile default kalau project belum punya
-rbot clean      # bersihkan build dir, file library (.a/.so), compile_commands.json & .rbot/deps.cache (folder lib/ tetap)
+rbot clean      # bersihkan build dir, compile_commands.json & .rbot/deps.cache (lihat Buildfile: clean)
 rbot version    # tampilkan versi rbot yang aktif (ter-embed dari .rbot-version)
 rbot help       # tampilkan bantuan
 ```
@@ -136,36 +136,6 @@ CPU time yang tercatat:
 Benchmark ini merupakan pengukuran pada environment pengujian yang sama dan
 bukan klaim performa universal. Hasil dapat berbeda tergantung hardware,
 filesystem, toolchain, jumlah source, dan environment runtime.
-
-### Benchmark otomatis (bench/compare.sh)
-
-Script `bench/compare.sh` membuat project sintetis (N source + header
-berantai), menuliskan `build.ninja` + `Makefile` + `Buildfile` untuk project
-yang sama, lalu mengukur ninja, make, `bear -- make`, dan rbot pada skenario
-setara:
-
-```bash
-./bench/compare.sh                  # default: 150 source, 30 header, 2 run
-./bench/compare.sh -n 40 -H 10      # project kecil, cepat
-./bench/compare.sh -s noop,touch    # subset skenario
-./bench/compare.sh -k               # simpan artefak di sys.tmp/
-```
-
-Skenario: `cold` (build dari nol), `noop` (tanpa perubahan), `touch`
-(header disentuh, konten sama — rbot: 0 recompile), `edit` (ubah 1 source),
-`compdb` (generate `compile_commands.json`), `strace` (hitung syscall no-op).
-Hasil: tabel rerata + `sys.tmp/results.csv`.
-
-Contoh hasil (20 source / 6 header, proot-distro, 1 run — angka untuk
-melacak regresi rbot, bukan klaim universal):
-
-| Skenario | ninja | make | bear+make | rbot |
-|---|---:|---:|---:|---:|
-| cold (ms) | 2533 | 2240 | 9353 | **1590** |
-| noop (ms) | 212 | 139 | 1103 | 144 |
-| touch (ms) | 1690 | 1253 | 6210 | **102** |
-| edit (ms) | 1851 | 992 | 3369 | **796** |
-| syscall noop | 11363 | 352 | 6197 | **310** |
 
 ### Optimasi environment proot
 
@@ -366,7 +336,7 @@ Buildfile format baru, lalu command dijalankan dengan Buildfile hasil
 konversi.
 
 ```bash
-rbot -xf nbuild/build.ninja       # konversi -> build -> hapus Buildfile.xf.tmp
+rbot -xf nbuild/build.ninja       # konversi -> build -> hapus Buildfile
 rbot -xcf nbuild/build.ninja      # konversi -> build, Buildfile tetap ada
 rbot -xf nbuild/build.ninja clean # bekerja untuk command apa pun
 ```
@@ -376,23 +346,14 @@ Aturan translasi:
 - tiap edge compile (`-c ... -o <obj>.o`) jadi source rbot; flag
   `-D/-O/-W/-f` diteruskan, `-std=...` jadi `std`, `-I` jadi `headers`;
 - edge link dipakai menebak `o.binaryName`;
-- output `lib/lib<name>.a|.so` jadi `o.libraryName` (+
-  `o.libraryStatic`/`o.libraryShared` sesuai varian yang ada);
-- token `-l` pada rule link (termasuk lewat variabel seperti `$libs`)
-  jadi `lib.default`/`lib.linux`/`lib.macos` (`m`/`pthread` diterjemahkan
-  per platform; `lib.windows` disunting manual);
-- chain embedded (arsip -> file `.c` hasil-generate -> object) jadi
-  `embedded.<name>.src/.dir/.with.tar/.with.ext` — object embed tidak
-  masuk daftar source;
 - path absolut di bawah cwd di-relatif-kan; rule template CMake
   (`$FLAGS`, `$INCLUDES`, `${...}`, `include rules.ninja`) diekspansi;
 - edge custom command (ar, ld, cmake -E, dsb.) diabaikan — link & library
   dikerjakan rbot sendiri.
 
-**Buildfile tidak pernah tertimpa**: `-xf` menulis ke `Buildfile.xf.tmp`
-(sementara, dihapus setelah command — Buildfile eksisting aman), sedangkan
-`-xcf` menulis ke `Buildfile` dengan konfirmasi `[y/N]` dulu bila file itu
-sudah ada; jawaban selain `y` membatalkan tanpa mengubah apa pun.
+`-xf` menghapus Buildfile sementara setelah command selesai (project asli
+tidak tersentuh); `-xcf` menyimpan hasilnya agar bisa dijadikan titik awal
+migrasi ke Buildfile.
 
 ## Pelacakan header (incremental)
 
@@ -544,8 +505,6 @@ output:
   lama dari target, varian itu dilewati (`up-to-date`) tanpa menjalankan
   `ar`/linker lagi — menghapus `.so` saja tidak meng-rebuild `.a`, dan
   build no-op tidak menyentuh library sama sekali.
-- `rbot clean` menghapus **file** library (`lib<name>.a`/`.so`) tanpa
-  menghapus folder `libDir`-nya — dulu seluruh folder ikut terhapus.
 - **exclude** — melepas source dari pengemasan library tanpa memengaruhi
   binary (mis. `main.c` milik executable):
 

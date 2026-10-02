@@ -42,9 +42,6 @@ file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/version.h
 # Mirror Buildfile: flags: - Wall, - Wextra
 if(MSVC)
   target_compile_options(rbot PRIVATE /W4)
-  # API C standar (strdup, fopen, getenv, ...) memicu C4996 di MSVC —
-  # ini pilihan sadar, bukan bug; jangan ganggu log CI.
-  target_compile_definitions(rbot PRIVATE _CRT_SECURE_NO_WARNINGS)
 else()
   target_compile_options(rbot PRIVATE -Wall -Wextra)
 endif()
