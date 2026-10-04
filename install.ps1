@@ -232,7 +232,16 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Progress -Activity "Building rbot" -Completed
 Write-Host "> Built      : $Output"
+# Simpan hasil bootstrap di source tree untuk mode --dev.
+$DevOutputDir = Join-Path $PSScriptRoot "build\bin"
+$DevOutput = Join-Path $DevOutputDir "rbot.exe"
 
+New-Item -ItemType Directory -Force -Path $DevOutputDir | Out-Null
+Copy-Item -Force $Output $DevOutput
+
+Write-Host "> Built & Saved: $DevOutput"
+
+# Install ke user PATH juga.
 Install-Binary $Output
         }
     finally {
