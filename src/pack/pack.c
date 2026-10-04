@@ -14,6 +14,7 @@
 #include "../portability.h"
 #include "../util.h"
 #include "pack.h"
+#include "pack_stage.h"
 
 /* ---- nilai {os}/{arch} host (host target rbot sendiri) ---- */
 
@@ -103,21 +104,22 @@ int64_t packPathMTimeNs(const char *path) { return fsMTimeNs(path); }
 int64_t packNewestInput(const Config *c) {
   int64_t newest = -1;
   for (int i = 0; i < c->pack.files.count; i++) {
-    const char *entry = c->pack.files.items[i];
-    if (fsFileExists(entry)) {
-      int64_t m = fsMTimeNs(entry);
+    char src[MAX_PATH * 2], dst[MAX_PATH * 2];
+    if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
+                        dst, sizeof(dst))) continue;
+    if (fsFileExists(src)) {
+      int64_t m = fsMTimeNs(src);
       if (m > newest) newest = m;
-    } else if (fsDirExists(entry)) {
-      /* folder: semua file di dalamnya + mtime folder itu sendiri (file
-         baru yang ditambahkan mengubah mtime folder). */
+    } else if (fsDirExists(src)) {
+      /* folder: semua file di dalamnya + mtime folder itu sendiri. */
       List files = {0};
-      walkDir(entry, "", &files);
+      walkDir(src, "", &files);
       for (int j = 0; j < files.count; j++) {
         int64_t m = fsMTimeNs(files.items[j]);
         if (m > newest) newest = m;
       }
       listFree(&files);
-      int64_t dm = fsMTimeNs(entry);
+      int64_t dm = fsMTimeNs(src);
       if (dm > newest) newest = dm;
     }
     /* entri yang tidak ada diabaikan di sini; packRun melaporkannya. */
@@ -179,9 +181,14 @@ bool packRun(const Config *c) {
   /* Validasi entri dulu: paket dengan file yang hilang harus gagal jelas,
      bukan diam-diam memaketkan sisanya. */
   for (int i = 0; i < c->pack.files.count; i++) {
-    const char *entry = c->pack.files.items[i];
-    if (!fsFileExists(entry) && !fsDirExists(entry)) {
-      fprintf(stderr, "rbot: pack: '%s' tidak ditemukan\n", entry);
+    char src[MAX_PATH * 2], dst[MAX_PATH * 2];
+    if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
+                        dst, sizeof(dst))) {
+      fprintf(stderr, "rbot: pack: mapping '%s' tidak valid\n", c->pack.files.items[i]);
+      return false;
+    }
+    if (!fsFileExists(src) && !fsDirExists(src)) {
+      fprintf(stderr, "rbot: pack: '%s' tidak ditemukan\n", src);
       return false;
     }
   }

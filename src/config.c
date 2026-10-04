@@ -51,6 +51,19 @@ static void appendLibraries(List *dst, const List *src) {
     listAdd(dst, src->items[i]);
 }
 
+static void addCommaList(List *dst, const char *value) {
+  char buf[2048];
+  copyStr(buf, sizeof(buf), value);
+  for (char *save = buf;;) {
+    char *comma = strchr(save, ',');
+    if (comma) *comma = '\0';
+    char *item = trim(save);
+    if (*item) listAdd(dst, item);
+    if (!comma) break;
+    save = comma + 1;
+  }
+}
+
 /* ==================== pack (pengemasan artefak) ==================== */
 
 /* Helper parsing pack.* (packSetStr/packAddFiles/packApplyDeb/packApply)
@@ -110,8 +123,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
     else if (strcmp(key, "foreground") == 0 && parseBool(value, &b))
       c->foreground = b;
     else if (strcmp(key, "target") == 0)
-      copyStr(c->target, sizeof(c->target), value);
-    /* Key bare hasil sintesis Buildfile.workspace (prefix projects.<n>. dan
+      copyStr(c->target, sizeof(c->target), value);     /* Key bare hasil sintesis Buildfile.ws (prefix projects.<n>. dan
        aliasnya dilepas): name/version/files/output/... -> pack. Tanpa
        files/output proyek biasa tidak terpengaruh (pack tak aktif). */
     else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0 ||
@@ -188,6 +200,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       copyStr(e->archiveDir, sizeof(e->archiveDir), "modules");
       copyStr(e->archiveName, sizeof(e->archiveName), sub);
       copyStr(e->ext, sizeof(e->ext), "gz");
+      listAdd(&e->excludes, ".git");
     }
 
     if (subsub && strcmp(subsub, "with") == 0) {
@@ -195,6 +208,8 @@ static void configApply(Config *c, const char *section, const char *sub, const c
         e->tar = b;
       else if (strcmp(key, "ext") == 0)
         copyStr(e->ext, sizeof(e->ext), value);
+    } else if (subsub && strcmp(subsub, "archive") == 0) {
+      if (strcmp(key, "exclude") == 0) addCommaList(&e->excludes, value);
     } else if (strcmp(key, "src") == 0) {
       copyStr(e->src, sizeof(e->src), value);
     } else if (strcmp(key, "extract") == 0) {
@@ -231,7 +246,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
   }
 
   if (strcmp(section, "deb") == 0) {
-    /* Key bare deb.<key> (hasil sintesis Buildfile.workspace: kunci
+    /* Key bare deb.<key> (hasil sintesis Buildfile.ws: kunci
        `deb.maintainer = ...` di-rute sebagai section "deb"). */
     packApplyDeb(c, key, value);
     return;
@@ -256,6 +271,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       copyStr(e->archiveName, sizeof(e->archiveName), "archive");
       copyStr(e->ext, sizeof(e->ext), "gz");
       copyStr(e->pattern, sizeof(e->pattern), "");
+      listAdd(&e->excludes, ".git");
     }
     EmbeddedEntry *e = &c->emb[0];
 
@@ -264,6 +280,26 @@ static void configApply(Config *c, const char *section, const char *sub, const c
         e->tar = b;
       else if (strcmp(key, "ext") == 0)
         copyStr(e->ext, sizeof(e->ext), value);
+      return;
+    }
+    if (strcmp(key, "with") == 0) {
+      /* with = tar, gz */
+      char buf[128];
+      copyStr(buf, sizeof(buf), value);
+      char *comma = strchr(buf, ',');
+      if (comma) {
+        *comma = '\0';
+        char *format = trim(buf);
+        char *ext = trim(comma + 1);
+        e->tar = strcmp(format, "tar") == 0;
+        copyStr(e->ext, sizeof(e->ext), ext);
+      } else {
+        e->tar = strcmp(trim(buf), "tar") == 0;
+      }
+      return;
+    }
+    if (strcmp(key, "exclude") == 0) {
+      addCommaList(&e->excludes, value);
       return;
     }
     if (strcmp(key, "src") == 0) {

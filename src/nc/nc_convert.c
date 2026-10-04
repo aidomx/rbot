@@ -463,8 +463,7 @@ bool ninjaToBuildfile(const char *ninjaPath, const char *outPath, char *err, siz
        as we read it" bila output ikut terbaca), dan ikut bersih saat
        `rbot clean`. */
     fprintf(out, "embedded.%s.dir = build\n", name);
-    fprintf(out, "embedded.%s.with.tar = true\n", name);
-    fprintf(out, "embedded.%s.with.ext = gz\n", name);
+    fprintf(out, "embedded.%s.with = tar, gz\n", name);
   }
 
   fclose(out);

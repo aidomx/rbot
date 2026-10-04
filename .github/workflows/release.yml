@@ -9,7 +9,9 @@ permissions:
   contents: write
 
 jobs:
-  # Job 1: Build binary untuk berbagai OS dan Arsitektur secara paralel
+  # Job 1: Build binary untuk berbagai OS dan Arsitektur secara paralel.
+  # Tanpa cmake — bootstrap dengan install.sh --dev (Unix) / install.ps1
+  # --dev (Windows, toolchain MSVC), hasilnya build/bin/rbot(.exe).
   build:
     strategy:
       fail-fast: false
@@ -19,17 +21,17 @@ jobs:
           - os: windows-latest
             asset_name: rbot-windows-x64.exe
             exe_ext: .exe
-            
+
           # --- LINUX ---
-          - os: ubuntu-latest       # Runner x86_64
+          - os: ubuntu-latest # Runner x86_64
             asset_name: rbot-linux-x64
             exe_ext: ""
-            
-          - os: ubuntu-24.04-arm    # Runner ARM64 native (Tersedia untuk public repo)
+
+          - os: ubuntu-24.04-arm # Runner ARM64 native (Tersedia untuk public repo)
             asset_name: rbot-linux-arm64
             exe_ext: ""
-            
-          - os: macos-latest        # Runner Apple Silicon M1/M2 (arm64)
+
+          - os: macos-latest # Runner Apple Silicon M1/M2 (arm64)
             asset_name: rbot-macos-arm64
             exe_ext: ""
 
@@ -39,16 +41,32 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Configure CMake
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      # cl.exe tidak ada di PATH default runner — impor env vcvars agar
+      # install.ps1 bisa memanggil cl (MSVC) untuk build release Windows.
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
 
-      - name: Build
-        run: cmake --build build --config Release
+      - name: Bootstrap build (install.sh --dev)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./install.sh --dev
+
+      - name: Bootstrap build (install.ps1 --dev)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CC: cl
+        run: ./install.ps1 --dev
+
+      - name: Smoke test
+        shell: bash
+        run: ./build/bin/rbot${{ matrix.exe_ext }} version
 
       - name: Prepare Binary
         shell: bash
         run: |
-          # Menyalin binary dari output CMake (sesuaikan path 'build/bin/' jika CMake Anda output ke tempat lain)
+          # install.sh/install.ps1 --dev menghasilkan build/bin/rbot(.exe)
           cp build/bin/rbot${{ matrix.exe_ext }} ${{ matrix.asset_name }}
 
       - name: Upload Binary Artifact
@@ -75,6 +93,12 @@ jobs:
       - name: Create source archive
         run: |
           git archive --format=zip --output="release-assets/rbot-${{ github.ref_name }}-source.zip" HEAD
+
+      - name: Generate SHA256 Checksums
+        run: |
+          cd release-assets
+          sha256sum * > checksums.txt
+          # Atau jika di macOS runner: shasum -a 256 * > checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

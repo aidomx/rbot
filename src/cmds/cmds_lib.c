@@ -22,6 +22,9 @@
 
 /* ==================== fase pack (proyek binary + pack.*) ==================== */
 
+/* Wrapper fase normal: library lintas-proyek disertakan pada link shared. */
+bool cmdsBuildLibrary(const Config *c, const List *srcs) { return cmdsBuildLibraryEx(c, srcs, true); }
+
 /*
  * Proyek binary dengan pack.*: summary build tidak lengkap tanpa status
  * kemasan, jadi packRun dipanggil DI DALAM kedua jalur sukses cmdBuild —
@@ -183,8 +186,14 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
  * kemas statis (ar / lib) dan/atau link shared (-shared / /LD).
  * Object perantara TIDAK dihapus — tetap dipakai link binary dan
  * agar build incremental berikutnya tidak kompilasi ulang total.
+ *
+ * linkPathLibs=false (fase library workspace): entri library ber-path
+ * (artifact proyek lain, mis. ../ruka/lib/libruka.a) DILEWATI pada link
+ * shared — .a proyek lain belum tentu ada saat fase library berjalan dan
+ * .so tidak perlu inline kode proyek lain. Library sistem (-lm, -lssl)
+ * tetap disertakan.
  */
-bool cmdsBuildLibrary(const Config *c, const List *srcs) {
+bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
   if (!c->libRequested) return true;
 
   /* Jalur no-op: hindari membangun daftar object, alokasi string, dan mkdir
@@ -274,6 +283,7 @@ bool cmdsBuildLibrary(const Config *c, const List *srcs) {
       strcat(cmd, target);
       for (int i = 0; i < c->libraries.count; i++) {
         const char *lib = c->libraries.items[i];
+        if (!linkPathLibs && (strchr(lib, '/') || strchr(lib, '\\'))) continue;
         if (lib[0] == '-') lib++;
         if (lib[0] == 'l') lib++;
         strcat(cmd, " ");
@@ -290,12 +300,22 @@ bool cmdsBuildLibrary(const Config *c, const List *srcs) {
       strcat(cmd, target);
       for (int i = 0; i < c->libraries.count; i++) {
         const char *lib = c->libraries.items[i];
+        /* Fase library workspace: artifact proyek lain dilewati (belum
+           tentu ada); simbol lintas diselesaikan saat link binary. */
+        if (!linkPathLibs && (strchr(lib, '/') || strchr(lib, '\\'))) continue;
         strcat(cmd, " ");
-        if (lib[0] == '-' || lib[0] == 'l')
-          strcat(cmd, "-");
-        else
-          strcat(cmd, "-l");
-        strcat(cmd, lib);
+        /* Explicit workspace artifact paths (e.g. ../ruka/lib/libruka.a)
+           must be passed directly to the linker. Only logical/system
+           library names use -l. */
+        if (strchr(lib, '/') || strchr(lib, '\\')) {
+          strcat(cmd, lib);
+        } else {
+          if (lib[0] == '-' || lib[0] == 'l')
+            strcat(cmd, "-");
+          else
+            strcat(cmd, "-l");
+          strcat(cmd, lib);
+        }
       }
     }
     printf("> Library   : %s\n", target);

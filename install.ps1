@@ -31,6 +31,14 @@ function Read-Version([string]$Root) {
 }
 
 function Find-Compiler {
+    # Hormati CC (seperti install.sh ${CC:-cc}) — dipakai CI untuk memilih
+    # toolchain secara eksplisit (mis. CC=cl untuk job MSVC).
+    if ($env:CC) {
+        if (Get-Command $env:CC -ErrorAction SilentlyContinue) {
+            return $env:CC
+        }
+        throw "compiler C '$env:CC' (dari CC) tidak ditemukan"
+    }
     $candidates = @("clang", "gcc", "cl")
     foreach ($name in $candidates) {
         if (Get-Command $name -ErrorAction SilentlyContinue) {
@@ -164,9 +172,11 @@ if ($Dev) {
         $Output = Join-Path $OutDir "rbot.exe"
 
         if ($Compiler -eq "cl") {
-            & link $Objects "/OUT:$Output"
+            # shell32: fsRemoveTree (SHFileOperationA) — sama dengan
+            # target_link_libraries(literal shell32) di CMakeLists lama.
+            & link $Objects shell32.lib "/OUT:$Output"
         } else {
-            & $Compiler $Objects -o $Output
+            & $Compiler $Objects -lshell32 -o $Output
         }
 
         if ($LASTEXITCODE -ne 0) {

@@ -29,7 +29,12 @@ void cmdsLibSharedPath(const Config *c, char *out, size_t n);
 bool cmdsLibVariantUpToDate(const Config *c, bool isStatic, const List *srcs);
 
 /* Fase library: kemas statis (ar / lib) dan/atau link shared dari object
-   source + embedded. true bila semua varian yang diminta sukses. */
+   source + embedded. true bila semua varian yang diminta sukses.
+   linkPathLibs=false (fase library workspace) melewatkan entri library
+   ber-path proyek lain pada link shared (lihat cmds_lib.c). */
+bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs);
+
+/* Build penuh (fase normal binary): library lintas-proyek disertakan. */
 bool cmdsBuildLibrary(const Config *c, const List *srcs);
 
 /* Kompilasi paralel (-jN). Return false bila ada yang gagal/interrupt. */

@@ -13,6 +13,7 @@
 #include "pack/pack.h"
 #include "portability.h"
 #include "prof/prof.h"
+#include "uses/workspace.h"
 #include "util.h"
 
 /*
@@ -34,9 +35,10 @@ void showHelp(void) {
   printf("%-8s%s\n", "-xcf <n>",
          "- sama seperti -xf, tapi hasil konversi ditulis ke Buildfile (konfirmasi bila ada)");
   printf("%-8s%s\n", "-j[N]", "- build paralel, N job (tanpa -j: jumlah core CPU; -j1 = serial)");
-  printf("%-8s%s\n", "-w", "- mode workspace: build semua proyek (Buildfile.workspace)");
+  printf("%-8s%s\n", "-w", "- mode workspace: build semua proyek (Buildfile.ws)");
   printf("%-8s%s\n", "", "- rbot -w <nama>: hanya proyek itu (+ dependency-nya)");
   printf("%-8s%s\n", "init", "- create a default Buildfile if none exists yet");
+  printf("%-8s%s\n", "", "- rbot init -w: buat Buildfile.ws (mode workspace) bila belum ada");
   printf("%-8s%s\n", "clean", "- clean build artifacts (Buildfile: clean)");
   printf("%-8s%s\n", "", "- output.libraryName/libraryShared membangun lib<name>.a + .so");
   printf("%-8s%s\n", "", "- pack.* mengemas artefak: tar.gz + .deb + checksum sha256");
@@ -89,14 +91,61 @@ int cmdInit(const char *buildfilePath) {
         fp);
   fclose(fp);
 
-  printf("> Created   : Buildfile\n");
+  printf("> Created   : %s\n", path);
+  return 0;
+}
+
+/* ==================== init -w (template workspace) ==================== */
+
+int cmdInitWorkspace(const char *buildfilePath) {
+  const char *path = buildfilePath && *buildfilePath ? buildfilePath : WORKSPACE_FILENAME;
+  if (fsFileExists(path)) {
+    printf("> %s already exists, nothing to do\n", path);
+    return 0;
+  }
+
+  FILE *fp = fopen(path, "w");
+  if (!fp) {
+    fprintf(stderr, "rbot: cannot create %s\n", path);
+    return 1;
+  }
+
+  fputs("use workspace\n"
+        "\n"
+        "projects = app\n"
+        "\n"
+        "# Default bersama untuk semua proyek\n"
+        "compiler = gcc, clang\n"
+        "flags = Wall, Wextra, MMD, MP # MMD: dep file <obj>.d (GNU/Clang); MP: phony target\n"
+        "std = gnu11\n"
+        "\n"
+        "# Proyek 'app' — root relatif terhadap file ini (default: <nama>/)\n"
+        "app.root = .\n"
+        "app.sources = src\n"
+        "app.headers = include, I.\n"
+        "app.output.binaryName = app\n"
+        "app.output.binaryDir = bin\n"
+        "app.output.buildDir = build\n"
+        "\n"
+        "# Tambah proyek lain dengan mendaftarkannya di `projects = ...`,\n"
+        "# lalu atur per proyek: <nama>.<key> (mis. lib.depends_on = app)\n",
+        fp);
+  fclose(fp);
+
+  printf("> Created   : %s\n", path);
   return 0;
 }
 
 /* ==================== build ==================== */
 
-int cmdBuild(int jobs, const char *buildfilePath) {
-  if (cmdsFastStateValid(buildfilePath)) return 0;
+/* Build penuh satu proyek — jalur rbot satu-proyek & fase binary workspace. */
+int cmdBuild(int jobs, const char *buildfilePath) { return cmdBuildEx(jobs, buildfilePath, false); }
+
+int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
+  /* Fast no-op hanya untuk fase normal (binary): snapshot state menyangkut
+     target binary. Fase library (workspace pass 1) selalu jalur penuh —
+     murah bila semua object & library up-to-date. */
+  if (!libOnly && cmdsFastStateValid(buildfilePath)) return 0;
   Config c = configDefaults();
   if (!loadConfig(&c, buildfilePath)) return 1;
   if (!resolveCompiler(&c)) return 1;
@@ -319,6 +368,48 @@ int cmdBuild(int jobs, const char *buildfilePath) {
     return 1;
   }
 
+  /* Fase library workspace (pass 1 dari cmdBuildEx, lihat commands.h):
+     kemas lib<name>.a/.so dari object milik proyek ini lalu berhenti —
+     link binary ditunda ke fase normal (pass 2) agar proyek yang saling
+     memakai library lintas-proyek bisa link setelah SEMUA library ada.
+     Library ber-path proyek lain (mis. ../ruka/lib/libruka.a) tidak
+     disertakan pada link .so: .a proyek lain belum tentu ada di titik ini
+     dan shared library memang tidak perlu inline-kan kode proyek lain. */
+  if (libOnly) {
+    if (!cmdsBuildLibraryEx(&c, &srcs, false)) {
+      free(inc);
+      free(wf);
+      depsFree(deps);
+      return 1;
+    }
+    if (compiled > 0 || depsSnapshotIncomplete(deps)) {
+      for (int i = 0; i < srcs.count; i++)
+        depsRecordUpdate(deps, srcs.items[i]);
+    }
+    depsSave(deps);
+    depsFree(deps);
+    cmdsFingerprintSave(&currentFp);
+    printf("\n> Summary\n");
+    if (c.libRequested) {
+      char libp[MAX_PATH * 2];
+      if (c.libStatic) {
+        cmdsLibStaticPath(&c, libp, sizeof(libp));
+        printf("Library  : %s\n", libp);
+      }
+      if (c.libShared) {
+        cmdsLibSharedPath(&c, libp, sizeof(libp));
+        printf("Library  : %s\n", libp);
+      }
+    }
+    printf("Compiled : %d\n", compiled);
+    printf("Skipped  : %d\n", skipped);
+    printf("Status   : Success\n");
+    free(inc);
+    free(wf);
+    profReport();
+    return 0;
+  }
+
   /* link: hanya jalankan linker bila target belum ada atau salah satu
      input object lebih baru daripada target. Gunakan nanosecond mtime agar
      keputusan incremental tidak kehilangan perubahan yang terjadi dalam
@@ -368,7 +459,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
     printf("> Linking   : %s (up-to-date)\n", target);
     /* Library bisa jadi masih perlu dibangun (baru diaktifkan di
        Buildfile / terhapus manual) meski binary sudah up-to-date. */
-    if (c.libRequested && !cmdsBuildLibrary(&c, &srcs)) {
+    if (c.libRequested && !cmdsBuildLibraryEx(&c, &srcs, true)) {
       free(inc);
       free(wf);
       return 1;
@@ -458,11 +549,18 @@ int cmdBuild(int jobs, const char *buildfilePath) {
       /* "ssl" -> -lssl, "lm" -> -lm (leading 'l' sudah termasuk, seperti "I."
          di headers); entri yang sudah diawali '-' diteruskan apa adanya */
       strcat(cmd, " ");
-      if (lib[0] == '-' || lib[0] == 'l')
-        strcat(cmd, "-");
-      else
-        strcat(cmd, "-l");
-      strcat(cmd, lib);
+      if (strchr(lib, '/') || strchr(lib, '\\')) {
+        /* Workspace project-library resolution may provide an explicit
+           artifact path (../project/lib/libname.a). Do not turn it into
+           -l../...; pass the path directly to the linker. */
+        strcat(cmd, lib);
+      } else {
+        if (lib[0] == '-' || lib[0] == 'l')
+          strcat(cmd, "-");
+        else
+          strcat(cmd, "-l");
+        strcat(cmd, lib);
+      }
     }
   }
 
@@ -480,7 +578,7 @@ int cmdBuild(int jobs, const char *buildfilePath) {
   }
 
   /* Library statis/shared dari object yang sama — object tidak dihapus. */
-  if (!cmdsBuildLibrary(&c, &srcs)) {
+  if (!cmdsBuildLibraryEx(&c, &srcs, true)) {
     return 1;
   }
 

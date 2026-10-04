@@ -1,4 +1,4 @@
-use alias
+use project
 
 clean as c
 output as o
@@ -9,7 +9,7 @@ root = .
 foreground = false 
 
 c.build = false
-c.compdb = true
+c.compdb = false
 
 sources = src
 
@@ -31,3 +31,18 @@ o.binaryDir = bin
 o.buildDir = build
 # auto generate compile_commands.json
 o.compileCommands = auto 
+
+pack.name = rbot
+pack.version = 0.2.0
+pack.output = dist/{name}-v{version}.tar.gz
+
+pack.files = bin/rbot:bin/rbot, README.md:share/rbot/README.md, LICENSE:share/rbot/LICENSE
+
+pack.format = deb
+pack.checksum = sha256
+
+pack.deb.install_prefix = /usr/local
+pack.deb.description = "Rbot C build tool"
+pack.deb.maintainer = "Aidomx <aidomxdev@gmail.com>"
+pack.deb.description = "A simple builder for you"
+pack.deb.architecture = arm64

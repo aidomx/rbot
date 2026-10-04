@@ -19,27 +19,56 @@
 #include "../portability.h"
 #include "../util.h"
 #include "pack_internal.h"
+#include "pack_stage.h"
 
 /* ==================== arsitektur Debian ==================== */
 
+/* Arsitektur host saat ini (arsitektur yang dipakai compiler untuk
+   membangun binary), dalam penamaan Debian. Dipakai sebagai default
+   ketika pack.deb.architecture tak diset, dan sebagai pembanding untuk
+   peringatan mismatch ketika diset manual (lihat debArch). */
+static const char *debHostArch(void) {
+#if defined(__x86_64__) || defined(_M_X64)
+  return "amd64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  return "arm64";
+#elif defined(__i386__) || defined(_M_X86)
+  return "i386";
+#elif defined(__riscv) && defined(__riscv_xlen) && __riscv_xlen == 64
+  return "riscv64";
+#elif defined(__arm__)
+  return "armhf";
+#else
+  return "all";
+#endif
+}
+
 static void debArch(const Config *c, char *out, size_t n) {
+  const char *host = debHostArch();
+
   if (c->pack.debArchitecture[0]) {
     copyStr(out, n, c->pack.debArchitecture);
+
+    /* pack.deb.architecture diset manual (lihat Buildfile) tapi tidak
+       cocok dengan arsitektur yang sebenarnya dipakai compiler untuk
+       binary ini. Ini bisa disengaja (cross-compile dengan CC khusus),
+       jadi hanya peringatan, bukan gagal — tapi tanpa peringatan,
+       label arsitektur yang salah di .deb bisa lolos tak terdeteksi
+       sampai orang lain mencoba memasangnya di perangkat target. */
+    if (strcmp(host, "all") != 0 && strcmp(c->pack.debArchitecture, host) != 0) {
+      fprintf(stderr,
+        "rbot: pack: peringatan: pack.deb.architecture='%s' tidak cocok dengan "
+        "arsitektur compiler saat ini ('%s'); binary yang dikemas kemungkinan "
+        "dikompilasi untuk '%s', bukan '%s'. Pastikan ini memang cross-build yang "
+        "disengaja — jika tidak, paket .deb ini tidak akan bisa dijalankan di "
+        "perangkat '%s'.\n",
+        c->pack.debArchitecture, host, host, c->pack.debArchitecture,
+        c->pack.debArchitecture);
+    }
     return;
   }
-#if defined(__x86_64__) || defined(_M_X64)
-  copyStr(out, n, "amd64");
-#elif defined(__aarch64__) || defined(_M_ARM64)
-  copyStr(out, n, "arm64");
-#elif defined(__i386__) || defined(_M_X86)
-  copyStr(out, n, "i386");
-#elif defined(__riscv) && defined(__riscv_xlen) && __riscv_xlen == 64
-  copyStr(out, n, "riscv64");
-#elif defined(__arm__)
-  copyStr(out, n, "armhf");
-#else
-  copyStr(out, n, "all");
-#endif
+
+  copyStr(out, n, host);
 }
 
 /* ==================== staging data ==================== */
@@ -89,33 +118,47 @@ static void debSetFileMode(const char *srcPath, const char *relPath, const char 
    Folder di-walk rekursif (walkDir menghasilkan path file relatif root). */
 static bool debStageData(const Config *c, const char *dataDir, const char *prefixRel) {
   for (int i = 0; i < c->pack.files.count; i++) {
-    const char *entry = c->pack.files.items[i];
+    char src[MAX_PATH * 2], dstRoot[MAX_PATH * 2];
+    if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
+                        dstRoot, sizeof(dstRoot))) return false;
 
-    if (fsFileExists(entry)) {
+    if (fsFileExists(src)) {
       char dest[MAX_PATH * 2];
-      snprintf(dest, sizeof(dest), "%s/%s/%s", dataDir, prefixRel, entry);
+      snprintf(dest, sizeof(dest), "%s/%s/%s", dataDir, prefixRel, dstRoot);
       mkparent(dest);
-      if (!copyFileBytes(entry, dest)) {
-        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", entry);
+      if (!copyFileBytes(src, dest)) {
+        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", src);
         return false;
       }
-      debSetFileMode(entry, entry, dest);
+      debSetFileMode(src, dstRoot, dest);
       continue;
     }
 
-    /* folder: salin semua file di bawahnya dengan struktur relatif sama */
     List files = {0};
-    walkDir(entry, "", &files);
+    walkDir(src, "", &files);
+    size_t srcLen = strlen(src);
     for (int j = 0; j < files.count; j++) {
+      const char *file = files.items[j];
+      const char *suffix = file + srcLen;
+      if (*suffix == '/') suffix++;
       char dest[MAX_PATH * 2];
-      snprintf(dest, sizeof(dest), "%s/%s/%s", dataDir, prefixRel, files.items[j]);
+      if (*suffix)
+        snprintf(dest, sizeof(dest), "%s/%s/%s/%s", dataDir, prefixRel,
+                 dstRoot, suffix);
+      else
+        snprintf(dest, sizeof(dest), "%s/%s/%s", dataDir, prefixRel, dstRoot);
       mkparent(dest);
-      if (!copyFileBytes(files.items[j], dest)) {
-        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", files.items[j]);
+      char rel[MAX_PATH * 2];
+      if (*suffix)
+        snprintf(rel, sizeof(rel), "%s/%s", dstRoot, suffix);
+      else
+        copyStr(rel, sizeof(rel), dstRoot);
+      if (!copyFileBytes(file, dest)) {
+        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", file);
         listFree(&files);
         return false;
       }
-      debSetFileMode(files.items[j], files.items[j], dest);
+      debSetFileMode(file, rel, dest);
     }
     listFree(&files);
   }

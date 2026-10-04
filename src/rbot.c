@@ -81,6 +81,7 @@ int rbotRun(int argc, const char *argv[]) {
   int jobs = 0; /* 0 = otomatis: jumlah core CPU (di bawah); -j1 = serial */
   const char *cmd = NULL;
   const char *buildfile = "Buildfile"; /* -f <file> untuk memakai yang lain */
+  bool haveF = false;        /* true bila -f diberikan secara eksplisit */
   bool wantWorkspace = false; /* -w: paksa mode workspace */
   const char *wsOnly = NULL;  /* -w <nama>: hanya proyek itu */
 
@@ -88,10 +89,10 @@ int rbotRun(int argc, const char *argv[]) {
     const char *a = argv[i];
     const char *err = NULL;
 
-    /* -w: mode workspace (Buildfile.workspace). `rbot -w` = semua proyek;
+    /* -w: mode workspace (Buildfile.ws). `rbot -w` = semua proyek;
        `rbot -w <nama>` = hanya proyek itu. OPSI, bukan command — argumen
-       setelahnya TIDAK diperlakukan sebagai command (rupakan dengan
-       dispatcher "command pertama non-opsi"). */
+       setelahnya TIDAK diperlakukan sebagai command (kecuali command yang
+       dikenal, lihat di bawah). */
     if (strcmp(a, "-w") == 0) {
       wantWorkspace = true;
       /* Kata berikutnya = nama proyek KECUALI command yang dikenal
@@ -120,10 +121,12 @@ int rbotRun(int argc, const char *argv[]) {
         return 2;
       }
       buildfile = argv[++i];
+      haveF = true;
       continue;
     }
     if (strncmp(a, "-f", 2) == 0 && a[2]) { /* -fBuildfile.aliased */
       buildfile = a + 2;
+      haveF = true;
       continue;
     }
 
@@ -216,10 +219,13 @@ int rbotRun(int argc, const char *argv[]) {
     buildfile = dst;
   }
 
-  /* Mode workspace: -w eksplisit, atau auto-detect Buildfile.workspace
-     saat rbot polos di root workspace. init/help tetap jalur satu-project. */
+  /* Mode workspace: -w eksplisit, atau auto-detect Buildfile.ws
+     saat rbot polos di root workspace. init tetap jalur satu-project kecuali
+     `init -w` yang menulis template workspace (Buildfile.ws). */
   bool wsAuto = !wantWorkspace && (!cmd || !*cmd) && workspaceFileExists();
   if (wantWorkspace || (wsAuto)) {
+    if (cmd && *cmd && strcmp(cmd, "init") == 0)
+      return cmdInitWorkspace(haveF ? buildfile : WORKSPACE_FILENAME);
     if (cmd && *cmd && strcmp(cmd, "clean") != 0) {
       fprintf(stderr, "rbot: command '%s' tidak berlaku di mode workspace (pakai build/clean)\n", cmd);
       return 2;

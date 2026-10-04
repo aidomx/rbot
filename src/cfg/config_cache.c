@@ -17,7 +17,7 @@
 #include "../util.h"
 
 #define CONFIG_CACHE_MAGIC "RBOTCFG1"
-#define CONFIG_CACHE_VERSION 6u /* 6: + section pack (PackConfig) */
+#define CONFIG_CACHE_VERSION 7u /* 7: + embedded archive excludes */
 #define CONFIG_CACHE_DIR ".rbot"
 #define CONFIG_CACHE_FILE "buildfile.cache"
 
@@ -83,7 +83,7 @@ static bool cacheWriteEmbedded(FILE *fp, const EmbeddedEntry *e) {
          cacheWriteU8(fp, tar) && cacheWriteString(fp, e->ext) &&
          cacheWriteString(fp, e->archivePath) && cacheWriteString(fp, e->objectPath) &&
          cacheWriteU8(fp, pre) && cacheWriteString(fp, e->prebuiltPath) &&
-         cacheWriteString(fp, e->variable);
+         cacheWriteString(fp, e->variable) && cacheWriteList(fp, &e->excludes);
 }
 
 static bool cacheReadEmbedded(FILE *fp, EmbeddedEntry *e) {
@@ -100,7 +100,8 @@ static bool cacheReadEmbedded(FILE *fp, EmbeddedEntry *e) {
       !cacheReadString(fp, e->objectPath, sizeof(e->objectPath)) ||
       !cacheReadU8(fp, &pre) ||
       !cacheReadString(fp, e->prebuiltPath, sizeof(e->prebuiltPath)) ||
-      !cacheReadString(fp, e->variable, sizeof(e->variable)))
+      !cacheReadString(fp, e->variable, sizeof(e->variable)) ||
+      !cacheReadList(fp, &e->excludes))
     return false;
   e->enable = b != 0;
   e->tar = tar != 0;

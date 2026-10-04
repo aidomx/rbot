@@ -1,9 +1,13 @@
 # rbot
 
-Build tool sederhana untuk project C, didorong oleh satu file konfigurasi
-deklaratif bernama `Buildfile`. Tidak perlu Makefile — cukup `rbot`.
+**A simple builder for you.**
 
-Lintas platform: Linux, macOS, dan Windows (MSVC + MinGW).
+rbot is a simple build tool for C projects, driven by a declarative
+`Buildfile`. No Makefile or CMake project is required — define the project
+once and let rbot handle compilation, dependencies, libraries, workspace
+projects, embedded assets, and packaging.
+
+Cross-platform: Linux, macOS, and Windows (MSVC + MinGW).
 
 ## Instalasi
 
@@ -13,372 +17,140 @@ Lintas platform: Linux, macOS, dan Windows (MSVC + MinGW).
 curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh
 ```
 
-Script di atas mengunduh binary `rbot` yang sudah di-build (`bin/rbot` di
-repo ini) dan memasangnya ke `/usr/bin/rbot`.
+The script installs the prebuilt `rbot` binary from the repository.
+
+### Bootstrap from source
+
+```bash
+./install.sh --dev
+```
+
+Requires a C compiler such as `gcc` or `clang`. The resulting binary is
+`build/bin/rbot`.
 
 ### Windows
 
-rbot juga bisa dibangun langsung dari source — tersedia toolchain MSVC
-(`cl.exe`, via Developer Command Prompt) maupun MinGW (`gcc`):
+From a source tree, use MSVC (`cl.exe`) or MinGW (`gcc`) without CMake:
 
-```bash
-cmake -S . -B build
-cmake --build build
-# binary: bin/rbot.exe
+```powershell
+.\install.ps1 --dev
 ```
+
+The resulting binary is `build\bin\rbot.exe`.
 
 ## Pemakaian
 
 ```bash
-rbot            # build project sesuai Buildfile (default, tanpa argumen)
-rbot -f lain    # build memakai file konfigurasi lain (bila diperlukan)
-rbot init       # buat Buildfile default kalau project belum punya
-rbot clean      # bersihkan build dir, compile_commands.json & .rbot/deps.cache (lihat Buildfile: clean)
-rbot version    # tampilkan versi rbot yang aktif (ter-embed dari .rbot-version)
+rbot            # build project dari Buildfile
+rbot -f FILE    # gunakan Buildfile lain
+rbot init       # buat Buildfile baru
+rbot init -w    # buat Buildfile.ws baru
+rbot -w         # build semua project dalam workspace
+rbot -w NAME    # build project NAME dan dependency-nya
+rbot clean      # bersihkan hasil build
+rbot version    # tampilkan versi rbot
 rbot help       # tampilkan bantuan
 ```
 
-### Versi (.rbot-version)
+Tanpa argumen, rbot mencari `Buildfile`. Di root workspace, `Buildfile.ws`
+dapat digunakan untuk mengelola beberapa project.
 
-Versi tidak lagi ditulis manual di source. rbot membaca file `.rbot-version`
-di root saat build, lalu menerbitkan `build/version.h` berisi
-`RBOT_VERSION_EMBEDDED` — versi ikut ter-embed ke binary sehingga
-`rbot version` tetap benar di mana pun binary dijalankan, tidak tergantung
-path lokal atau repo. Mengubah isi `.rbot-version` otomatis memicu
-kompilasi ulang saat build berikutnya.
+## Versi
+
+Versi rbot disimpan di `.rbot-version` dan di-embed ke binary saat build.
+Perubahan versi akan memicu build ulang yang diperlukan.
 
 ```bash
-printf 'v0.2.0\n' > .rbot-version
-rbot && rbot version   # -> rbot v0.2.0
+printf 'v0.1.8\n' > .rbot-version
+rbot
+rbot version
 ```
 
-Kode konsumen bisa memakai macro yang sama:
+Kode C juga dapat memakai versi yang di-embed melalui `build/version.h`:
 
 ```c
-#include "version.h" /* tambahkan build ke headers di Buildfile */
+#include "version.h"
 printf("%s\n", RBOT_VERSION_EMBEDDED);
 ```
 
-Cara ini juga menjawab kondisi release: binary yang di-build dari commit
-tersebut selalu membawa versi yang benar, tanpa perlu membaca file versi
-atau API release saat runtime.
-
-## Header tracking
-
-rbot melacak dependensi header secara otomatis: source dikompilasi ulang
-bila `.c`-nya **atau header apa pun yang di-include-nya (transitif)** lebih
-baru daripada object-nya. Tidak perlu konfigurasi tambahan.
-
-- `#include "x.h"` dicari di direktori file pengguna dulu, lalu di direktori
-  `headers` Buildfile; `#include <x.h>` hanya di direktori `headers`.
-- Header yang tidak ada di direktori project (mis. `<stdio.h>`) dianggap
-  header sistem dan diabaikan.
-- Pemindai mengabaikan komentar dan `#if`/`#ifdef`, jadi hasilnya bisa
-  sedikit berlebih (kompilasi ulang yang tak perlu), tidak pernah kurang.
-  `#include` yang memakai macro tidak terdeteksi.
-- Header hanya dipindai untuk source yang lolos cek mtime `.c`, dan setiap
-  header dibaca sekali per build — no-op build tetap murah.
-- Saat ada yang usang karena header, rbot mencetak
-  `> Headers   : N source(s) stale due to header change`.
-
-## Benchmark
-
-Benchmark berikut membandingkan **rbot self-hosted** dengan workflow
-`bear -- make` pada project C dengan **174 source file**.
-
-`CMake` tidak termasuk dalam pengukuran karena hanya digunakan untuk
-bootstrap/build awal rbot. Setelah executable tersedia, kedua workflow
-dijalankan menggunakan build system masing-masing.
-
-### No-op build
-
-Kondisi pengujian:
-
-- 174 source file C.
-- Tidak ada source yang berubah.
-- Target `bin/rupa` sudah up-to-date.
-- rbot menggunakan persistent Buildfile cache.
-- rbot menggunakan persistent `compile_commands.json` cache.
-- `compile_commands.json` tidak ditulis ulang ketika konfigurasi tidak berubah.
-- Tidak ada source yang dikompilasi ulang.
-- Linker tidak dijalankan ketika target sudah up-to-date.
-- Pembanding menggunakan `bear -- make` agar workflow Make juga menghasilkan
-  `compile_commands.json`.
-
-| Build system    |   Run 1 |   Run 2 |   Rata-rata |
-| --------------- | ------: | ------: | ----------: |
-| **rbot**        | 0.858 s | 0.814 s | **0.836 s** |
-| **bear + make** | 2.204 s | 2.169 s | **2.187 s** |
-
-Pada pengujian tersebut:
-
-```text
-rbot:
-  Compiled : 0
-  Skipped  : 174
-  CompDB   : cache hit
-  Linking  : bin/rupa (up-to-date)
-
-bear + make:
-  make: 'bin/rupa' is up to date.
-```
-
-Rata-rata wall-clock time `rbot` sekitar **2.6× lebih rendah** dibandingkan
-`bear -- make` pada pengujian no-op ini.
-
-CPU time yang tercatat:
-
-| Build system    |  Run 1 |  Run 2 |   Rata-rata |
-| --------------- | -----: | -----: | ----------: |
-| **rbot**        | 0.14 s | 0.13 s | **0.135 s** |
-| **bear + make** | 1.41 s | 1.41 s |  **1.41 s** |
-
-Benchmark ini merupakan pengukuran pada environment pengujian yang sama dan
-bukan klaim performa universal. Hasil dapat berbeda tergantung hardware,
-filesystem, toolchain, jumlah source, dan environment runtime.
-
-### Optimasi environment proot
-
-Pada proot-distro (Termux) tiap syscall melewati ptrace sehingga biayanya
-puluhan kali lebih mahal dari Linux biasa. Optimasi berbasis pengurangan
-syscall pada project uji 151 source / 30 header (kernel
-`6.17.0-PRoot-Distro`):
-
-| Aspek | Sebelum | Sesudah |
-|---|---|---|
-| No-op build | 0.80–0.94 s | **0.33–0.72 s** |
-| Total syscall | 4800 | **~1500** |
-| openat (file dibuka) | 670 | **50–80** |
-| read (byte dibaca) | 1339 | **~100** |
-
-Penghematan utama:
-
-- `.rbot/deps.cache` dimuat **satu pass** (snapshot hash + cache edges
-  sekaligus, tidak dibuka dua kali);
-- cache edges `!e/!k` — file `.d` tidak dibuka ulang selama mtime sama
-  (satu stat menggantikan open+read per source);
-- header anak edges `.d` diverifikasi shallow tanpa dibuka/dipindai;
-- pass rekam setelah build sukses **dilewati pada no-op murni** (tidak ada
-  yang berubah sejak rekam terakhir) — membuang DFS + ribuan pembaruan
-  snapshot yang murni CPU; dan pass rekam memakai hash terekam selama
-  mtime sama (build no-op = nol baca isi).
-
-### Optimasi kinerja (clean & no-op)
-
-- **Clean build paralel secara default** — kompilasi memakai semua core CPU
-  tanpa perlu `-j` (`-j1` untuk serial).
-- **Tanpa `/bin/sh` per job** — command kompilasi/link yang polos (tanpa
-  quote, variabel, glob, pipe) dijalankan langsung lewat `posix_spawn`: satu
-  `exec` per job, bukan dua (shell + compiler), dan tanpa menyalin page table
-  proses rbot. Command yang butuh shell tetap lewat `sh -c` seperti dulu.
-- **No-op tidak lagi menulis apa pun** — cache edges (`!e/!k`) kini selalu
-  ter-indeks penuh; sebelumnya sebagian entri terlewat sehingga file `.d`
-  dibuka ulang dan `.rbot/deps.cache` ditulis ulang di setiap build.
-- Source tanpa header project (hanya header sistem) sekarang tercatat sah di
-  cache (`!e <src> <mtime> 0`), tidak lagi dianggap "cache meleset".
-- Object (`.o`) tidak lagi tercatat sebagai dependensi source-nya sendiri
-  (bug offset pada pengecekan target `.o` di parser `.d`): satu `stat` lebih
-  sedikit per source, dan isi object tidak lagi di-hash ke snapshot.
-- `stat` per entri direktori diganti `d_type` dari `readdir`; `mkdir` berulang
-  per object dilewati; mtime object/source dari fase klasifikasi dipakai ulang
-  saat keputusan link, jadi no-op tidak men-stat ulang semua object.
-
 ## Buildfile
 
-`rbot init` akan membuat `Buildfile` default berikut di project kamu
-(format baru `use alias`; format lama berbasis section `key:` juga tetap
-diterima — lihat bagian di bawah):
+Buildfile modern menggunakan `use alias` dan format `key = value`:
 
-```yaml
+```text
 use alias
 
 clean as c
 output as o
 
 root = .
-
-c.build = false
-c.compdb = false # compile_commands.json
-
 sources = src
-
-flags = Wall, Wextra, MMD, MP # MMD: dep file <obj>.d (GNU/Clang); MP: phony target
-
-std = gnu11
-
 headers = include, I.
-
+flags = Wall, Wextra, O2, MMD, MP
+std = gnu11
 compiler = gcc, clang
 
-progress.bar = true
-progress.error = always
+c.build = false
+c.compdb = true
 
 o.binaryName = app
 o.binaryDir = bin
 o.buildDir = build
-o.compileCommands = auto # compile_commands.json
+o.compileCommands = auto
 ```
 
-Bagian yang sering disesuaikan:
+Format Buildfile lama tetap didukung.
 
-- **sources** — daftar direktori yang di-scan rekursif untuk file `.c`.
-- **target** _(opsional)_ — arsitektur tujuan build, mis. `x86_64`, `arm64`,
-  atau `riscv64`. Kosong berarti host (perilaku lama). Flag arsitektur
-  ditambahkan otomatis sesuai toolchain (GNU/Clang: `-m64`,
-  `-march=armv8-a`, `-march=rv64gc -mabi=lp64d`; Apple Clang: `-arch`;
-  MSVC: `/ARCH` bila perlu) — juga tercatat di `compile_commands.json`.
+### Konfigurasi umum
 
-  ```yaml
-  target = arm64
-  ```
+- `sources` — direktori yang dipindai untuk source `.c`.
+- `exclude` — source yang dikeluarkan dari target, misalnya `main.c`.
+- `headers` — direktori include.
+- `flags` — flag compiler, misalnya `Wall, Wextra, MMD, MP`.
+- `std` — standar bahasa, misalnya `gnu11`.
+- `compiler` — compiler yang tersedia, misalnya `gcc, clang`.
+- `library` / `library.<platform>` — library yang ditambahkan saat link.
+- `foreground` — perilaku process group/SIGINT.
+- `output.*` — konfigurasi binary dan library.
 
-- **headers** — tiap entri menjadi `-I<dir>`; `I.` shorthand untuk `-I.`
-  (di MSVC otomatis menjadi `/I<dir>`).
-- **flags** — flag compiler. Direkomendasikan untuk pelacakan header penuh:
+Contoh library:
 
-  ```yaml
-  flags = Wall, Wextra, MMD, MP # MMD: dep file <obj>.d (GNU/Clang); MP: phony target
-  ```
+```text
+library.default = ssl, crypto
+library.linux = m, pthread
+library.macos = m
+library.windows = ws2_32
+```
 
-  Dengan `-MMD`, tiap kompilasi menghasilkan `<obj>.d` di build dir —
-  berguna untuk editor/IDE dan debugger build. rbot sendiri tidak bergantung
-  pada file itu untuk keputusan incremental (lihat pelacakan header di
-  bawah); di MSVC flag `-M*` dilewati otomatis.
-- **library** _(opsional, tidak ada di default)_ — tiap entri menjadi
-  `-l<nama>`, contoh `ssl` → `-lssl` (di MSVC otomatis menjadi `ssl.lib`).
-  Di format baru: `library = ssl, crypto`, atau per platform
-  `library.linux = m, pthread`.
-- **o.binaryName / o.binaryDir** (alias kanonik `output.*`) — nama & lokasi
-  binary hasil build.
-- **foreground** _(opsional, default `true`)_ — kendali Ctrl+C:
+## Build paralel
 
-  ```yaml
-  foreground = false
-  ```
-
-  Saat `true` (default), child build berbagi process group dengan rbot —
-  Ctrl+C dari terminal menghentikan rbot dan compiler sekaligus (perilaku
-  klasik). Saat `false`, child berjalan di process group terpisah: rbot
-  menerima SIGINT sendiri, meneruskannya ke compiler, lalu membatalkan
-  build dengan rapi. Ini membuat SIGINT bisa diterima lebih fleksibel
-  (mis. untuk mencatat status sebelum keluar) tanpa menyisakan proses
-  compiler yang masih berjalan.
-
-## Build paralel (-jN)
-
-Tanpa opsi `-j`, rbot langsung paralel sebanyak core CPU (seperti `ninja`).
-Pakai `-j1` untuk build serial.
+Build paralel aktif secara default sesuai jumlah core CPU.
 
 ```bash
-rbot            # paralel, sejumlah core CPU (default)
-rbot -j         # sama seperti di atas
-rbot -j4        # paralel, 4 job
-rbot -j1        # serial
+rbot
+rbot -j
+rbot -j4
+rbot -j1
 rbot --jobs=4
-rbot clean -j2  # opsi boleh sebelum/sesudah command
 ```
 
-Mirip `make -j`: hanya fase kompilasi yang diparalelkan; link, embedded,
-dan fase library tetap berurutan. Setiap job mendapat process group
-sendiri sehingga Ctrl+C diteruskan ke semua compiler yang sedang berjalan
-dan build berhenti dengan rapi (exit code 130).
+`-j1` memaksa build serial. Fase kompilasi dapat diparalelkan; link dan
+beberapa fase artifact tetap terkoordinasi oleh rbot.
 
-## Buildfile format baru (`use alias`)
+## Header tracking dan incremental build
 
-Buildfile format baru tetap bernama `Buildfile` — cukup diawali baris
-`use alias`, dan rbot membacanya otomatis tanpa opsi apa pun. Opsi
-`-f <file>` hanya diperlukan bila memakai nama file konfigurasi lain
-(bentuk rapat `-f<file>` juga bisa):
+rbot melacak dependency header secara otomatis. Source akan dianggap stale
+ketika source atau dependency header-nya berubah.
 
-```bash
-rbot                # Buildfile (format baru maupun lama) terbaca otomatis
-rbot -f lain        # pakai nama file lain, bila memang diperlukan
-rbot -flain clean   # bentuk rapat; command apa pun menghormati -f
-```
+Dengan `MMD, MP`, compiler GNU/Clang menghasilkan `.d` files yang dapat
+digunakan rbot untuk mendapatkan dependency header. Bila `.d` belum tersedia,
+rbot memiliki fallback scanner untuk `#include`.
 
-File konfigurasi diawali baris `use alias` memakai format flat
-`key = value` (kualifikasi dengan titik) plus definisi alias `X as Y`.
-Semantiknya seperti alias pada umumnya: **nama kanonik tetap berlaku**,
-alias hanya nama kedua — dan bisa berantai:
+rbot juga memiliki cache dependency/fingerprint sehingga perubahan mtime
+saja tidak selalu menyebabkan kompilasi ulang ketika isi sebenarnya tidak
+berubah.
 
-```yaml
-use alias
-
-clean as c                # c.build = ... juga berarti clean.build
-embedded.modules as mod   # mod.src = ... berarti embedded.modules.src
-mod.archive as archive    # chain: archive.name = ... -> e.modules.archive
-
-root = .
-c.build = false
-sources = src, tools
-flags = Wall, O2, MMD, MP
-
-o.binaryName = app
-o.binaryDir = bin
-```
-
-Kunci `key` tanpa titik pada baris menjorok mewarisi prefix section yang
-terbaru; komentar `//` didukung di format ini (komentar `#` didukung di
-semua format). `Buildfile` di repo ini sendiri memakai format baru —
-lihat isinya untuk contoh nyata.
-
-Tanpa baris `use alias`, parser lama berbasis section/indentasi tetap
-dipakai persis seperti biasa — kedua format tidak saling mengganggu.
-`-f` dengan path yang memuat direktori membuat rbot masuk ke direktori
-tersebut dulu (gaya `make -C`), jadi sources/headers/output tetap
-relatif terhadap lokasi Buildfile.
-
-## Lintas konfigurasi (`-xf` / `-xcf`)
-
-rbot bisa meniru project yang sudah punya `build.ninja` (hasil CMake
-generator Ninja, atau tulisan tangan): file itu dikonversi menjadi
-Buildfile format baru, lalu command dijalankan dengan Buildfile hasil
-konversi.
-
-```bash
-rbot -xf nbuild/build.ninja       # konversi -> build -> hapus Buildfile
-rbot -xcf nbuild/build.ninja      # konversi -> build, Buildfile tetap ada
-rbot -xf nbuild/build.ninja clean # bekerja untuk command apa pun
-```
-
-Aturan translasi:
-
-- tiap edge compile (`-c ... -o <obj>.o`) jadi source rbot; flag
-  `-D/-O/-W/-f` diteruskan, `-std=...` jadi `std`, `-I` jadi `headers`;
-- edge link dipakai menebak `o.binaryName`;
-- path absolut di bawah cwd di-relatif-kan; rule template CMake
-  (`$FLAGS`, `$INCLUDES`, `${...}`, `include rules.ninja`) diekspansi;
-- edge custom command (ar, ld, cmake -E, dsb.) diabaikan — link & library
-  dikerjakan rbot sendiri.
-
-`-xf` menghapus Buildfile sementara setelah command selesai (project asli
-tidak tersentuh); `-xcf` menyimpan hasilnya agar bisa dijadikan titik awal
-migrasi ke Buildfile.
-
-## Pelacakan header (incremental)
-
-Mengubah header tidak lagi mengharuskan build penuh yang membabi buta.
-
-Sumber dependensi header dipilih otomatis per source:
-
-1. **file `.d` dari compiler** — dengan flag `-MMD -MP` (GNU/Clang),
-   daftar header yang ditulis compiler dipakai langsung. Paling akurat:
-   compiler yang meresolusi `#if`, makro, dan computed include, sehingga
-   header yang tidak benar-benar dipakai (mis. di balik `#if 0`) tidak
-   memicu kompilasi ulang. Bila `.d` basi (source lebih baru) atau belum
-   ada, rbot jatuh ke pemindai `#include`.
-2. **pemindai `#include` (fallback)** — dipakai untuk build pertama,
-   MSVC (tanpa `-MMD`), atau saat `.d` belum ada. Hasilnya bisa sedikit
-   berlebih (mengabaikan `#if`), tidak pernah kurang.
-
-Keputusan build dua lapis:
-
-1. **mtime** — object dianggap usang bila salah satu header dependensi
-   lebih baru daripada object.
-2. **konten** — bila mtime mengatakan stale (mis. setelah `touch include/app.h`),
-   hash isi source + seluruh dependensinya dibandingkan dengan snapshot dari
-   build sukses terakhir (`.rbot/deps.cache`). Isi tidak berubah → build
-   dilewati, tanpa kompilasi ulang.
+Contoh output no-op:
 
 ```text
 > Headers   : 4 source(s) skipped (touched, content unchanged)
@@ -386,139 +158,291 @@ Compiled : 0
 Skipped  : 5
 ```
 
-Snapshot hanya direkam setelah build sukses, jadi object yang gagal
-kompilasi tidak pernah dianggap segar. `rbot clean` menghapusnya juga —
-verifikasi hash pada build berikutnya dimulai dari nol, lalu snapshot
-direkam ulang saat build sukses.
+## compile_commands.json
+
+rbot dapat menghasilkan dan mempertahankan `compile_commands.json` untuk
+editor dan tooling seperti clangd.
+
+```text
+o.compileCommands = auto
+```
+
+Cache configuration dan compile database tidak ditulis ulang ketika tidak
+ada perubahan yang relevan.
+
+## Workspace multi-project
+
+Gunakan `Buildfile.ws` untuk beberapa project:
+
+```text
+use workspace
+
+projects.rupamod as mod
+projects.rupa as rupa
+projects = rupamod, rupa, ruka
+
+compiler = gcc, clang
+flags = Wall, Wextra, MMD, MP
+std = gnu11
+
+mod.output.binary = false
+mod.archive.src = .
+mod.archive.name = rupa_modules
+mod.archive.with = tar, gz
+mod.archive.exclude = build, dist, LICENSE, README.md, self_archive
+mod.archive.dir = ../ruka/modules
+
+rupa.sources = src
+rupa.exclude = main.c
+rupa.output as rupaout
+rupa.library as rupalib
+rupaout.binaryName = rupa
+rupaout.libraryName = rupa
+rupaout.libDir = lib
+rupaout.libraryShared = true
+
+ruka.sources = manager, src
+ruka.exclude = manager/main.c
+ruka.output as rukaout
+ruka.library as rukalib
+rukaout.binaryName = ruka
+rukaout.libraryName = ruka
+rukaout.libDir = lib
+rukaout.libraryShared = true
+ruka.depends_on = rupamod
+```
+
+Perintah:
+
+```bash
+rbot init -w
+rbot -w
+rbot -w rupa
+rbot -w clean
+```
+
+`rbot -w NAME` membangun project yang diminta beserta dependency-nya.
+Workspace mensintesis Buildfile project ke `.rbot/workspace/` dan tetap
+menggunakan mekanisme build normal rbot, termasuk cache, dependency tracking,
+parallel build, dan compdb.
+
+### Library dan binary dua fase
+
+Workspace dapat memiliki dependency library silang. rbot menangani kondisi
+seperti `rupa <-> ruka` dalam dua fase:
+
+1. library pass — membuat static/shared library yang diperlukan;
+2. binary pass — setelah seluruh library tersedia, link binary final.
+
+Contoh:
+
+```text
+rukalib.linux = rupa
+rupalib.linux = ruka
+```
+
+## Archive
+
+Project workspace juga dapat menghasilkan archive sendiri:
+
+```text
+mod.output.binary = false
+mod.archive.src = .
+mod.archive.name = rupa_modules
+mod.archive.with = tar, gz
+mod.archive.exclude = build, dist, LICENSE, README.md, self_archive
+mod.archive.dir = ../ruka/modules
+```
+
+`archive.src` menentukan root source. `archive.pattern` (bila digunakan)
+hanya digunakan untuk mendeteksi freshness archive; bukan filter isi archive.
+Isi archive dikendalikan oleh `archive.exclude`.
+
+`.git` merupakan exclusion bawaan untuk source archive.
+
+## Embedded files
+
+rbot dapat mengubah archive menjadi object binary dan memasukkannya ke
+binary/library.
+
+Contoh:
+
+```text
+ruka.embedded.modules as rukamod
+
+rukamod.file = ../rupamod/dist/rupa_modules.tar.gz
+rukamod.variable = MODULES
+rukamod.extract = /tmp/rupa-system
+rukamod.pattern = .rp
+```
+
+Header yang dihasilkan berada di `build/embedded.h` dan menyediakan macro:
+
+```text
+EMBED_<NAME>_ARCHIVE_NAME
+EMBED_<NAME>_EXTRACT_DIR
+EMBED_<NAME>_SYMBOL
+EMBED_<NAME>_SYMBOL_END
+EMBED_<NAME>_SYMBOL_LEN
+```
+
+Untuk static-library dependency, reference ke symbol embedded harus cukup kuat
+agar linker menarik object embedded dari archive ketika diperlukan.
+
+## Packaging
+
+rbot memiliki packaging built-in melalui `pack.*`.
+
+Contoh sederhana:
+
+```text
+pack.name = rbot
+pack.version = 0.1.8
+pack.output = dist/{name}-v{version}.tar.gz
+pack.files = bin/rbot
+```
+
+### Source → destination mapping
+
+`pack.files` dapat memetakan file source ke path di dalam package:
+
+```text
+pack.files = bin/rbot:bin/rbot, README.md:share/rbot/README.md
+```
+
+Hasil archive:
+
+```text
+bin/rbot
+share/rbot/README.md
+```
+
+Tanpa `:destination`, path lama tetap berlaku:
+
+```text
+pack.files = bin/rbot, README.md
+```
+
+### Format, compression, checksum
+
+```text
+pack.name = rbot
+pack.version = 0.1.8
+pack.output = dist/{name}-v{version}.tar.gz
+pack.files = bin/rbot:bin/rbot, LICENSE:share/rbot/LICENSE
+pack.format = deb
+pack.checksum = sha256
+pack.deb.install_prefix = /usr/local
+```
+
+`pack.format` dapat digunakan untuk memilih format package yang didukung.
+Compression dapat ditentukan melalui `pack.compress` atau extension output,
+misalnya `.tar.gz`.
+
+Template output yang umum:
+
+```text
+{name}
+{version}
+{os}
+{arch}
+```
+
+### Package merge pada workspace
+
+Satu project dapat menggabungkan **package definition** project lain:
+
+```text
+rupa.pack.files = bin/rupa:bin/rupa, src/prompt/cmd.txt:share/rupa/cmd.txt
+rupa.pack.merge = ruka
+
+ruka.pack.files = bin/ruka:bin/ruka
+ruka.pack.name = ruka
+ruka.pack.version = 0.2.2
+ruka.pack.output = dist/{name}-v{version}.tar.gz
+```
+
+`pack.merge` berarti project target harus memiliki konfigurasi `pack.*` sendiri.
+Yang digabung adalah isi package, terutama `pack.files`; metadata output tetap
+milik masing-masing project.
+
+Dengan konfigurasi tersebut package `rupa` dapat berisi:
+
+```text
+bin/rupa
+bin/ruka
+share/rupa/cmd.txt
+```
+
+Sementara `ruka` tetap dapat menghasilkan package-nya sendiri.
+
+Jika project yang disebut pada `pack.merge` tidak memiliki `pack.files`, rbot
+menganggap konfigurasi tersebut invalid dan berhenti dengan error.
+
+### Debian install prefix
+
+Untuk `.deb`, destination dari `pack.files` ditempatkan relatif terhadap
+`pack.deb.install_prefix`:
+
+```text
+pack.deb.install_prefix = /usr/local
+pack.files = bin/rbot:bin/rbot, README.md:share/rbot/README.md
+```
+
+menghasilkan path data package:
+
+```text
+/usr/local/bin/rbot
+/usr/local/share/rbot/README.md
+```
+
+## Library output
+
+Selain executable, rbot dapat membuat static dan shared library dari object
+yang sama:
+
+```text
+output as o
+
+o.binaryName = app
+o.binaryDir = bin
+o.buildDir = build
+
+o.libraryName = app
+o.libDir = lib
+o.libraryShared = true
+```
+
+Hasil pada Linux:
+
+```text
+bin/app
+lib/libapp.a
+lib/libapp.so
+```
+
+`libraryShared = true` membuat shared library dan menggunakan object yang
+sesuai untuk shared linking. Masing-masing artifact memiliki freshness check
+sendiri.
+
+## Konversi build.ninja
+
+rbot dapat menggunakan `build.ninja` sebagai sumber konfigurasi sementara:
+
+```bash
+rbot -xf build.ninja
+rbot -xcf build.ninja
+rbot -xf build.ninja clean
+```
+
+`-xf` menghapus Buildfile hasil konversi setelah command selesai, sedangkan
+`-xcf` mempertahankannya.
 
 ## Interrupt (Ctrl+C)
 
-Dengan `foreground: false` (atau saat `-jN` aktif), rbot menangani SIGINT
-sendiri: compiler yang sedang berjalan menerima sinyal, job baru tidak
-dimulai, dan rbot keluar dengan status `interrupted` alih-alih error build.
-
-## Embedded (Buildfile: embedded)
-
-Fitur embedded mengarsipkan sebuah direktori lalu menempelkannya ke binary
-— hasil build tetap satu file executable tanpa aset eksternal.
-
-### Menulis di Buildfile
-
-```yaml
-library:
-  - ssl
-  - crypto
-
-  - linux:
-      - m
-      - pthread
-
-  - macos:
-      - m
-
-  - windows:
-      - ws2_32
-
-embedded:
-  - assets:
-      - src: assets
-      - pattern: .txt
-      - extract: /tmp/rupa-assets
-      - archive:
-          - dir: modules
-          - name: demo_assets
-          - with:
-              - tar: true
-              - ext: gz
-```
-
-Hasil di direktori project:
-
-```text
-modules/demo_assets.tar.gz
-build/demo_assets.o
-build/embedded.h
-```
-
-### Memakai di kode
-
-Include `build/embedded.h` (tambahkan `build` ke `headers` di Buildfile),
-lalu pakai macro per entri `<NAMA>` (uppercase nama entri):
-
-| Macro                       | Arti                           |
-| --------------------------- | ------------------------------ |
-| `EMBED_<NAMA>_ARCHIVE_NAME` | nama file arsip                |
-| `EMBED_<NAMA>_EXTRACT_DIR`  | isi `extract:` di Buildfile    |
-| `EMBED_<NAMA>_SYMBOL`       | pointer ke byte pertama data   |
-| `EMBED_<NAMA>_SYMBOL_END`   | pointer satu-byte-setelah-blok |
-| `EMBED_<NAMA>_SYMBOL_LEN`   | panjang data dalam byte        |
-
-```c
-#include <stdio.h>
-#include "embedded.h"
-
-int main(void) {
-  printf("arsip : %s\n", EMBED_ASSETS_ARCHIVE_NAME);
-  printf("ukuran: %lu byte\n", (unsigned long)EMBED_ASSETS_SYMBOL_LEN);
-
-  FILE *f = fopen("/tmp/restore.tar.gz", "wb");
-  fwrite(EMBED_ASSETS_SYMBOL, 1, EMBED_ASSETS_SYMBOL_LEN, f);
-  fclose(f);
-  return 0;
-}
-```
-
-### Dua jalur embed (otomatis)
-
-| Jalur             | Kapan dipakai                          | Bentuk simbol                     |
-| ----------------- | -------------------------------------- | --------------------------------- |
-| `ld -r -b binary` | GNU ld tersedia (Linux/MinGW)          | `_binary_<path>_start/_end` nyata |
-| Fallback C array  | MSVC, atau tanpa `ld` (`RBOT_NO_LD=1`) | `start[]` + `unsigned long _len`  |
-
-Macro `EMBED_<NAMA>_*` di `build/embedded.h` sama persis di kedua jalur.
-Freshness arsip dicek otomatis: perubahan pada file di `src:` akan memicu
-build ulang arsip dan object.
-
-## Library (Buildfile: output.library*)
-
-Selain binary, rbot bisa memproduksi library statis dan/atau dinamis dari
-object yang sama:
-
-```yaml
-output:
-  - binaryName: rupa
-  - binaryDir: bin
-  - buildDir: build
-
-  - libraryName: rupa # aktifkan library: lib/librupa.a
-  - libDir: lib # direktori hasil (default "lib")
-  - libraryShared: true # + lib/librupa.so (perlu -fPIC saat kompilasi)
-```
-
-- `libraryName` mengaktifkan **statis**: `lib<name>.a` (GNU/Clang) atau
-  `<name>.lib` (MSVC).
-- `libraryShared: true` menambah varian **dinamis**: `lib<name>.so`
-  (Linux), `.dylib` (macOS), `<name>.dll` (Windows). Saat aktif, semua
-  source otomatis dikompilasi dengan `-fPIC` sehingga object tetap bisa
-  dipakai link binary.
-- Setiap varian dicek **terpisah**: bila seluruh object inputnya lebih
-  lama dari target, varian itu dilewati (`up-to-date`) tanpa menjalankan
-  `ar`/linker lagi — menghapus `.so` saja tidak meng-rebuild `.a`, dan
-  build no-op tidak menyentuh library sama sekali.
-- **exclude** — melepas source dari pengemasan library tanpa memengaruhi
-  binary (mis. `main.c` milik executable):
-
-  ```yaml
-  exclude:
-    - main.c
-  ```
-
-  Cocok berdasarkan nama file (`main.c`), path (`src/main.c`), atau
-  prefix direktori (`src/tools/`).
-
-Keputusan build library incremental: fase library dilewati bila semua
-varian yang diminta sudah lebih baru daripada seluruh object inputnya;
-object perantara tidak dihapus sehingga build berikutnya tetap murah.
+rbot menangani SIGINT dan meneruskannya ke compiler/job yang sedang berjalan.
+Build yang dibatalkan akan berhenti dengan status interrupted dan tidak
+menandai build yang gagal sebagai successful snapshot.
 
 ## Lisensi
 

@@ -10,7 +10,7 @@
  *
  *   use project    — satu project; sinonim persis `use alias` (jalur parse
  *                    sama, tidak ada jalur konfigurasi kedua).
- *   use workspace  — pembungkus banyak project (file: Buildfile.workspace;
+ *   use workspace  — pembungkus banyak project (file: Buildfile.ws;
  *                    lihat uses/workspace.h).
  *   use alias      — nama lama untuk `use project`; tetap diterima demi
  *                    kompatibilitas (Buildfile rbot & template `rbot init`).

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
-# workspace.sh — benchmark mode workspace rbot (Buildfile.workspace)
+# workspace.sh — benchmark mode workspace rbot (Buildfile.ws)
 #
 # Meniru tests/wstest: 3 proyek dalam satu workspace
 #   rupamod : proyek kemasan (archive .rp -> dist/rupa_modules.tar.gz)
 #   rupa    : binary C mandiri
 #   ruka    : binary C, depends_on rupamod, meng-embed arsip rupamod
-# Buildfile.workspace dibuat persis seperti tests/wstest (alias, archive,
+# Buildfile.ws dibuat persis seperti tests/wstest (alias, archive,
 # depends_on, embedded). Sebagai PEMBANDING dibuat juga build.ninja dan
 # Makefile untuk graf yang sama (satu graf datar, ruka relink bila arsip
 # berubah). Bukan klaim: pembanding tidak punya konsep workspace.
@@ -37,7 +37,7 @@
 #   ./bench/workspace.sh -n 30 -r 2       # cepat
 #   ./bench/workspace.sh -s mod,leaf      # subset skenario
 #   ./bench/workspace.sh -a "--foo"       # argumen tambahan untuk rbot
-#   ./bench/workspace.sh -c "gcc, clang"  # compiler di Buildfile.workspace
+#   ./bench/workspace.sh -c "gcc, clang"  # compiler di Buildfile.ws
 #   ./bench/workspace.sh -d 1.1           # jeda detik antara build & edit berikutnya
 #                                         # (uji deteksi perubahan berbasis mtime detik)
 #   NO_COLOR=1 ./bench/workspace.sh       # tanpa warna / progress bar
@@ -56,7 +56,7 @@ NMOD=40         # -m : jumlah file .rp di rupamod/stdlib
 NRUN=5          # -r : pengulangan per skenario (median)
 RBOT=bin/rbot   # -b : binary rbot
 RBOT_ARGS=""    # -a : argumen tambahan untuk rbot
-COMPILERS="gcc" # -c : nilai 'compiler =' di Buildfile.workspace
+COMPILERS="gcc" # -c : nilai 'compiler =' di Buildfile.ws
 KEEP=0          # -k : jangan hapus workspace di akhir
 ONLY=""         # -s : subset skenario
 OUTDIR=""       # -o : direktori kerja (default ws.tmp di cwd)
@@ -181,7 +181,7 @@ gen_ws() {
     printf 'module m%s\nexport f%s\n' "$i" "$i" >"$WS/rupamod/stdlib/m$i.rp"
   done
 
-  # ---- Buildfile.workspace (bentuk sama dengan tests/wstest) ----
+  # ---- Buildfile.ws (bentuk sama dengan tests/wstest) ----
   {
     echo "use workspace"
     echo
@@ -215,7 +215,7 @@ gen_ws() {
     echo "ruka.embedded.modules.file = ../rupamod/dist/rupa_modules.tar.gz"
     echo "ruka.embedded.modules.variable = MODULES"
     echo "ruka.headers = build, I."
-  } >"$WS/Buildfile.workspace"
+  } >"$WS/Buildfile.ws"
 
   # ---- pembanding: build.ninja (graf datar yang setara) ----
   {

@@ -43,7 +43,7 @@ bool packWriteSha256(const char *path);
 bool packBuildTar(const Config *c, const PackArtifact *a);
 bool packBuildDeb(const Config *c, const PackArtifact *a);
 
-/* mtime ns terbesar di antara entri pack.files (folder di-walk rekursif);
+/* mtime ns terbesar di antara source entri pack.files (folder di-walk rekursif);
    -1 bila tidak ada entri valid. */
 int64_t packNewestInput(const Config *c);
 

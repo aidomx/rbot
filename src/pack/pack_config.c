@@ -1,6 +1,6 @@
 /*
  * pack_config — parsing section pack.* (Buildfile) dan key bare (hasil
- * sintesis Buildfile.workspace). Dipisah dari config.c agar ukuran file
+ * sintesis Buildfile.ws). Dipisah dari config.c agar ukuran file
  * tetap di bawah 500 baris; satu-satunya pemakai adalah configApply() —
  * deklarasi ada di pack_internal.h.
  */
@@ -9,8 +9,7 @@
 #include "../util.h"
 #include "pack_internal.h"
 
-/* Setel string pack; sepasang kutip pembuka/penutup dilepas (nilai
-   `pack.deb.maintainer = "Nama <email>"` di Buildfile.workspace). */
+/* Setel string pack; sepasang kutip pembuka/penutup dilepas (nilai    `pack.deb.maintainer = "Nama <email>"` di Buildfile.ws). */
 void packSetStr(char *dst, size_t n, const char *value) {
   size_t len = strlen(value);
   if (len >= 2 && value[0] == '\"' && value[len - 1] == '\"') {
@@ -21,7 +20,7 @@ void packSetStr(char *dst, size_t n, const char *value) {
   }
 }
 
-/* pack.files = a, b, c — daftar dipisah koma (satu-satunya key list pack). */
+/* pack.files = a, b, c — daftar dipisah koma; a:b memetakan source ke destination. */
 void packAddFiles(PackConfig *p, const char *value) {
   char buf[2048];
   copyStr(buf, sizeof(buf), value);
@@ -35,8 +34,7 @@ void packAddFiles(PackConfig *p, const char *value) {
   }
 }
 
-/* Key deb.* — dipakai section `pack` + `pack.deb.*` maupun key bare
-   `deb.*` hasil sintesis Buildfile.workspace. */
+/* Key deb.* — dipakai section `pack` + `pack.deb.*` maupun key bare    `deb.*` hasil sintesis Buildfile.ws. */
 void packApplyDeb(Config *c, const char *key, const char *value) {
   if (strcmp(key, "maintainer") == 0)
     packSetStr(c->pack.debMaintainer, sizeof(c->pack.debMaintainer), value);

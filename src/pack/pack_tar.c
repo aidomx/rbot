@@ -15,6 +15,7 @@
 #include "../portability.h"
 #include "../util.h"
 #include "pack_internal.h"
+#include "pack_stage.h"
 
 static const char *tarFlag(const char *compress) {
   if (strcmp(compress, "gzip") == 0) return "cz";
@@ -24,27 +25,38 @@ static const char *tarFlag(const char *compress) {
 }
 
 bool packBuildTar(const Config *c, const PackArtifact *a) {
-  (void)c;
   fsRemoveFile(a->tmp);
+  char stage[128];
+  snprintf(stage, sizeof(stage), ".rbot/pack/tar-data");
+  if (!packStageEntries(c, stage)) return false;
 
-  size_t n = strlen(a->tmp) + 64;
-  for (int i = 0; i < c->pack.files.count; i++)
-    n += strlen(c->pack.files.items[i]) + 2;
+  size_t n = strlen(a->tmp) + strlen(stage) + 64;
+  for (int i = 0; i < c->pack.files.count; i++) {
+    char src[MAX_PATH * 2], dst[MAX_PATH * 2];
+    if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
+                        dst, sizeof(dst))) continue;
+    n += strlen(dst) + 2;
+  }
   char *cmd = malloc(n);
   if (!cmd) {
     fprintf(stderr, "rbot: pack: kehabisan memori\n");
+    fsRemoveTree(stage);
     return false;
   }
 
-  snprintf(cmd, n, "tar %sf %s", tarFlag(a->compress), a->tmp);
+  snprintf(cmd, n, "tar %sf %s -C %s", tarFlag(a->compress), a->tmp, stage);
   for (int i = 0; i < c->pack.files.count; i++) {
+    char src[MAX_PATH * 2], dst[MAX_PATH * 2];
+    if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
+                        dst, sizeof(dst))) continue;
     strcat(cmd, " ");
-    strcat(cmd, c->pack.files.items[i]);
+    strcat(cmd, dst);
   }
 
   mkparent(a->tmp);
   bool ok = runCmd(cmd);
   free(cmd);
+  fsRemoveTree(stage);
   if (!ok) {
     fsRemoveFile(a->tmp);
     fprintf(stderr, "rbot: pack: tar gagal untuk %s\n", a->path);

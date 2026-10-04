@@ -182,7 +182,15 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
     snprintf(rel, sizeof(rel), "%s", rest);
     char *dot = strrchr(rel, '.');
     if (dot) *dot = '\0';
-    snprintf(out, n, "%s/%s.o", c->outBuildDir, rel);
+
+    /* Keep the source-root in the object path when multiple source roots are
+       configured. This prevents collisions such as src/install.c and
+       manager/install.c both becoming build/install.o. A single-root build
+       keeps the historical flat layout for compatibility. */
+    if (c->sources.count > 1 && strcmp(root, ".") != 0)
+      snprintf(out, n, "%s/%s/%s.o", c->outBuildDir, root, rel);
+    else
+      snprintf(out, n, "%s/%s.o", c->outBuildDir, rel);
     return true;
   }
   return false;

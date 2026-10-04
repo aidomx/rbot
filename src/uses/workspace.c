@@ -12,7 +12,8 @@
 #include "alias.h"
 
 /*
- * workspace — implementasi mode `use workspace` (Buildfile.workspace).
+ * workspace — implementasi mode `use workspace` (Buildfile.ws; nama lama
+ * Buildfile.workspace masih diterima bila file baru tidak ada).
  *
  * Workspace adalah LAYER TIPIS di atas jalur build satu project yang sudah
  * ada: file workspace di-parse untuk daftar proyek + setting per proyek +
@@ -22,7 +23,7 @@
  * proyeknya. FastState, fingerprint, library, compdb — semuanya ikut
  * otomatis tanpa diubah.
  *
- * Rute key di Buildfile.workspace:
+ * Rute key di Buildfile.ws:
  *   projects = a, b           -> daftar proyek (validasi eksplisit)
  *   projects.<nama>.*         -> setting per proyek (alias `projects.<n> as
  *                                <singkatan>` diperbolehkan; batas titik
@@ -33,7 +34,7 @@
  *                                Buildfile tiap proyek.
  *
  * Root proyek default = <root workspace>/<nama>; override: <n>.root.
- * Path relatif terhadap lokasi Buildfile.workspace (aturan rbot yang sudah
+ * Path relatif terhadap lokasi file workspace (aturan rbot yang sudah
  * ada) — berarti relatif root workspace. Urutan build dari depends_on
  * (topological sort), bukan urutan `projects =`.
  */
@@ -54,6 +55,11 @@ typedef struct {
   List commonLines; /* key selain projects/projects.<nama> — default bersama */
   List order;       /* urutan build hasil topo sort (nama) */
   List depends[WS_MAX_PROJECTS];
+  /* Proyek lain yang dirujuk lewat library.<os> = <nama proyek> (mis.
+     rupalib.linux = ruka). TIDAK masuk topo sort — siklus library antar
+     proyek (rupa <-> ruka) sah; dua fase build yang menyelesaikannya.
+     Dipakai untuk memperluas build selektif `-w <nama>`. */
+  List libDeps[WS_MAX_PROJECTS];
 } WsModel;
 
 /* ==================== util kecil ==================== */
@@ -109,7 +115,7 @@ static void wsAddCommon(WsModel *m, const char *key, const char *value) {
   listAdd(&m->commonLines, buf);
 }
 
-/* ==================== parse Buildfile.workspace ==================== */
+/* ==================== parse Buildfile.ws ==================== */
 
 /* Satu baris setting. Tiga bentuk diterima (alias di-resolve lebih dulu):
      projects.<nama>.<setting> = v   (bentuk kanonik)
@@ -164,7 +170,7 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
   listAdd(&p->lines, buf);
 }
 
-/* Parse Buildfile.workspace di cwd. Alias di-resolve dengan mesin alias
+/* Parse file workspace di cwd. Alias di-resolve dengan mesin alias
    yang sama dengan use project (projects.rupamod as mod). */
 static bool wsParse(WsModel *m, const char *path) {
   memset(m, 0, sizeof(*m));
@@ -225,6 +231,137 @@ static bool wsParse(WsModel *m, const char *path) {
   return true;
 }
 
+/* ==================== pack.merge ==================== */
+
+static bool wsProjectPackFiles(const WsProject *p, List *out) {
+  bool found = false;
+  for (int i = 0; i < p->lines.count; i++) {
+    const char *ln = p->lines.items[i];
+    if (strncmp(ln, "pack.files = ", 13) != 0) continue;
+    const char *v = ln + 13;
+    char buf[WS_LINE_LEN * 2];
+    if (strlen(v) >= sizeof(buf)) return false;
+    copyStr(buf, sizeof(buf), v);
+    for (char *save = buf;;) {
+      char *comma = strchr(save, ',');
+      if (comma) *comma = '\0';
+      char *item = trim(save);
+      if (*item && !listAdd(out, item)) return false;
+      if (!comma) break;
+      save = comma + 1;
+    }
+    found = true;
+  }
+  return found;
+}
+
+static bool wsPackMergeInfo(const WsModel *m, const WsProject *owner,
+                            char *out, size_t n) {
+  out[0] = '\0';
+  for (int i = 0; i < owner->lines.count; i++) {
+    const char *ln = owner->lines.items[i];
+    if (strncmp(ln, "pack.merge = ", 13) != 0) continue;
+    const char *v = ln + 13;
+    char buf[WS_LINE_LEN * 2];
+    if (strlen(v) >= sizeof(buf)) return false;
+    copyStr(buf, sizeof(buf), v);
+    for (char *save = buf;;) {
+      char *comma = strchr(save, ',');
+      if (comma) *comma = '\0';
+      char *item = trim(save);
+      if (*item) {
+        int dep = wsFindProject(m, item);
+        if (dep < 0) {
+          fprintf(stderr, "rbot: workspace: '%s' pack.merge unknown project '%s'\n",
+                  owner->name, item);
+          return false;
+        }
+        List files = {0};
+        if (!wsProjectPackFiles(&m->projects[dep], &files)) {
+          fprintf(stderr, "rbot: workspace: '%s' pack.merge project '%s' has no pack.files\n",
+                  owner->name, item);
+          listFree(&files);
+          return false;
+        }
+        for (int j = 0; j < files.count; j++) {
+          const char *entry = files.items[j];
+          const char *colon = strchr(entry, ':');
+          char src[WS_LINE_LEN], dst[WS_LINE_LEN], dstBuf[WS_LINE_LEN];
+          if (colon) {
+            size_t sl = (size_t)(colon - entry);
+            if (sl == 0 || sl >= sizeof(src)) { listFree(&files); return false; }
+            memcpy(src, entry, sl); src[sl] = '\0';
+            copyStr(dstBuf, sizeof(dstBuf), colon + 1);
+            copyStr(dst, sizeof(dst), trim(dstBuf));
+          } else {
+            copyStr(src, sizeof(src), entry);
+            copyStr(dst, sizeof(dst), entry);
+          }
+          char mapped[WS_LINE_LEN * 2];
+          int written = snprintf(mapped, sizeof(mapped), "../%s/%s:%s",
+                                 m->projects[dep].root, src, dst);
+          if (written < 0 || (size_t)written >= sizeof(mapped)) {
+            listFree(&files);
+            return false;
+          }
+          if (out[0] && strlen(out) + 2 >= n) { listFree(&files); return false; }
+          if (out[0]) strcat(out, ", ");
+          if (strlen(out) + strlen(mapped) + 1 >= n) { listFree(&files); return false; }
+          strcat(out, mapped);
+        }
+        listFree(&files);
+      }
+      if (!comma) break;
+      save = comma + 1;
+    }
+  }
+  return true;
+}
+
+static bool wsValidatePackMerges(WsModel *m) {
+  for (int i = 0; i < m->projectCount; i++) {
+    WsProject *owner = &m->projects[i];
+    for (int j = 0; j < owner->lines.count; j++) {
+      const char *ln = owner->lines.items[j];
+      if (strncmp(ln, "pack.merge = ", 13) != 0) continue;
+      const char *v = ln + 13;
+      char buf[WS_LINE_LEN * 2];
+      if (strlen(v) >= sizeof(buf)) return false;
+      copyStr(buf, sizeof(buf), v);
+      for (char *save = buf;;) {
+        char *comma = strchr(save, ',');
+        if (comma) *comma = '\0';
+        char *item = trim(save);
+        if (*item) {
+          int dep = wsFindProject(m, item);
+          if (dep < 0) {
+            fprintf(stderr, "rbot: workspace: '%s' pack.merge unknown project '%s'\n",
+                    owner->name, item);
+            return false;
+          }
+          List files = {0};
+          bool ok = wsProjectPackFiles(&m->projects[dep], &files);
+          listFree(&files);
+          if (!ok) {
+            fprintf(stderr, "rbot: workspace: '%s' pack.merge project '%s' has no pack.files\n",
+                    owner->name, item);
+            return false;
+          }
+          /* merge is also a build dependency: the merged package's files
+             must exist before the owner's pack phase runs. */
+          bool exists = false;
+          for (int k = 0; k < m->depends[i].count; k++)
+            if (strcmp(m->depends[i].items[k], item) == 0) exists = true;
+          if (!exists && !listAdd(&m->depends[i], item)) return false;
+        }
+        if (!comma) break;
+        save = comma + 1;
+      }
+    }
+  }
+  return true;
+}
+
 /* ==================== topo sort depends_on ==================== */
 
 /* DFS berwarna (0 putih, 1 abu, 2 hitam): siklus terdeteksi pasti, dan
@@ -271,6 +408,28 @@ static bool wsTopoSort(WsModel *m) {
     }
   }
 
+  /* Kumpulkan juga dependensi library lintas-proyek (library.<os> =
+     <nama proyek lain>). Sengaja TIDAK masuk DFS topo: siklus library
+     sah (dua fase build), hanya dipakai untuk memperluas `-w <nama>`. */
+  for (int i = 0; i < m->projectCount; i++) {
+    for (int j = 0; j < m->projects[i].lines.count; j++) {
+      const char *ln = m->projects[i].lines.items[j];
+      if (strncmp(ln, "library.", 8) != 0) continue;
+      const char *v = strchr(ln, '=');
+      if (!v) continue;
+      v = trim((char *)v + 1);
+      for (char *save = (char *)v;;) {
+        char *comma = strchr(save, ',');
+        if (comma) *comma = '\0';
+        char *item = trim(save);
+        if (*item && strcmp(item, m->projects[i].name) != 0 && wsFindProject(m, item) >= 0)
+          listAdd(&m->libDeps[i], item);
+        if (!comma) break;
+        save = comma + 1;
+      }
+    }
+  }
+
   unsigned char color[WS_MAX_PROJECTS] = {0};
   List order = {0};
   for (int i = 0; i < m->projectCount; i++)
@@ -284,24 +443,95 @@ static bool wsTopoSort(WsModel *m) {
 
 /* ==================== sintesis Buildfile per proyek ==================== */
 
-static bool wsSynthesize(const WsModel *m, const char *outDir) {
+
+/* Ubah shorthand library workspace: `library.linux = ruka` menjadi path
+   artifact project (`../ruka/lib/libruka.a`). Nilai project tidak boleh
+   diterjemahkan menjadi `-lruka`, karena linker berada di root project
+   consumer dan tidak otomatis mengetahui libDir project lain. */
+static bool wsLibraryValue(const WsModel *m, const WsProject *owner,
+                           const char *value, char *out, size_t n) {
+  (void)owner;
+  out[0] = '\0';
+  const char *p = value;
+  bool first = true;
+  while (*p) {
+    const char *comma = strchr(p, ',');
+    size_t len = comma ? (size_t)(comma - p) : strlen(p);
+    while (len && (p[0] == ' ' || p[0] == '\t')) { p++; len--; }
+    while (len && (p[len - 1] == ' ' || p[len - 1] == '\t')) len--;
+    char item[WS_LINE_LEN];
+    if (len >= sizeof(item)) return false;
+    memcpy(item, p, len); item[len] = '\0';
+    const WsProject *dep = NULL;
+    for (int i = 0; i < m->projectCount; i++) {
+      if (strcmp(m->projects[i].name, item) == 0) { dep = &m->projects[i]; break; }
+    }
+    char mapped[WS_LINE_LEN];
+    if (dep) {
+      char libName[WS_NAME_LEN];
+      char libDir[WS_LINE_LEN];
+      snprintf(libName, sizeof(libName), "%s", dep->name);
+      snprintf(libDir, sizeof(libDir), "lib");
+      for (int j = 0; j < dep->lines.count; j++) {
+        const char *ln = dep->lines.items[j];
+        if (strncmp(ln, "output.libraryName = ", 22) == 0)
+          snprintf(libName, sizeof(libName), "%s", ln + 22);
+        else if (strncmp(ln, "output.libDir = ", 16) == 0)
+          snprintf(libDir, sizeof(libDir), "%s", ln + 16);
+      }
+      /* Paths in synthesized Buildfile are relative to consumer root.
+         Build the string only after checking its exact size so long workspace
+         project/library paths cannot trigger snprintf truncation. */
+      {
+        const char *prefix = "../";
+        const char *middle = "/";
+        const char *libPrefix = "/lib";
+        const char *suffix = ".a";
+        size_t need = strlen(prefix) + strlen(dep->root) +
+                      strlen(middle) + strlen(libDir) +
+                      strlen(libPrefix) + strlen(libName) + strlen(suffix) + 1;
+        if (need > sizeof(mapped)) return false;
+        char *dst = mapped;
+        const char *parts[] = { prefix, dep->root, middle, libDir,
+                                libPrefix, libName, suffix };
+        for (size_t k = 0; k < sizeof(parts) / sizeof(parts[0]); k++) {
+          size_t partLen = strlen(parts[k]);
+          memcpy(dst, parts[k], partLen);
+          dst += partLen;
+        }
+        *dst = '\0';
+      }
+    } else {
+      snprintf(mapped, sizeof(mapped), "%s", item);
+    }
+    if (!first) strncat(out, ", ", n - strlen(out) - 1);
+    strncat(out, mapped, n - strlen(out) - 1);
+    first = false;
+    if (!comma) break;
+    p = comma + 1;
+  }
+  return true;
+}
+
+static bool wsSynthesize(const WsModel *m, const char *outDir, const char *wsName) {
   mkdirs(outDir);
   for (int i = 0; i < m->projectCount; i++) {
     const WsProject *p = &m->projects[i];
 
     /* Bandingkan isi lama vs baru: hanya tulis ulang bila berubah agar
        mtime stabil (cache config & fast path tidak miss sia-sia). */
-    size_t n = 256;
+    size_t n = 4096;
     for (int j = 0; j < m->commonLines.count; j++) n += strlen(m->commonLines.items[j]) + 1;
     for (int j = 0; j < p->lines.count; j++) n += strlen(p->lines.items[j]) + 1;
+    n += (size_t)WS_MAX_PROJECTS * WS_LINE_LEN * 2;
     char *body = malloc(n);
     if (!body) return false;
     body[0] = '\0';
 
     char hdr[192];
     snprintf(hdr, sizeof(hdr),
-             "/* Generated by rbot from Buildfile.workspace — project '%s'. Do not edit. */\n",
-             p->name);
+             "/* Generated by rbot from %s — project '%s'. Do not edit. */\n",
+             wsName, p->name);
     strcat(body, hdr);
     strcat(body, "use project\n\noutput as o\nclean as c\n\n");
     /* root = ".": tiap proyek dieksekusi dengan cwd = root proyeknya
@@ -312,8 +542,44 @@ static bool wsSynthesize(const WsModel *m, const char *outDir) {
       strcat(body, m->commonLines.items[j]);
       strcat(body, "\n");
     }
+    char mergedFiles[WS_MAX_PROJECTS * WS_LINE_LEN * 2];
+    if (!wsPackMergeInfo(m, p, mergedFiles, sizeof(mergedFiles))) {
+      free(body);
+      return false;
+    }
     for (int j = 0; j < p->lines.count; j++) {
-      strcat(body, p->lines.items[j]);
+      const char *ln = p->lines.items[j];
+      if (strncmp(ln, "pack.merge = ", 13) == 0) continue;
+      if (strncmp(ln, "pack.files = ", 13) == 0 && mergedFiles[0]) {
+        char mergedLine[WS_LINE_LEN * 2 + 32];
+        int written = snprintf(mergedLine, sizeof(mergedLine), "%s, %s", ln, mergedFiles);
+        if (written < 0 || (size_t)written >= sizeof(mergedLine)) {
+          free(body);
+          return false;
+        }
+        strcat(body, mergedLine);
+        strcat(body, "\n");
+        continue;
+      }
+      if (strncmp(ln, "library.", 8) == 0) {
+        const char *eq = strchr(ln, '=');
+        if (eq) {
+          char key[WS_LINE_LEN], value[WS_LINE_LEN], mapped[WS_LINE_LEN * 2];
+          size_t kl = (size_t)(eq - ln);
+          if (kl < sizeof(key)) {
+            memcpy(key, ln, kl); key[kl] = '\0';
+            snprintf(value, sizeof(value), "%s", eq + 1);
+            char *k = trim(key); char *v = trim(value);
+            if (wsLibraryValue(m, p, v, mapped, sizeof(mapped))) {
+              char rewritten[WS_LINE_LEN * 3];
+              snprintf(rewritten, sizeof(rewritten), "%s = %s", k, mapped);
+              strcat(body, rewritten); strcat(body, "\n");
+              continue;
+            }
+          }
+        }
+      }
+      strcat(body, ln);
       strcat(body, "\n");
     }
 
@@ -378,7 +644,7 @@ static bool wsMarkNeeded(const WsModel *m, int idx, unsigned char *needed,
 }
 
 static int wsExecOne(const WsModel *m, const char *name, const char *cmd, int jobs,
-                     const char *wsDir) {
+                     const char *wsDir, bool libOnly) {
   int idx = wsFindProject(m, name);
   if (idx < 0) return 1;
   if (!m->projects[idx].root[0]) return 1;
@@ -408,10 +674,50 @@ static int wsExecOne(const WsModel *m, const char *name, const char *cmd, int jo
     fprintf(stderr, "rbot: cannot enter project root '%s'\n", m->projects[idx].root);
     return 1;
   }
-  printf("\n> Project   : %s\n", name);
-  int rc = cmdBuild(jobs, bf);
+  printf("\n> Project   : %s%s\n", name, libOnly ? "  (library pass)" : "");
+  int rc = cmdBuildEx(jobs, bf, libOnly);
   fsSetCwd(wsDir);
   return rc;
+}
+
+/* Bebaskan seluruh isi model (dipakai di semua jalur keluar workspaceRun
+   agar tidak ada List yang bocor saat parse/topo/needed gagal). */
+static void wsModelFree(WsModel *m) {
+  for (int i = 0; i < WS_MAX_PROJECTS; i++) {
+    listFree(&m->depends[i]);
+    listFree(&m->libDeps[i]);
+  }
+  listFree(&m->order);
+  for (int i = 0; i < m->projectCount; i++) listFree(&m->projects[i].lines);
+  listFree(&m->commonLines);
+}
+
+/* Perluas set proyek yang dibutuhkan dengan dependensi library (libDeps)
+   DAN depends_on secara transitif (fixpoint, bukan topo — siklus library
+   sah). Contoh: `-w rupa` menarik ruka (library rupa), lalu rupamod
+   (depends_on ruka) agar arsip embed tersedia untuk fase library ruka. */
+static void wsExpandLibDeps(const WsModel *m, unsigned char *needed) {
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (int i = 0; i < m->projectCount; i++) {
+      if (!needed[i]) continue;
+      for (int j = 0; j < m->libDeps[i].count; j++) {
+        int dep = wsFindProject(m, m->libDeps[i].items[j]);
+        if (dep >= 0 && !needed[dep]) {
+          needed[dep] = 1;
+          changed = true;
+        }
+      }
+      for (int j = 0; j < m->depends[i].count; j++) {
+        int dep = wsFindProject(m, m->depends[i].items[j]);
+        if (dep >= 0 && !needed[dep]) {
+          needed[dep] = 1;
+          changed = true;
+        }
+      }
+    }
+  }
 }
 
 int workspaceRun(const char *cmd, int jobs, const char *only) {
@@ -420,27 +726,39 @@ int workspaceRun(const char *cmd, int jobs, const char *only) {
     fprintf(stderr, "rbot: cannot determine current directory\n");
     return 1;
   }
-  char wsFile[MAX_PATH * 2];
-  snprintf(wsFile, sizeof(wsFile), "%s/%s", wsDir, WORKSPACE_FILENAME);
-  if (!fsFileExists(wsFile)) {
+  const char *wsName = workspaceFileName();
+  if (!wsName) {
     fprintf(stderr, "rbot: %s not found\n", WORKSPACE_FILENAME);
     return 1;
   }
+  char wsFile[MAX_PATH * 2];
+  snprintf(wsFile, sizeof(wsFile), "%s/%s", wsDir, wsName);
 
   WsModel m;
-  if (!wsParse(&m, wsFile)) return 1;
+  if (!wsParse(&m, wsFile)) {
+    wsModelFree(&m);
+    return 1;
+  }
   if (m.projectCount == 0) {
     fprintf(stderr, "rbot: workspace: no projects declared\n");
+    wsModelFree(&m);
+    return 1;
+  }
+  if (!wsValidatePackMerges(&m)) {
+    wsModelFree(&m);
     return 1;
   }
   if (!wsTopoSort(&m)) {
-    for (int i = 0; i < m.projectCount; i++) listFree(&m.depends[i]);
+    wsModelFree(&m);
     return 1;
   }
 
   char synthDir[MAX_PATH * 2];
   snprintf(synthDir, sizeof(synthDir), "%s/%s", wsDir, WORKSPACE_SYNTH_DIR);
-  if (!wsSynthesize(&m, synthDir)) return 1;
+  if (!wsSynthesize(&m, synthDir, wsName)) {
+    wsModelFree(&m);
+    return 1;
+  }
   profMark("workspace-parse+synth");
 
   unsigned char needed[WS_MAX_PROJECTS] = {0};
@@ -448,40 +766,56 @@ int workspaceRun(const char *cmd, int jobs, const char *only) {
     int target = wsFindProject(&m, only);
     if (target < 0) {
       fprintf(stderr, "rbot: workspace: unknown project '%s'\n", only);
-      for (int i = 0; i < m.projectCount; i++) listFree(&m.depends[i]);
-      listFree(&m.order);
-      for (int i = 0; i < m.projectCount; i++) listFree(&m.projects[i].lines);
-      listFree(&m.commonLines);
+      wsModelFree(&m);
       return 1;
     }
     unsigned char visiting[WS_MAX_PROJECTS] = {0};
     if (!wsMarkNeeded(&m, target, needed, visiting)) {
-      for (int i = 0; i < m.projectCount; i++) listFree(&m.depends[i]);
-      listFree(&m.order);
-      for (int i = 0; i < m.projectCount; i++) listFree(&m.projects[i].lines);
-      listFree(&m.commonLines);
+      wsModelFree(&m);
       return 1;
     }
+    /* Build selektif juga menarik proyek yang dirujuk lewat library
+       (library.<os> = <nama proyek>) — transitif; siklus library sah dan
+       tidak membuat loop ini macet (fixpoint sederhana). */
+    wsExpandLibDeps(&m, needed);
   } else {
     for (int i = 0; i < m.projectCount; i++) needed[i] = 1;
   }
 
   int rc = 0;
-  for (int i = 0; i < m.order.count; i++) {
+  if (strcmp(cmd, "build") == 0) {
+    /* FASE 1 — library pass: tiap proyek mengkompilasi source-nya dan
+       mengemas lib<name>.a/.so TANPA link binary. Proyek yang saling
+       memakai library lintas-proyek (rupa <-> ruka) baru bisa link
+       setelah SEMUA library tersedia. Urutan tetap topo (depends_on):
+       archive rupamod harus jadi sebelum fase library ruka meng-embed. */
+    for (int i = 0; i < m.order.count && rc == 0; i++) {
+      int idx = wsFindProject(&m, m.order.items[i]);
+      if (idx < 0 || !needed[idx]) continue;
+      rc = wsExecOne(&m, m.order.items[i], cmd, jobs, wsDir, true);
+    }
+  }
+
+  /* FASE 2 — binary pass (atau command selain build): link binary dengan
+     seluruh library lintas-proyek yang kini sudah ada. */
+  for (int i = 0; rc == 0 && i < m.order.count; i++) {
     int idx = wsFindProject(&m, m.order.items[i]);
     if (idx < 0 || !needed[idx]) continue;
-    int one = wsExecOne(&m, m.order.items[i], cmd, jobs, wsDir);
+    int one = wsExecOne(&m, m.order.items[i], cmd, jobs, wsDir, false);
     if (one != 0) {
       rc = one;
       if (strcmp(cmd, "build") == 0) break; /* gagal: hentikan rantai */
     }
   }
 
-  for (int i = 0; i < m.projectCount; i++) listFree(&m.depends[i]);
-  listFree(&m.order);
-  for (int i = 0; i < m.projectCount; i++) listFree(&m.projects[i].lines);
-  listFree(&m.commonLines);
+  wsModelFree(&m);
   return rc;
 }
 
-bool workspaceFileExists(void) { return fsFileExists(WORKSPACE_FILENAME); }
+const char *workspaceFileName(void) {
+  if (fsFileExists(WORKSPACE_FILENAME)) return WORKSPACE_FILENAME;
+  if (fsFileExists(WORKSPACE_FILENAME_LEGACY)) return WORKSPACE_FILENAME_LEGACY;
+  return NULL;
+}
+
+bool workspaceFileExists(void) { return workspaceFileName() != NULL; }

@@ -51,12 +51,53 @@ static bool ldAvailable(void) {
   return g_ldAvailable == 1;
 }
 
+static uint64_t embArchiveConfigHash(const EmbeddedEntry *e) {
+  uint64_t h = UINT64_C(1469598103934665603);
+#define HASH_BYTES(p, n) do { \
+    const unsigned char *_b = (const unsigned char *)(p); \
+    for (size_t _i = 0; _i < (n); _i++) { h ^= _b[_i]; h *= UINT64_C(1099511628211); } \
+  } while (0)
+#define HASH_STR(x) do { const char *_s = (x); HASH_BYTES(_s, strlen(_s) + 1); } while (0)
+  HASH_STR(e->src);
+  HASH_STR(e->pattern);
+  HASH_STR(e->archiveDir);
+  HASH_STR(e->archiveName);
+  HASH_STR(e->ext);
+  HASH_BYTES(&e->tar, sizeof(e->tar));
+  for (int i = 0; i < e->excludes.count; i++) HASH_STR(e->excludes.items[i]);
+#undef HASH_STR
+#undef HASH_BYTES
+  return h;
+}
+
+static bool embArchiveStateMatches(const EmbeddedEntry *e) {
+  char path[MAX_PATH + 96];
+  snprintf(path, sizeof(path), "%s.archive", e->objectPath);
+  FILE *fp = fopen(path, "rb");
+  if (!fp) return false;
+  uint64_t stored = 0;
+  bool ok = fread(&stored, 1, sizeof(stored), fp) == sizeof(stored);
+  fclose(fp);
+  return ok && stored == embArchiveConfigHash(e);
+}
+
+static void embArchiveStateSave(const EmbeddedEntry *e) {
+  char path[MAX_PATH + 96];
+  snprintf(path, sizeof(path), "%s.archive", e->objectPath);
+  mkparent(path);
+  FILE *fp = fopen(path, "wb");
+  if (!fp) return;
+  uint64_t h = embArchiveConfigHash(e);
+  fwrite(&h, 1, sizeof(h), fp);
+  fclose(fp);
+}
+
 static bool embArchiveFresh(const EmbeddedEntry *e) {
   /* Arsip jadi (embedded.<n>.file): cukup bandingkan mtime file — tidak
      ada direktori sumber untuk discan. */
   if (e->usePrebuilt) return fsFileExists(e->archivePath);
   int64_t at = fsMTimeNs(e->archivePath);
-  if (at < 0) return false;
+  if (at < 0 || !embArchiveStateMatches(e)) return false;
 
   /* Scan freshness dengan resolusi nanodetik: perubahan source dan archive
      dapat terjadi dalam detik yang sama, sehingga time_t/fsMTime() terlalu
@@ -270,7 +311,20 @@ bool embedResourceCompile(const EmbeddedEntry *e, const Config *c) {
   fclose(out);
 
   char *inc = includeFlags(c);
+  /* Objek embed ikut dikemas ke library: bila varian shared diminta, kompilasi
+     dengan -fPIC (GNU/Clang) — sama seperti object source di
+     compileLibraryOne/cmdsRunParallelJobs. Tanpa ini link .so gagal dengan
+     "recompile with -fPIC" di lingkungan tanpa GNU ld (jalur fallback ini).
+     MSVC tidak butuh flag PIC. */
+#ifndef _WIN32
+  char *wf = NULL;
+  if (c->libShared && compilerIsMSVC(c) == false)
+    wf = picWarningFlags(c);
+  else
+    wf = warningFlags(c);
+#else
   char *wf = warningFlags(c);
+#endif
   bool ok = compileOne(c, inc, wf, cfile, e->objectPath);
   free(inc);
   free(wf);
@@ -294,11 +348,49 @@ static bool buildEmbeddedArchiveEntry(const EmbeddedEntry *e) {
   bool ok;
   if (e->tar) {
     const char *z = (strcmp(e->ext, "gz") == 0) ? "z" : "";
-    char *cmd = malloc(strlen(tmpArchive) + strlen(e->src) + 64);
-    if (!cmd) return false;
-    sprintf(cmd, "tar c%sf %s -C %s .", z, tmpArchive, e->src);
+
+    /* Snapshot the files before invoking tar.  This is required when
+       archive.src is "."/"./": the archive output directory and rbot's
+       temporary files can live inside the source tree, so `tar ... .`
+       otherwise observes the tree changing while it is being read. */
+    List files = {0};
+    if (e->pattern[0])
+      walkDir(e->src, e->pattern, &files);
+    else
+      walkDir(e->src, "", &files);
+
+    char listFile[MAX_PATH * 2 + 32];
+    snprintf(listFile, sizeof(listFile), ".rbot-embed-%s.list", e->name);
+    FILE *lf = fopen(listFile, "w");
+    if (!lf) {
+      listFree(&files);
+      return false;
+    }
+
+    size_t srcLen = strlen(e->src);
+    for (int i = 0; i < files.count; i++) {
+      const char *path = files.items[i];
+      const char *rel = path;
+      if (strncmp(path, e->src, srcLen) == 0 &&
+          (path[srcLen] == '/' || path[srcLen] == '\\' || path[srcLen] == '\0')) {
+        rel = path + srcLen;
+        while (*rel == '/' || *rel == '\\') rel++;
+      }
+      if (*rel) fprintf(lf, "%s\n", rel);
+    }
+    fclose(lf);
+    listFree(&files);
+
+    size_t cap = strlen(tmpArchive) + strlen(e->src) + strlen(listFile) + 96;
+    char *cmd = malloc(cap);
+    if (!cmd) {
+      fsRemoveFile(listFile);
+      return false;
+    }
+    snprintf(cmd, cap, "tar c%sf %s -C %s -T %s", z, tmpArchive, e->src, listFile);
     ok = runCmd(cmd);
     free(cmd);
+    fsRemoveFile(listFile);
   } else {
     char *cmd = malloc(strlen(tmpArchive) + strlen(e->src) + 64);
     if (!cmd) return false;
@@ -319,6 +411,7 @@ static bool buildEmbeddedArchiveEntry(const EmbeddedEntry *e) {
             e->archivePath);
     return false;
   }
+  embArchiveStateSave(e);
   return true;
 }
 

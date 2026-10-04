@@ -5,7 +5,15 @@ debian
 .rbot
 shared
 design
+dist
 todos
 sys.tmp
 ws.tmp
 Buildfile.xf.tmp
+tests/rupaws
+trash
+RELEASE_*.md
+rbot_logo.png
+*.orig
+*.bak
+*.plist

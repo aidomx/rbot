@@ -29,7 +29,7 @@
  *     entri pack.files dipasang di <install_prefix>/<entri>.
  * pack.checksum = sha256 menulis <artefak>.sha256 (format `sha256sum -c`).
  *
- * Di Buildfile.workspace, setting per proyek disintesis TANPA prefix
+ * Di Buildfile.ws, setting per proyek disintesis TANPA prefix
  * projects.<nama>. — sehingga key bare (name, version, files, output,
  * compress, checksum, format, deb.*) juga dirutekan ke pack di sini.
  * Proyek pack tanpa sources otomatis output.binary = false (tidak ada
@@ -57,6 +57,7 @@ typedef struct {
   char src[MAX_PATH];     /* direktori yang diarsipkan */
   char extract[MAX_PATH]; /* direktori ekstraksi saat runtime (boleh kosong) */
   char pattern[128];      /* pola scan freshness, default ".rp" tidak generik */
+  List excludes;          /* pola/path yang dikeluarkan dari archive */
   char archiveDir[EMBED_PATH_LEN];
   char archiveName[EMBED_NAME_LEN];
   bool tar;
