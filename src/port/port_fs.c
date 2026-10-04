@@ -168,7 +168,7 @@ bool fsRemoveTree(const char *path) {
   op.wFunc = FO_DELETE;
   op.pFrom = doubled;
   op.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
-  return SHFileOperation(&op) == 0;
+  return SHFileOperationA(&op) == 0;
 }
 
 void fsListDir(const char *dir, List *dirs, List *files) {
