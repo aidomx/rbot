@@ -13,14 +13,23 @@
 #include <string.h>
 
 #ifdef _WIN32
+
+/* windows.h WAJIB paling depan di antara header Windows.
+   shellapi.h memakai DECLSPEC_IMPORT dan STDAPICALLTYPE yang
+   didefinisikan di winnt.h — hanya ditarik oleh windows.h. */
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <direct.h>
 #include <io.h>
 #include <shellapi.h>
+#include <windows.h>
 
 /* MSVC tidak (selalu) menyediakan typedef mode_t — itu POSIX-only.
-   struct _stat memakai unsigned short untuk st_mode.
-   Guard pakai makro sendiri agar tidak bentrok bila MSVC suatu saat
-   menyediakannya lagi. */
+   struct _stat memakai unsigned short untuk st_mode. */
 #ifndef RBOT_MODE_T_DEFINED
 typedef unsigned short mode_t;
 #define RBOT_MODE_T_DEFINED
@@ -28,14 +37,13 @@ typedef unsigned short mode_t;
 
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <windows.h>
+
 #else
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
-
 #ifdef _WIN32
 
 /* ========== Windows: Filesystem ========== */
