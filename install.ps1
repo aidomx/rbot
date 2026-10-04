@@ -211,33 +211,30 @@ if ($Dev) {
 
         $Output = Join-Path $StagingDir "rbot.exe"
 
-        $global:LASTEXITCODE = 0
-        if ($Compiler -eq "cl") {
-            # shell32: fsRemoveTree (SHFileOperationA) — sama dengan
-            # target_link_libraries(literal shell32) di CMakeLists lama.
-            $LinkArgs = @($Objects) + @(
-                "shell32.lib",
-                "/nologo",
-                "/SUBSYSTEM:CONSOLE",
-                "/OUT:$Output"
-            )
-            $output = & link @LinkArgs 2>&1
-        } else {
-            $LinkArgs = @($Objects) + @("-lshell32", "-o", $Output)
-            $output = & $Compiler @LinkArgs 2>&1
+$global:LASTEXITCODE = 0
+if ($Compiler -eq "cl") {
+    $LinkArgs = @($Objects) + @(
+        "shell32.lib",
+        "/nologo",
+        "/SUBSYSTEM:CONSOLE",
+        "/OUT:$Output"
+    )
+    $linkOutput = & link @LinkArgs 2>&1
+} else {
+    $LinkArgs = @($Objects) + @("-lshell32", "-o", $Output)
+    $linkOutput = & $Compiler @LinkArgs 2>&1
+}
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ($linkOutput | Out-String)
+    throw "gagal melakukan linking rbot (exit $LASTEXITCODE)"
+}
+
+Write-Progress -Activity "Building rbot" -Completed
+Write-Host "> Built      : $Output"
+
+Install-Binary $Output
         }
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host ($output | Out-String)
-            throw "gagal melakukan linking rbot (exit $LASTEXITCODE)"
-        }
-
-        Write-Progress -Activity "Building rbot" -Completed
-        Write-Host "> Built      : $Output"
-
-        # Install dari staging (di luar TempDir) supaya tidak dihapus finally.
-        Install-Binary $Output
-    }
     finally {
         Remove-Item -Recurse -Force $TempDir    -ErrorAction SilentlyContinue
         Remove-Item -Recurse -Force $StagingDir -ErrorAction SilentlyContinue
