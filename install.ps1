@@ -173,9 +173,8 @@ if ($Dev) {
 
             New-Item -ItemType Directory -Force -Path $ObjParent | Out-Null
 
-            $global:LASTEXITCODE = 0
+           $global:LASTEXITCODE = 0
             if ($Compiler -eq "cl") {
-                # Array argumen → tiap elemen jadi satu token (aman untuk path ber-spasi).
                 $ClArgs = @(
                     "/nologo", "/std:c11", "/O2", "/W4",
                     "/DRBOT_VERSION_EMBEDDED=`"$Version`"",
@@ -184,7 +183,8 @@ if ($Dev) {
                     "/c", $Source.FullName,
                     "/Fo$Obj"
                 )
-                $output = & cl @ClArgs 2>&1
+                Write-Host ">> cl @ $($Source.Name)"
+                & cl @ClArgs
             } else {
                 $CcArgs = @(
                     "-std=gnu11", "-O2", "-Wall", "-Wextra",
@@ -194,13 +194,14 @@ if ($Dev) {
                     "-c", $Source.FullName,
                     "-o", $Obj
                 )
-                $output = & $Compiler @CcArgs 2>&1
+                Write-Host ">> $Compiler @ $($Source.Name)"
+                & $Compiler @CcArgs
             }
 
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host ($output | Out-String)
-                throw "gagal mengompilasi $($Source.FullName) (exit $LASTEXITCODE)"
-            }
+            $exitCode = $LASTEXITCODE
+            if ($exitCode -ne 0) {
+                throw "gagal mengompilasi $($Source.FullName) (exit $exitCode)"
+            } 
 
             $Objects += $Obj
             $Done++
