@@ -21,7 +21,7 @@ std = gnu11
 # build: version.h & embedded.h (dihasilkan saat build)
 headers = include, I., build 
 
-compiler = gcc, clang
+compiler = cl, gcc, clang
 
 progress.bar = true
 progress.error = always
