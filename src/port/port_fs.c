@@ -14,9 +14,6 @@
 
 #ifdef _WIN32
 
-/* windows.h WAJIB paling depan di antara header Windows.
-   shellapi.h memakai DECLSPEC_IMPORT dan STDAPICALLTYPE yang
-   didefinisikan di winnt.h — hanya ditarik oleh windows.h. */
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -25,8 +22,12 @@
 #endif
 #include <direct.h>
 #include <io.h>
-#include <shellapi.h>
 #include <windows.h>
+/* windows.h WAJIB paling depan di antara header Windows.
+   shellapi.h memakai DECLSPEC_IMPORT dan STDAPICALLTYPE yang
+   didefinisikan di winnt.h — hanya ditarik oleh windows.h. */
+
+#include <shellapi.h>
 
 /* MSVC tidak (selalu) menyediakan typedef mode_t — itu POSIX-only.
    struct _stat memakai unsigned short untuk st_mode. */
@@ -167,7 +168,7 @@ bool fsRemoveTree(const char *path) {
   op.wFunc = FO_DELETE;
   op.pFrom = doubled;
   op.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
-  return SHFileOperationA(&op) == 0;
+  return SHFileOperation(&op) == 0;
 }
 
 void fsListDir(const char *dir, List *dirs, List *files) {
