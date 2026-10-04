@@ -4,23 +4,55 @@
 # Pemakaian:
 #   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh -s -- --dev
+#   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh -s -- --version v0.2.0
 #   ./install.sh --dev  (jika dijalankan dari dalam source tree lokal)
 #
-# Mode default (curl) mengunduh binary rbot yang sudah di-build ke /usr/local/bin/rbot.
-# Mode --dev melakukan bootstrap build rbot dari source dengan compiler C lokal:
-# dari source tree lokal hasilnya disimpan di build/bin/rbot; bila source
-# diunduh sementara (curl | sh -s -- --dev), binary dipasang ke path instalasi
-# sebelum temp source terhapus.
+# Mode default (curl) mengunduh binary rbot dari GitHub Releases ke /usr/local/bin/rbot.
+# Mode --dev melakukan bootstrap build rbot dari source dengan compiler C lokal.
 
 set -eu
 
 GITHUB_USER="aidomx"
 REPO_NAME="rbot"
 BRANCH="main"
-BIN_PATH_IN_REPO="bin/rbot"
-VERSION="v0.1.8"
+VERSION="v0.1.8"   # fallback; ditimpa oleh .rbot-version saat --dev
 
+# Nama asset di GitHub Releases (harus persis sama dengan yang
+# di-upload oleh .github/workflows/release.yml).
+ASSET_WINDOWS_X64="rbot-windows-x64.exe"
+ASSET_LINUX_X64="rbot-linux-x64"
+ASSET_LINUX_ARM64="rbot-linux-arm64"
+ASSET_MACOS_ARM64="rbot-macos-arm64"
+ASSET_MACOS_X64="rbot-macos-x64"
+
+# ---------------------------------------------------------------------------
+# Parsing argumen
+# ---------------------------------------------------------------------------
+DEV=0
+VERSION_TAG=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dev)
+      DEV=1
+      shift
+      ;;
+    --version)
+      if [ $# -lt 2 ]; then
+        echo "rbot: --version memerlukan argumen tag (mis. --version v0.2.0)" >&2
+        exit 1
+      fi
+      VERSION_TAG="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+# ---------------------------------------------------------------------------
 # Lokasi instalasi default. Termux memakai $PREFIX/bin.
+# ---------------------------------------------------------------------------
 case "$(uname -s 2>/dev/null || echo unknown)" in
   Darwin)
     INSTALL_PATH="/usr/local/bin/rbot"
@@ -45,16 +77,26 @@ read_version() {
   fi
 }
 
-RAW_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${REPO_NAME}/${BRANCH}/${BIN_PATH_IN_REPO}"
-SOURCE_URL="https://github.com/${GITHUB_USER}/${REPO_NAME}/archive/refs/heads/${BRANCH}.tar.gz"
-
-# Fungsi instalasi global (hanya digunakan untuk mode default / curl)
+# ---------------------------------------------------------------------------
+# Installer
+# ---------------------------------------------------------------------------
 install_binary() {
   binary="$1"
   chmod +x "$binary"
   echo "> Installing : ${INSTALL_PATH}"
 
   install_dir="$(dirname "${INSTALL_PATH}")"
+
+  if [ ! -d "$install_dir" ]; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo mkdir -p "$install_dir"
+    else
+      mkdir -p "$install_dir" || {
+        echo "rbot: tidak bisa membuat ${install_dir}" >&2
+        return 1
+      }
+    fi
+  fi
 
   if [ -w "$install_dir" ]; then
     mv "$binary" "${INSTALL_PATH}"
@@ -71,13 +113,75 @@ install_binary() {
   fi
 }
 
-if [ "${1:-}" = "--dev" ]; then
+# ---------------------------------------------------------------------------
+# Helper untuk mode default (GitHub Releases)
+# ---------------------------------------------------------------------------
+detect_asset_name() {
+  os="$(uname -s 2>/dev/null || echo unknown)"
+  arch="$(uname -m 2>/dev/null || echo unknown)"
+
+  case "$os" in
+    Linux)
+      case "$arch" in
+        x86_64|amd64)   echo "$ASSET_LINUX_X64" ;;
+        aarch64|arm64)  echo "$ASSET_LINUX_ARM64" ;;
+        *) echo "rbot: arsitektur Linux tidak didukung: $arch" >&2; return 1 ;;
+      esac
+      ;;
+    Darwin)
+      case "$arch" in
+        arm64)  echo "$ASSET_MACOS_ARM64" ;;
+        x86_64) echo "$ASSET_MACOS_X64" ;;
+        *) echo "rbot: arsitektur macOS tidak didukung: $arch" >&2; return 1 ;;
+      esac
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      echo "$ASSET_WINDOWS_X64"
+      ;;
+    *)
+      echo "rbot: OS tidak didukung: $os" >&2
+      return 1
+      ;;
+  esac
+}
+
+# Ambil JSON metadata release (latest atau tag tertentu).
+fetch_release_json() {
+  tag="$1"
+  if [ -n "$tag" ]; then
+    api="https://api.github.com/repos/${GITHUB_USER}/${REPO_NAME}/releases/tags/${tag}"
+  else
+    api="https://api.github.com/repos/${GITHUB_USER}/${REPO_NAME}/releases/latest"
+  fi
+
+  curl -fsSL \
+    -H 'User-Agent: rbot-installer' \
+    -H 'Accept: application/vnd.github+json' \
+    "$api"
+}
+
+# Parse field JSON satu baris dengan split per-koma.
+# Contoh: json_field "$json" '"tag_name"'  →  v0.2.0
+json_field() {
+  json="$1"
+  key="$2"
+  printf '%s' "$json" \
+    | tr ',' '\n' \
+    | grep -F "$key" \
+    | head -n1 \
+    | sed -E 's/.*:"([^"]+)".*/\1/'
+}
+
+# ---------------------------------------------------------------------------
+# Mode --dev: bootstrap build dari source
+# ---------------------------------------------------------------------------
+if [ "$DEV" -eq 1 ]; then
   TMP_DIR="$(mktemp -d)"
   cleanup() { rm -rf "$TMP_DIR"; }
   trap cleanup EXIT INT TERM
 
   SRC_DIR=""
-  
+
   # Deteksi apakah dijalankan dari dalam source tree lokal
   SCRIPT_DIR="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
   if [ -f "${SCRIPT_DIR}/src/main.c" ] && [ -f "${SCRIPT_DIR}/include/rbot.h" ]; then
@@ -92,6 +196,7 @@ if [ "${1:-}" = "--dev" ]; then
       exit 1
     }
 
+    SOURCE_URL="https://github.com/${GITHUB_USER}/${REPO_NAME}/archive/refs/heads/${BRANCH}.tar.gz"
     echo "> Downloading source: ${SOURCE_URL}"
     curl -fsSL "${SOURCE_URL}" -o "${TMP_DIR}/rbot.tar.gz"
     tar -xzf "${TMP_DIR}/rbot.tar.gz" -C "${TMP_DIR}"
@@ -116,12 +221,12 @@ if [ "${1:-}" = "--dev" ]; then
   mkdir -p "${TMP_DIR}/build/obj"
   SOURCES=$(find "${SRC_DIR}/src" -name '*.c' -type f | sort)
   TOTAL=$(printf '%s\n' "$SOURCES" | sed '/^$/d' | wc -l | tr -d ' ')
-  
+
   if [ "$TOTAL" -eq 0 ]; then
     echo "rbot: tidak ada file sumber (.c) ditemukan di ${SRC_DIR}/src" >&2
     exit 1
   fi
-  
+
   DONE=0
 
   progress() {
@@ -172,8 +277,7 @@ if [ "${1:-}" = "--dev" ]; then
   done
 
   OBJECTS=$(find "${TMP_DIR}/build/obj" -name '*.o' -type f | sort)
-  
-  # PERBAIKAN: Output binary ke build/bin/rbot di dalam direktori source (lokal)
+
   mkdir -p "${SRC_DIR}/build/bin"
   "${CC:-cc}" $OBJECTS -o "${SRC_DIR}/build/bin/rbot" -pthread -lm
   progress 100
@@ -182,7 +286,6 @@ if [ "${1:-}" = "--dev" ]; then
   chmod +x "${SRC_DIR}/build/bin/rbot"
   echo "> Built & Saved: ${SRC_DIR}/build/bin/rbot"
 
-  # Cek versi jika berhasil di-build
   if [ -x "${SRC_DIR}/build/bin/rbot" ]; then
     "${SRC_DIR}/build/bin/rbot" version 2>/dev/null || true
   fi
@@ -201,18 +304,61 @@ if [ "${1:-}" = "--dev" ]; then
   exit 0
 fi
 
-# --- Mode Default (Curl / Unduh Binary) ---
+# ---------------------------------------------------------------------------
+# Mode default: unduh binary dari GitHub Releases
+# ---------------------------------------------------------------------------
+
+command -v curl >/dev/null 2>&1 || {
+  echo "rbot: membutuhkan curl untuk mengunduh binary" >&2
+  exit 1
+}
+
+ASSET="$(detect_asset_name)" || exit 1
+
+echo "> Platform   : ${ASSET}"
+if [ -n "${VERSION_TAG}" ]; then
+  echo "> Requesting : tag ${VERSION_TAG}"
+else
+  echo "> Requesting : latest release"
+fi
+
+RELEASE_JSON="$(fetch_release_json "${VERSION_TAG}")" || {
+  echo "rbot: gagal mengambil metadata release dari GitHub API" >&2
+  exit 1
+}
+
+TAG_NAME="$(json_field "${RELEASE_JSON}" '"tag_name"')"
+if [ -n "${TAG_NAME}" ]; then
+  echo "> Release    : ${TAG_NAME}"
+fi
+
+# Ambil URL browser_download_url untuk asset yang cocok.
+URL="$(printf '%s' "${RELEASE_JSON}" \
+  | tr ',' '\n' \
+  | grep -F 'https://' \
+  | grep -F "/${ASSET}\"" \
+  | head -n1 \
+  | sed -E 's/.*"(https[^"]+)".*/\1/')"
+
+if [ -z "${URL}" ]; then
+  echo "rbot: asset '${ASSET}' tidak ada di release ${TAG_NAME:-latest}" >&2
+  echo "rbot: asset yang tersedia:" >&2
+  printf '%s' "${RELEASE_JSON}" \
+    | tr ',' '\n' \
+    | grep -F '"name"' \
+    | sed 's/^/  /' >&2
+  exit 1
+fi
+
 TMP_FILE="$(mktemp)"
 cleanup() { rm -f "${TMP_FILE}"; }
 trap cleanup EXIT INT TERM
 
-echo "> Downloading: ${RAW_URL}"
-
-if ! curl -fsSL "${RAW_URL}" -o "${TMP_FILE}"; then
-  echo "rbot: gagal mengunduh binary dari ${RAW_URL}" >&2
+echo "> Downloading: ${URL}"
+if ! curl -fsSL "${URL}" -o "${TMP_FILE}"; then
+  echo "rbot: gagal mengunduh binary dari ${URL}" >&2
   exit 1
 fi
 
 install_binary "${TMP_FILE}"
 # Trap cleanup akan otomatis menghapus TMP_FILE saat skrip selesai
-

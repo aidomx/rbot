@@ -3,8 +3,9 @@
 # Pemakaian:
 #   irm https://raw.githubusercontent.com/aidomx/rbot/main/install.ps1 | iex
 #   .\install.ps1 --dev
+#   .\install.ps1 --version v0.2.0
 #
-# Mode default mengunduh binary rbot Windows yang sudah di-build.
+# Mode default mengunduh binary rbot Windows dari GitHub Releases.
 # Mode --dev melakukan bootstrap build dari source dengan compiler C lokal.
 #
 # Compiler yang didukung:
@@ -15,19 +16,21 @@
 $ErrorActionPreference = "Stop"
 
 $GitHubUser = "aidomx"
-$RepoName = "rbot"
-$Branch = "main"
-$BinPathInRepo = "bin/rbot.exe"
-$Version = "v0.1.8"
+$RepoName   = "rbot"
+$Branch     = "main"
+$Version    = "v0.1.8"   # fallback; ditimpa oleh .rbot-version saat --dev
+
+# ---------------------------------------------------------------------------
+# Helper umum
+# ---------------------------------------------------------------------------
 
 function Read-Version([string]$Root) {
     $file = Join-Path $Root ".rbot-version"
     if (Test-Path $file) {
         $v = (Get-Content $file -TotalCount 1).Trim()
-        if ($v) {
-            $script:Version = $v
-        }
+        if ($v) { return $v }
     }
+    return $null
 }
 
 function Find-Compiler {
@@ -37,30 +40,26 @@ function Find-Compiler {
         if (Get-Command $env:CC -ErrorAction SilentlyContinue) {
             return $env:CC
         }
-        throw "compiler C '$env:CC' (dari CC) tidak ditemukan"
+        throw "compiler C '$env:CC' (dari CC) tidak ditemukan di PATH. " +
+              "Jika ini job MSVC, jalankan ilammy/msvc-dev-cmd sebelum step ini."
     }
-    $candidates = @("clang", "gcc", "cl")
-    foreach ($name in $candidates) {
-        if (Get-Command $name -ErrorAction SilentlyContinue) {
-            return $name
-        }
+    foreach ($name in @("clang", "gcc", "cl")) {
+        if (Get-Command $name -ErrorAction SilentlyContinue) { return $name }
     }
     return $null
 }
 
 function Install-Binary([string]$Binary) {
-    $InstallDir = Join-Path $env:LOCALAPPDATA "rbot"
+    $InstallDir  = Join-Path $env:LOCALAPPDATA "rbot"
     $InstallPath = Join-Path $InstallDir "rbot.exe"
 
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     Copy-Item -Force $Binary $InstallPath
 
     # Tambahkan ke User PATH jika belum ada.
-    $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $UserPath  = [Environment]::GetEnvironmentVariable("Path", "User")
     $PathParts = @()
-    if ($UserPath) {
-        $PathParts = $UserPath -split ";" | Where-Object { $_ }
-    }
+    if ($UserPath) { $PathParts = $UserPath -split ";" | Where-Object { $_ } }
 
     if ($PathParts -notcontains $InstallDir) {
         $NewPath = (($PathParts + $InstallDir) -join ";")
@@ -76,29 +75,57 @@ function Install-Binary([string]$Binary) {
     Write-Host "> Note       : buka terminal baru agar PATH diperbarui."
 }
 
-$Dev = ($args.Count -gt 0 -and $args[0] -eq "--dev")
+# ---------------------------------------------------------------------------
+# Parsing argumen
+# ---------------------------------------------------------------------------
 
-$ScriptDir = if ($PSScriptRoot) {
-    $PSScriptRoot
-} else {
-    (Get-Location).Path
+$Dev        = $false
+$VersionTag = $null
+
+for ($i = 0; $i -lt $args.Count; $i++) {
+    switch ($args[$i]) {
+        "--dev" {
+            $Dev = $true
+        }
+        "--version" {
+            if (($i + 1) -lt $args.Count) {
+                $VersionTag = $args[$i + 1]
+                $i++
+            } else {
+                throw "--version memerlukan argumen tag (mis. --version v0.2.0)"
+            }
+        }
+        default {
+            # abaikan argumen tak dikenal
+        }
+    }
 }
+
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 
 $LocalSource = (
     (Test-Path (Join-Path $ScriptDir "src\main.c")) -and
     (Test-Path (Join-Path $ScriptDir "include\rbot.h"))
 )
 
+# ---------------------------------------------------------------------------
+# Mode --dev: bootstrap build dari source
+# ---------------------------------------------------------------------------
+
 if ($Dev) {
     $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("rbot-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
+
+    # Output final diletakkan di luar $TempDir supaya tidak ikut terhapus di finally.
+    $StagingDir = Join-Path ([System.IO.Path]::GetTempPath()) ("rbot-build-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $StagingDir | Out-Null
 
     try {
         if ($LocalSource) {
             $SrcDir = $ScriptDir
         } else {
             $SourceUrl = "https://github.com/$GitHubUser/$RepoName/archive/refs/heads/$Branch.zip"
-            $Archive = Join-Path $TempDir "rbot.zip"
+            $Archive   = Join-Path $TempDir "rbot.zip"
 
             Write-Host "> Downloading source: $SourceUrl"
             Invoke-WebRequest -Uri $SourceUrl -OutFile $Archive
@@ -110,10 +137,11 @@ if ($Dev) {
         }
 
         if (-not $SrcDir -or -not (Test-Path (Join-Path $SrcDir "src\main.c"))) {
-            throw "source tree tidak valid"
+            throw "source tree tidak valid (src\main.c tidak ditemukan di '$SrcDir')"
         }
 
-        Read-Version $SrcDir
+        $found = Read-Version $SrcDir
+        if ($found) { $Version = $found }
 
         $Compiler = Find-Compiler
         if (-not $Compiler) {
@@ -128,37 +156,50 @@ if ($Dev) {
 
         $Sources = Get-ChildItem (Join-Path $SrcDir "src") -Filter "*.c" -Recurse
         if ($Sources.Count -eq 0) {
-            throw "tidak ada file sumber (.c) ditemukan"
+            throw "tidak ada file sumber (.c) ditemukan di $(Join-Path $SrcDir 'src')"
         }
 
-        $Total = $Sources.Count
-        $Done = 0
-        $Objects = @()
+        $IncludeDir = Join-Path $SrcDir "include"
+        $SrcInner   = Join-Path $SrcDir "src"
+        $Total      = $Sources.Count
+        $Done       = 0
+        $Objects    = @()
 
         foreach ($Source in $Sources) {
-            $Relative = $Source.FullName.Substring((Join-Path $SrcDir "src").Length).TrimStart("\")
+            $Relative    = $Source.FullName.Substring($SrcInner.Length).TrimStart("\")
             $ObjRelative = [System.IO.Path]::ChangeExtension($Relative, ".o")
-            $Obj = Join-Path $ObjDir $ObjRelative
-            $ObjParent = Split-Path $Obj -Parent
+            $Obj         = Join-Path $ObjDir $ObjRelative
+            $ObjParent   = Split-Path $Obj -Parent
 
             New-Item -ItemType Directory -Force -Path $ObjParent | Out-Null
 
+            $global:LASTEXITCODE = 0
             if ($Compiler -eq "cl") {
-                & cl /nologo /std:c11 /O2 /W4 `
-                    "/DRBOT_VERSION_EMBEDDED=`"$Version`"" `
-                    "/I$(Join-Path $SrcDir 'include')" `
-                    "/I$(Join-Path $SrcDir 'src')" `
-                    /c $Source.FullName "/Fo$Obj"
+                # Array argumen → tiap elemen jadi satu token (aman untuk path ber-spasi).
+                $ClArgs = @(
+                    "/nologo", "/std:c11", "/O2", "/W4",
+                    "/DRBOT_VERSION_EMBEDDED=`"$Version`"",
+                    "/I$IncludeDir",
+                    "/I$SrcInner",
+                    "/c", $Source.FullName,
+                    "/Fo$Obj"
+                )
+                $output = & cl @ClArgs 2>&1
             } else {
-                & $Compiler -std=gnu11 -O2 -Wall -Wextra `
-                    "-DRBOT_VERSION_EMBEDDED=`"$Version`"" `
-                    "-I$(Join-Path $SrcDir 'include')" `
-                    "-I$(Join-Path $SrcDir 'src')" `
-                    -c $Source.FullName -o $Obj
+                $CcArgs = @(
+                    "-std=gnu11", "-O2", "-Wall", "-Wextra",
+                    "-DRBOT_VERSION_EMBEDDED=`"$Version`"",
+                    "-I$IncludeDir",
+                    "-I$SrcInner",
+                    "-c", $Source.FullName,
+                    "-o", $Obj
+                )
+                $output = & $Compiler @CcArgs 2>&1
             }
 
             if ($LASTEXITCODE -ne 0) {
-                throw "gagal mengompilasi $($Source.FullName)"
+                Write-Host ($output | Out-String)
+                throw "gagal mengompilasi $($Source.FullName) (exit $LASTEXITCODE)"
             }
 
             $Objects += $Obj
@@ -167,42 +208,85 @@ if ($Dev) {
             Write-Progress -Activity "Building rbot" -Status "$Percent%" -PercentComplete $Percent
         }
 
-        $OutDir = Join-Path $SrcDir "build\bin"
-        New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-        $Output = Join-Path $OutDir "rbot.exe"
+        $Output = Join-Path $StagingDir "rbot.exe"
 
+        $global:LASTEXITCODE = 0
         if ($Compiler -eq "cl") {
             # shell32: fsRemoveTree (SHFileOperationA) — sama dengan
             # target_link_libraries(literal shell32) di CMakeLists lama.
-            & link $Objects shell32.lib "/OUT:$Output"
+            $LinkArgs = @($Objects) + @(
+                "shell32.lib",
+                "/nologo",
+                "/SUBSYSTEM:CONSOLE",
+                "/OUT:$Output"
+            )
+            $output = & link @LinkArgs 2>&1
         } else {
-            & $Compiler $Objects -lshell32 -o $Output
+            $LinkArgs = @($Objects) + @("-lshell32", "-o", $Output)
+            $output = & $Compiler @LinkArgs 2>&1
         }
 
         if ($LASTEXITCODE -ne 0) {
-            throw "gagal melakukan linking rbot"
+            Write-Host ($output | Out-String)
+            throw "gagal melakukan linking rbot (exit $LASTEXITCODE)"
         }
 
         Write-Progress -Activity "Building rbot" -Completed
-        Write-Host "> Built & Saved: $Output"
+        Write-Host "> Built      : $Output"
 
-        if (Test-Path $Output) {
-            & $Output version 2>$null
-        }
+        # Install dari staging (di luar TempDir) supaya tidak dihapus finally.
+        Install-Binary $Output
     }
     finally {
-        Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $TempDir    -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $StagingDir -ErrorAction SilentlyContinue
     }
 
     exit 0
 }
 
+# ---------------------------------------------------------------------------
+# Mode default: unduh binary dari GitHub Releases
+# ---------------------------------------------------------------------------
+
+function Get-ReleaseInfo([string]$Tag) {
+    $api = if ($Tag) {
+        "https://api.github.com/repos/$GitHubUser/$RepoName/releases/tags/$Tag"
+    } else {
+        "https://api.github.com/repos/$GitHubUser/$RepoName/releases/latest"
+    }
+    $headers = @{
+        "User-Agent" = "rbot-installer"
+        "Accept"     = "application/vnd.github+json"
+    }
+    try {
+        return Invoke-RestMethod -Uri $api -Headers $headers
+    } catch {
+        throw "gagal mengambil release dari GitHub API ($api): $($_.Exception.Message)"
+    }
+}
+
+function Get-WindowsAssetUrl([string]$Tag) {
+    $release = Get-ReleaseInfo $Tag
+    $asset = $release.assets |
+        Where-Object { $_.name -eq "rbot-windows-x64.exe" } |
+        Select-Object -First 1
+
+    if (-not $asset) {
+        $names = ($release.assets | ForEach-Object { $_.name }) -join ", "
+        throw "asset 'rbot-windows-x64.exe' tidak ada di release $($release.tag_name). Asset tersedia: $names"
+    }
+
+    Write-Host "> Release    : $($release.tag_name)"
+    return $asset.browser_download_url
+}
+
 $TempFile = Join-Path ([System.IO.Path]::GetTempPath()) ("rbot-" + [guid]::NewGuid().ToString("N") + ".exe")
-$RawUrl = "https://raw.githubusercontent.com/$GitHubUser/$RepoName/$Branch/$BinPathInRepo"
 
 try {
-    Write-Host "> Downloading: $RawUrl"
-    Invoke-WebRequest -Uri $RawUrl -OutFile $TempFile
+    $url = Get-WindowsAssetUrl $VersionTag
+    Write-Host "> Downloading: $url"
+    Invoke-WebRequest -Uri $url -OutFile $TempFile
     Install-Binary $TempFile
 }
 finally {
