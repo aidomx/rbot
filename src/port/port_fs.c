@@ -15,10 +15,20 @@
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
+#include <shellapi.h>
+
+/* MSVC tidak (selalu) menyediakan typedef mode_t — itu POSIX-only.
+   struct _stat memakai unsigned short untuk st_mode.
+   Guard pakai makro sendiri agar tidak bentrok bila MSVC suatu saat
+   menyediakannya lagi. */
+#ifndef RBOT_MODE_T_DEFINED
+typedef unsigned short mode_t;
+#define RBOT_MODE_T_DEFINED
+#endif
+
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <windows.h>
-#include <shellapi.h>
 #else
 #include <dirent.h>
 #include <sys/stat.h>
@@ -35,7 +45,8 @@
    (mis. /I, /Fo, /link) justru rusak bila diubah jadi '\\'. */
 static void toBackslash(char *dst, size_t n, const char *src) {
   size_t j = 0;
-  for (const char *p = src; *p && j + 1 < n; p++, j++) dst[j] = (*p == '/') ? '\\' : *p;
+  for (const char *p = src; *p && j + 1 < n; p++, j++)
+    dst[j] = (*p == '/') ? '\\' : *p;
   dst[j] = '\0';
 }
 
@@ -121,7 +132,7 @@ bool fsRemoveFile(const char *path) {
 bool fsSetMode(const char *path, unsigned mode) {
   char tmp[MAX_PATH * 2];
   toBackslash(tmp, sizeof(tmp), path);
-  return _chmod(tmp, (mode_t)mode) == 0;
+  return _chmod(tmp, (int)mode) == 0;
 }
 
 unsigned fsGetMode(const char *path) {
@@ -248,11 +259,17 @@ bool fsStampNsSize(const char *path, int64_t *mtimeNs, long long *size) {
   return true;
 }
 
-void fsMakeDir(const char *path) { mkdir(path, 0755); }
+void fsMakeDir(const char *path) {
+  mkdir(path, 0755);
+}
 
-bool fsRemoveFile(const char *path) { return unlink(path) == 0; }
+bool fsRemoveFile(const char *path) {
+  return unlink(path) == 0;
+}
 
-bool fsSetMode(const char *path, unsigned mode) { return chmod(path, (mode_t)mode) == 0; }
+bool fsSetMode(const char *path, unsigned mode) {
+  return chmod(path, (int)mode) == 0;
+}
 
 unsigned fsGetMode(const char *path) {
   struct stat st;
@@ -315,9 +332,13 @@ void fsListDir(const char *dir, List *dirs, List *files) {
   closedir(d);
 }
 
-bool fsGetCwd(char *out, size_t n) { return getcwd(out, n) != NULL; }
+bool fsGetCwd(char *out, size_t n) {
+  return getcwd(out, n) != NULL;
+}
 
-bool fsSetCwd(const char *path) { return chdir(path) == 0; }
+bool fsSetCwd(const char *path) {
+  return chdir(path) == 0;
+}
 
 #endif /* !_WIN32 */
 
