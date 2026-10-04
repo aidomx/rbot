@@ -5,6 +5,10 @@
 #include <string.h>
 #include <time.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 /*
  * Implementasi prof — lihat prof.h.
  * Buffer kecil statis; label adalah string literal pemanggil (tidak
@@ -25,9 +29,23 @@ static ProfMark g_marks[PROF_MAX];
 static int g_n = 0;
 
 static double profNow(void) {
+#ifdef _WIN32
+  static LARGE_INTEGER freq;
+  static bool initialized = false;
+  LARGE_INTEGER counter;
+
+  if (!initialized) {
+    if (!QueryPerformanceFrequency(&freq)) return 0.0;
+    initialized = true;
+  }
+
+  if (!QueryPerformanceCounter(&counter)) return 0.0;
+  return (double)counter.QuadPart / (double)freq.QuadPart;
+#else
   struct timespec ts;
   if (clock_gettime(CLOCK_REALTIME, &ts) != 0) return 0.0;
   return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+#endif
 }
 
 void profInit(void) {
