@@ -12,6 +12,9 @@ jobs:
   # Job 1: Build binary untuk berbagai OS dan Arsitektur secara paralel.
   # Tanpa cmake — bootstrap dengan install.sh --dev (Unix) / install.ps1
   # --dev (Windows, toolchain MSVC), hasilnya build/bin/rbot(.exe).
+  #
+  # Versi diambil dari git tag lewat env RBOT_VERSION (github.ref_name),
+  # sehingga tag v* adalah sumber kebenaran dan mengalahkan .rbot-version.
   build:
     strategy:
       fail-fast: false
@@ -50,6 +53,9 @@ jobs:
       - name: Bootstrap build (install.sh --dev)
         if: runner.os != 'Windows'
         shell: bash
+        env:
+          # Tag git (mis. v0.2.0) diteruskan ke installer sebagai sumber versi.
+          RBOT_VERSION: ${{ github.ref_name }}
         run: ./install.sh --dev
 
       - name: Bootstrap build (install.ps1 --dev)
@@ -57,11 +63,20 @@ jobs:
         shell: pwsh
         env:
           CC: cl
+          RBOT_VERSION: ${{ github.ref_name }}
         run: ./install.ps1 --dev
 
       - name: Smoke test
         shell: bash
-        run: ./build/bin/rbot${{ matrix.exe_ext }} version
+        env:
+          EXPECTED: ${{ github.ref_name }}
+        run: |
+          out=$(./build/bin/rbot${{ matrix.exe_ext }} version)
+          echo "$out"
+          case "$out" in
+            *"$EXPECTED"*) ;;
+            *) echo "::error::version mismatch: expected '$EXPECTED' in '$out'"; exit 1 ;;
+          esac
 
       - name: Prepare Binary
         shell: bash
@@ -98,7 +113,6 @@ jobs:
         run: |
           cd release-assets
           sha256sum * > checksums.txt
-          # Atau jika di macOS runner: shasum -a 256 * > checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

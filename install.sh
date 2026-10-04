@@ -4,18 +4,25 @@
 # Pemakaian:
 #   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh -s -- --dev
+#   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh -s -- --dev --version v0.2.0
 #   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh -s -- --version v0.2.0
 #   ./install.sh --dev  (jika dijalankan dari dalam source tree lokal)
 #
 # Mode default (curl) mengunduh binary rbot dari GitHub Releases ke /usr/local/bin/rbot.
 # Mode --dev melakukan bootstrap build rbot dari source dengan compiler C lokal.
+#
+# Sumber versi (urutan prioritas):
+#   1. --version <tag>    (argumen eksplisit)
+#   2. $RBOT_VERSION      (env, di-set CI dari git tag, mis. v0.2.0)
+#   3. .rbot-version      (file di source tree; hanya untuk --dev)
+#   4. fallback hardcoded
 
 set -eu
 
 GITHUB_USER="aidomx"
 REPO_NAME="rbot"
 BRANCH="main"
-VERSION="v0.1.8"   # fallback; ditimpa oleh .rbot-version saat --dev
+VERSION="v0.1.8"   # fallback terakhir; ditimpa oleh --version / RBOT_VERSION / .rbot-version
 
 # Nama asset di GitHub Releases (harus persis sama dengan yang
 # di-upload oleh .github/workflows/release.yml).
@@ -69,7 +76,16 @@ case "$(uname -s 2>/dev/null || echo unknown)" in
     ;;
 esac
 
+# Prioritas: RBOT_VERSION (env) > .rbot-version (file). VERSION_TAG sudah
+# ditangani di pemanggil sebelum fungsi ini dipanggil.
 read_version() {
+  # Prioritas 1: env RBOT_VERSION (di-set CI dari git tag v*).
+  if [ -n "${RBOT_VERSION:-}" ]; then
+    VERSION="$RBOT_VERSION"
+    return
+  fi
+
+  # Prioritas 2: file .rbot-version (untuk dev lokal).
   file="$1/.rbot-version"
   if [ -f "$file" ]; then
     v=$(sed -n "1p" "$file")
@@ -208,7 +224,16 @@ if [ "$DEV" -eq 1 ]; then
     fi
   fi
 
-  read_version "${SRC_DIR}"
+  # Prioritas versi:
+  #   1. --version <tag>
+  #   2. RBOT_VERSION (env, di-set CI dari git tag)
+  #   3. .rbot-version
+  #   4. $VERSION (fallback hardcoded)
+  if [ -n "${VERSION_TAG}" ]; then
+    VERSION="${VERSION_TAG}"
+  else
+    read_version "${SRC_DIR}"
+  fi
 
   command -v "${CC:-cc}" >/dev/null 2>&1 || {
     echo "rbot: compiler C '${CC:-cc}' tidak ditemukan; pasang gcc/clang terlebih dahulu" >&2
@@ -312,6 +337,12 @@ command -v curl >/dev/null 2>&1 || {
   echo "rbot: membutuhkan curl untuk mengunduh binary" >&2
   exit 1
 }
+
+# Di mode default, --version eksplisit menang; kalau tidak, RBOT_VERSION dipakai;
+# kalau tidak ada keduanya, pakai release "latest".
+if [ -z "${VERSION_TAG}" ] && [ -n "${RBOT_VERSION:-}" ]; then
+  VERSION_TAG="${RBOT_VERSION}"
+fi
 
 ASSET="$(detect_asset_name)" || exit 1
 

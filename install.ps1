@@ -3,10 +3,17 @@
 # Pemakaian:
 #   irm https://raw.githubusercontent.com/aidomx/rbot/main/install.ps1 | iex
 #   .\install.ps1 --dev
+#   .\install.ps1 --dev --version v0.2.0
 #   .\install.ps1 --version v0.2.0
 #
 # Mode default mengunduh binary rbot Windows dari GitHub Releases.
 # Mode --dev melakukan bootstrap build dari source dengan compiler C lokal.
+#
+# Sumber versi (urutan prioritas):
+#   1. --version <tag>   (argumen eksplisit)
+#   2. $env:RBOT_VERSION (di-set CI dari git tag, mis. v0.2.0)
+#   3. .rbot-version     (file di source tree)
+#   4. fallback hardcoded
 #
 # Compiler yang didukung:
 #   clang
@@ -18,13 +25,20 @@ $ErrorActionPreference = "Stop"
 $GitHubUser = "aidomx"
 $RepoName   = "rbot"
 $Branch     = "main"
-$Version    = "v0.1.8"   # fallback; ditimpa oleh .rbot-version saat --dev
+$Version    = "v0.1.8"   # fallback terakhir; ditimpa oleh --version / RBOT_VERSION / .rbot-version
 
 # ---------------------------------------------------------------------------
 # Helper umum
 # ---------------------------------------------------------------------------
 
 function Read-Version([string]$Root) {
+    # Prioritas 1: env RBOT_VERSION (di-set CI dari git tag v*).
+    if ($env:RBOT_VERSION) {
+        $v = $env:RBOT_VERSION.Trim()
+        if ($v) { return $v }
+    }
+
+    # Prioritas 2: file .rbot-version (untuk dev lokal).
     $file = Join-Path $Root ".rbot-version"
     if (Test-Path $file) {
         $v = (Get-Content $file -TotalCount 1).Trim()
@@ -140,8 +154,17 @@ if ($Dev) {
             throw "source tree tidak valid (src\main.c tidak ditemukan di '$SrcDir')"
         }
 
-        $found = Read-Version $SrcDir
-        if ($found) { $Version = $found }
+        # Prioritas versi:
+        #   1. --version <tag>
+        #   2. RBOT_VERSION (env, di-set CI dari git tag)
+        #   3. .rbot-version
+        #   4. $Version (fallback hardcoded)
+        if ($VersionTag) {
+            $Version = $VersionTag
+        } else {
+            $found = Read-Version $SrcDir
+            if ($found) { $Version = $found }
+        }
 
         $Compiler = Find-Compiler
         if (-not $Compiler) {
@@ -173,7 +196,7 @@ if ($Dev) {
 
             New-Item -ItemType Directory -Force -Path $ObjParent | Out-Null
 
-           $global:LASTEXITCODE = 0
+            $global:LASTEXITCODE = 0
             if ($Compiler -eq "cl") {
                 $ClArgs = @(
                     "/nologo", "/std:c11", "/O2", "/W4",
@@ -201,7 +224,7 @@ if ($Dev) {
             $exitCode = $LASTEXITCODE
             if ($exitCode -ne 0) {
                 throw "gagal mengompilasi $($Source.FullName) (exit $exitCode)"
-            } 
+            }
 
             $Objects += $Obj
             $Done++
@@ -211,39 +234,40 @@ if ($Dev) {
 
         $Output = Join-Path $StagingDir "rbot.exe"
 
-$global:LASTEXITCODE = 0
-if ($Compiler -eq "cl") {
-    $LinkArgs = @($Objects) + @(
-        "shell32.lib",
-        "/nologo",
-        "/SUBSYSTEM:CONSOLE",
-        "/OUT:$Output"
-    )
-    $linkOutput = & link @LinkArgs 2>&1
-} else {
-    $LinkArgs = @($Objects) + @("-lshell32", "-o", $Output)
-    $linkOutput = & $Compiler @LinkArgs 2>&1
-}
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host ($linkOutput | Out-String)
-    throw "gagal melakukan linking rbot (exit $LASTEXITCODE)"
-}
-
-Write-Progress -Activity "Building rbot" -Completed
-Write-Host "> Built      : $Output"
-# Simpan hasil bootstrap di source tree untuk mode --dev.
-$DevOutputDir = Join-Path $PSScriptRoot "build\bin"
-$DevOutput = Join-Path $DevOutputDir "rbot.exe"
-
-New-Item -ItemType Directory -Force -Path $DevOutputDir | Out-Null
-Copy-Item -Force $Output $DevOutput
-
-Write-Host "> Built & Saved: $DevOutput"
-
-# Install ke user PATH juga.
-Install-Binary $Output
+        $global:LASTEXITCODE = 0
+        if ($Compiler -eq "cl") {
+            $LinkArgs = @($Objects) + @(
+                "shell32.lib",
+                "/nologo",
+                "/SUBSYSTEM:CONSOLE",
+                "/OUT:$Output"
+            )
+            $linkOutput = & link @LinkArgs 2>&1
+        } else {
+            $LinkArgs = @($Objects) + @("-lshell32", "-o", $Output)
+            $linkOutput = & $Compiler @LinkArgs 2>&1
         }
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host ($linkOutput | Out-String)
+            throw "gagal melakukan linking rbot (exit $LASTEXITCODE)"
+        }
+
+        Write-Progress -Activity "Building rbot" -Completed
+        Write-Host "> Built      : $Output"
+
+        # Simpan hasil bootstrap di source tree untuk mode --dev.
+        $DevOutputDir = Join-Path $ScriptDir "build\bin"
+        $DevOutput    = Join-Path $DevOutputDir "rbot.exe"
+
+        New-Item -ItemType Directory -Force -Path $DevOutputDir | Out-Null
+        Copy-Item -Force $Output $DevOutput
+
+        Write-Host "> Built & Saved: $DevOutput"
+
+        # Install ke user PATH juga.
+        Install-Binary $Output
+    }
     finally {
         Remove-Item -Recurse -Force $TempDir    -ErrorAction SilentlyContinue
         Remove-Item -Recurse -Force $StagingDir -ErrorAction SilentlyContinue
@@ -286,6 +310,12 @@ function Get-WindowsAssetUrl([string]$Tag) {
 
     Write-Host "> Release    : $($release.tag_name)"
     return $asset.browser_download_url
+}
+
+# Di mode default, --version eksplisit menang; kalau tidak, RBOT_VERSION dipakai;
+# kalau tidak ada keduanya, pakai release "latest".
+if (-not $VersionTag -and $env:RBOT_VERSION) {
+    $VersionTag = $env:RBOT_VERSION.Trim()
 }
 
 $TempFile = Join-Path ([System.IO.Path]::GetTempPath()) ("rbot-" + [guid]::NewGuid().ToString("N") + ".exe")
