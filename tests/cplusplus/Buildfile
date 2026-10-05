@@ -1,0 +1,3 @@
+use project
+compiler = g++, clang++
+std = c++17

@@ -158,11 +158,12 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
     /* Entri FILE .c (mis. hasil `rbot -xf` untuk build.ninja flat) masuk
        langsung; selain itu dianggap folder dan discan rekursif. */
     size_t elen = strlen(entry);
-    if (elen >= 2 && strcmp(entry + elen - 2, ".c") == 0 && fsFileExists(entry)) {
+    if (elen >= 2 && (strcmp(entry + elen - 2, ".c") == 0 || strcmp(entry + elen - 2, ".cpp") == 0) && fsFileExists(entry)) {
       listAdd(&srcs, entry);
       continue;
     }
     walkDir(entry, ".c", &srcs);
+    walkDir(entry, ".cpp", &srcs);
   }
   if (srcs.count == 0) {
     fprintf(stderr,
