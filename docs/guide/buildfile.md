@@ -27,6 +27,43 @@ o.buildDir = build
 o.compileCommands = auto
 ```
 
+## Minimal form: standard projects
+
+For a standard layout — `src/` for sources, optionally `include/` for
+public headers — the whole Buildfile can be a single line:
+
+```text
+use project
+```
+
+The representative Buildfile above stays valid, but nothing in it is
+required: defaults fill only the fields you leave out, and every explicit
+declaration wins over the convention. Non-standard layouts therefore stay
+free to declare `sources`, `headers`, and output names explicitly.
+
+### Implied defaults
+
+| Field | Default when undeclared |
+|---|---|
+| `sources` | `src` |
+| `headers` | `include` — only when an `include/` folder exists |
+| `output.binaryName` | the project folder name (see below) |
+| `std` | `gnu11` |
+| `output.binaryDir` | `bin` |
+| `output.buildDir` | `build` |
+| `output.compileCommands` | `auto` |
+| `output.libDir` | `lib` |
+
+Notes:
+
+- The binary name is the cwd folder's base name, sanitized: characters
+  outside letters, digits, `_`, `-`, `.` become `_` (fallback `rbot` if
+  the name is unusable).
+- `-Iinclude` reaches the compiler and `compile_commands.json` through
+  the `headers` convention.
+- With the default `sources` but no `.c` files in `src/`, the build fails
+  with a guided error: put sources under `src/` or set `sources = ...`
+  for a different layout.
 
 ## Core fields
 

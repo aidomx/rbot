@@ -17,7 +17,7 @@
 #include "../util.h"
 
 #define CONFIG_CACHE_MAGIC "RBOTCFG1"
-#define CONFIG_CACHE_VERSION 7u /* 7: + embedded archive excludes */
+#define CONFIG_CACHE_VERSION 8u /* 8: konvensi proyek standar (src/include/nama folder) */
 #define CONFIG_CACHE_DIR ".rbot"
 #define CONFIG_CACHE_FILE "buildfile.cache"
 

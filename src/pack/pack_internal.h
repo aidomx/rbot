@@ -18,6 +18,15 @@
  */
 
 /* Satu artefak hasil resolusi template pack.output. */
+
+/* packResolveSource — resolve path SUMBER entri pack.files. Entri boleh
+   ditulis portabel tanpa akhiran .exe: di Windows binary link menghasilkan
+   <name>.exe, sehingga `bin/rbot:bin/rbot` menunjuk bin/rbot.exe. Path apa
+   adanya dicek dulu; bila tidak ada, coba dengan akhiran .exe (fallback
+   lintas host, tanpa #ifdef, agar Buildfile yang sama jalan di mana pun).
+   Return true bila path efektif (di out) ada; false bila keduanya tidak —
+   pemanggil melaporkan error memakai path asli. */
+bool packResolveSource(const char *src, char *out, size_t n);
 typedef struct {
   char path[MAX_PATH * 2]; /* output final, relatif root proyek */
   char tmp[MAX_PATH * 2];  /* file sementara, direname setelah jadi */

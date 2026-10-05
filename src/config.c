@@ -36,7 +36,8 @@ Config configDefaults(void) {
   c.progressBar = true;
   c.progressErrorAlways = true;
   c.foreground = true;
-  copyStr(c.outBinaryName, sizeof(c.outBinaryName), "rbot");
+  /* outBinaryName sengaja kosong: konvensi proyek standar memakai nama
+     folder proyek (diisi configFinalize; fallback "rbot"). */
   copyStr(c.outBinaryDir, sizeof(c.outBinaryDir), "bin");
   copyStr(c.outBuildDir, sizeof(c.outBuildDir), "build");
   copyStr(c.outCompileCommands, sizeof(c.outCompileCommands), "auto");
@@ -84,6 +85,39 @@ static void configFinalize(Config *c) {
   configFinalizeLibraries(c);
   for (int i = 0; i < c->embCount; i++)
     configFinalizeEntry(&c->emb[i], c->outBuildDir);
+
+  /* Konvensi proyek standar — Buildfile minimal cukup `use project`:
+     - sources -> src (bila tidak dideklarasikan)
+     - headers -> include (bila folder ada dan tidak dideklarasikan)
+     - binary  -> nama folder proyek (cwd saat load; bila tidak diset)
+     Proyek non-standar tetap bebas mendeklarasikan semuanya secara
+     eksplisit — defaults hanya mengisi yang kosong. */
+  if (c->sources.count == 0) listAdd(&c->sources, "src");
+  if (c->headerPublic.count == 0 && fsDirExists("include"))
+    listAdd(&c->headerPublic, "include");
+  if (!c->outBinaryName[0]) {
+    char cwd[MAX_PATH];
+    if (fsGetCwd(cwd, sizeof(cwd))) {
+      const char *base = strrchr(cwd, '/');
+#ifdef _WIN32
+      const char *bs = strrchr(cwd, '\\');
+      if (bs && (!base || bs > base)) base = bs;
+#endif
+      base = base ? base + 1 : cwd;
+      char name[128];
+      size_t w = 0;
+      for (const char *p = base; *p && w + 1 < sizeof(name); p++) {
+        char ch = *p;
+        bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                  (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.';
+        name[w++] = ok ? ch : '_';
+      }
+      name[w] = '\0';
+      if (w > 0 && strcmp(name, ".") != 0 && strcmp(name, "..") != 0)
+        copyStr(c->outBinaryName, sizeof(c->outBinaryName), name);
+    }
+  }
+  if (!c->outBinaryName[0]) copyStr(c->outBinaryName, sizeof(c->outBinaryName), "rbot");
 
   /* pack: nilai default + penanda proyek pengemasan. Key yang hanya
      mengisi metadata (name/version/deb.*) tidak mengaktifkan pack —

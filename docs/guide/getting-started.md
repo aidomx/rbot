@@ -8,13 +8,26 @@ The intended user experience is simple: a conventional project should require ve
 
 ## Minimal project
 
-The minimal project form discussed for the next simplification of rbot is:
+A standard project — `src/` for sources, optionally `include/` for public
+headers — needs only one line in its Buildfile:
 
 ```text
 use project
 ```
 
-For rbot's current v0.2.0 configuration model, explicit fields are still commonly used when the project needs them.
+Everything else follows rbot conventions: `sources` defaults to `src`,
+`headers` to `include` when that folder exists, the binary is named after
+the project folder, and `std = gnu11`, `bin/`, `build/` fill in the rest.
+A quick test:
+
+```bash
+mkdir -p hello/src
+printf 'int main(void){return 0;}\n' > hello/src/main.c
+cd hello && rbot init && rbot   # produces bin/hello
+```
+
+Non-standard layouts stay free: any field declared explicitly wins over
+the convention (see [Buildfile](buildfile.md)).
 
 ## Initialize
 
@@ -22,7 +35,7 @@ For rbot's current v0.2.0 configuration model, explicit fields are still commonl
 rbot init
 ```
 
-Creates a project Buildfile.
+Creates the minimal Buildfile above — just `use project`.
 
 For a workspace:
 
@@ -30,7 +43,17 @@ For a workspace:
 rbot init -w
 ```
 
-creates the workspace Buildfile.
+creates a workspace Buildfile listing projects:
+
+```text
+use workspace
+
+projects = app
+```
+
+Each project follows the same standard convention: a folder `app/`
+containing `src/` (and optionally `include/`), built with `rbot -w`
+from the workspace root.
 
 ## Build
 

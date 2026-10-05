@@ -22,10 +22,27 @@ bool packEntryParts(const char *entry, char *src, size_t srcN,
   return dst[0] != '\0';
 }
 
+bool packResolveSource(const char *src, char *out, size_t n) {
+  if (fsFileExists(src) || fsDirExists(src)) {
+    copyStr(out, n, src);
+    return true;
+  }
+  size_t l = strlen(src);
+  if (l + 5 <= n) {
+    memcpy(out, src, l);
+    memcpy(out + l, ".exe", 5);
+    if (fsFileExists(out)) return true; /* hanya file — direktori .exe tidak masuk akal */
+  }
+  copyStr(out, n, src);
+  return false;
+}
+
 int64_t packEntryMTimeNs(const char *entry) {
   char src[MAX_PATH * 2], dst[MAX_PATH * 2];
   if (!packEntryParts(entry, src, sizeof(src), dst, sizeof(dst))) return -1;
-  return fsMTimeNs(src);
+  char eff[MAX_PATH * 2];
+  if (!packResolveSource(src, eff, sizeof(eff))) return -1;
+  return fsMTimeNs(eff);
 }
 
 
@@ -54,19 +71,22 @@ bool packStageEntries(const Config *c, const char *root) {
     char src[MAX_PATH * 2], dstRoot[MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
                         dstRoot, sizeof(dstRoot))) return false;
-    if (fsFileExists(src)) {
+    /* Fallback .exe: bin/rbot -> bin/rbot.exe di host Windows. */
+    char eff[MAX_PATH * 2];
+    packResolveSource(src, eff, sizeof(eff));
+    if (fsFileExists(eff)) {
       char dst[MAX_PATH * 2];
       snprintf(dst, sizeof(dst), "%s/%s", root, dstRoot);
       mkparent(dst);
-      if (!packCopyFile(src, dst)) {
-        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", src);
+      if (!packCopyFile(eff, dst)) {
+        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", eff);
         return false;
       }
       continue;
     }
     List files = {0};
-    walkDir(src, "", &files);
-    size_t srcLen = strlen(src);
+    walkDir(eff, "", &files);
+    size_t srcLen = strlen(eff);
     for (int j = 0; j < files.count; j++) {
       const char *file = files.items[j];
       const char *suffix = file + srcLen;

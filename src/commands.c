@@ -62,34 +62,11 @@ int cmdInit(const char *buildfilePath) {
     return 1;
   }
 
-  fputs("use project\n"
-        "\n"
-        "clean as c\n"
-        "output as o\n"
-        "\n"
-        "root = .\n"
-        "\n"
-        "c.build = false\n"
-        "c.compdb = false # compile_commands.json\n"
-        "\n"
-        "sources = src\n"
-        "\n"
-        "flags = Wall, Wextra, MMD, MP # MMD: dep file <obj>.d (GNU/Clang); MP: phony target\n"
-        "\n"
-        "std = gnu11\n"
-        "\n"
-        "headers = include, I.\n"
-        "\n"
-        "compiler = gcc, clang\n"
-        "\n"
-        "progress.bar = true\n"
-        "progress.error = always\n"
-        "\n"
-        "o.binaryName = app\n"
-        "o.binaryDir = bin\n"
-        "o.buildDir = build\n"
-        "o.compileCommands = auto # compile_commands.json\n",
-        fp);
+  /* Template minimal: proyek standar (src/ + include/ opsional) cukup
+     `use project` — sisanya konvensi rbot (sources=src, headers=include
+     bila ada, binary = nama folder). Proyek non-standar bebas menambah
+     field eksplisit; lihat docs/guide/buildfile.md. */
+  fputs("use project\n", fp);
   fclose(fp);
 
   printf("> Created   : %s\n", path);
@@ -111,25 +88,12 @@ int cmdInitWorkspace(const char *buildfilePath) {
     return 1;
   }
 
+  /* Template minimal workspace: cukup daftar proyek. Konvensi per proyek
+     sama dengan proyek standar (folder <nama>/ berisi src/). */
   fputs("use workspace\n"
         "\n"
-        "projects = app\n"
-        "\n"
-        "# Default bersama untuk semua proyek\n"
-        "compiler = gcc, clang\n"
-        "flags = Wall, Wextra, MMD, MP # MMD: dep file <obj>.d (GNU/Clang); MP: phony target\n"
-        "std = gnu11\n"
-        "\n"
-        "# Proyek 'app' — root relatif terhadap file ini (default: <nama>/)\n"
-        "app.root = .\n"
-        "app.sources = src\n"
-        "app.headers = include, I.\n"
-        "app.output.binaryName = app\n"
-        "app.output.binaryDir = bin\n"
-        "app.output.buildDir = build\n"
-        "\n"
-        "# Tambah proyek lain dengan mendaftarkannya di `projects = ...`,\n"
-        "# lalu atur per proyek: <nama>.<key> (mis. lib.depends_on = app)\n",
+        "# Proyek standar: folder <nama>/ berisi src/ (include/ opsional).\n"
+        "projects = app\n",
         fp);
   fclose(fp);
 
@@ -201,7 +165,9 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
     walkDir(entry, ".c", &srcs);
   }
   if (srcs.count == 0) {
-    fprintf(stderr, "rbot: no source files found in sources\n");
+    fprintf(stderr,
+            "rbot: tidak ada source .c di sources — proyek standar memakai folder src/ "
+            "(atau set sources = ... untuk tata letak lain)\n");
     return 1;
   }
 

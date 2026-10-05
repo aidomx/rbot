@@ -49,3 +49,22 @@ output as o
 ```
 
 and then referenced as `c.*` or `o.*`.
+
+## Defaults for standard projects
+
+Undeclared fields follow rbot conventions, so a standard project (folders
+`src/` and optional `include/`) needs only `use project`:
+
+| Field | Default when undeclared |
+|---|---|
+| `sources` | `src` |
+| `headers` | `include` (only when the folder exists) |
+| `output.binaryName` | project folder name, sanitized (fallback `rbot`) |
+| `std` | `gnu11` |
+| `output.binaryDir` | `bin` |
+| `output.buildDir` | `build` |
+| `output.compileCommands` | `auto` |
+| `output.libDir` | `lib` |
+
+Explicit declarations always win over these defaults; see
+[Buildfile](../guide/buildfile.md) for details.

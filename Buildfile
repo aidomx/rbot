@@ -45,4 +45,3 @@ pack.checksum = sha256
 pack.deb.install_prefix = /usr/local
 pack.deb.maintainer = "Aidomx <aidomxdev@gmail.com>"
 pack.deb.description = "A simple builder for you"
-pack.deb.architecture = arm64

@@ -122,21 +122,26 @@ static bool debStageData(const Config *c, const char *dataDir, const char *prefi
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
                         dstRoot, sizeof(dstRoot))) return false;
 
-    if (fsFileExists(src)) {
+    /* Fallback .exe — sama dengan packStageEntries; tanpa ini .deb di
+       Windows dibangun tanpa binary secara diam-diam. */
+    char eff[MAX_PATH * 2];
+    packResolveSource(src, eff, sizeof(eff));
+
+    if (fsFileExists(eff)) {
       char dest[MAX_PATH * 2];
       snprintf(dest, sizeof(dest), "%s/%s/%s", dataDir, prefixRel, dstRoot);
       mkparent(dest);
-      if (!copyFileBytes(src, dest)) {
-        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", src);
+      if (!copyFileBytes(eff, dest)) {
+        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", eff);
         return false;
       }
-      debSetFileMode(src, dstRoot, dest);
+      debSetFileMode(eff, dstRoot, dest);
       continue;
     }
 
     List files = {0};
-    walkDir(src, "", &files);
-    size_t srcLen = strlen(src);
+    walkDir(eff, "", &files);
+    size_t srcLen = strlen(eff);
     for (int j = 0; j < files.count; j++) {
       const char *file = files.items[j];
       const char *suffix = file + srcLen;

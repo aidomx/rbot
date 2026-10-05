@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="rbot_logo.png" alt="rbot logo" width="600">
+  <img src="rbot_logo.webp" alt="rbot logo" width="auto" height="auto">
 </div>
 
 # rbot
@@ -71,7 +71,17 @@ dapat digunakan untuk mengelola beberapa project.
 
 ## Buildfile
 
-Buildfile modern menggunakan `use alias` dan format `key = value`:
+Proyek standar — folder `src/` (dan opsional `include/`) — cukup satu
+baris; sisanya mengikuti konvensi rbot:
+
+```text
+use project
+```
+
+Konvensi default: `sources = src`, `headers = include` (bila foldernya
+ada), nama binary = nama folder proyek, `std = gnu11`, output di `bin/`
+dan `build/`. Proyek non-standard tetap bebas mendeklarasikan semuanya —
+field eksplisit selalu menimpa konvensi:
 
 ```text
 use alias
@@ -92,19 +102,27 @@ o.buildDir = build
 o.compileCommands = auto
 ```
 
-Format Buildfile lama tetap didukung. Daftar lengkap field ada di
-[docs/reference/buildfile-fields.md](./docs/reference/buildfile-fields.md).
+Format Buildfile lama tetap didukung. Daftar lengkap field dan default
+ada di [docs/reference/buildfile-fields.md](./docs/reference/buildfile-fields.md).
 
 ## Workspace multi-project
 
-`Buildfile.ws` mengelola beberapa project sekaligus:
+`Buildfile.ws` mengelola beberapa project sekaligus. Workspace minimal
+cukup mendaftar project-nya — tiap project mengikuti konvensi standar
+(folder `<nama>/` berisi `src/`), tanpa Buildfile sendiri:
 
 ```text
 use workspace
 
+projects = rupamod, rupa, ruka
+```
+
+Setting per project, dependency, dan referensi library antar project tetap
+bisa dideklarasikan untuk tata letak non-standard:
+
+```text
 projects.rupamod as mod
 projects.rupa as rupa
-projects = rupamod, rupa, ruka
 
 ruka.depends_on = rupamod
 rukalib.linux = rupa

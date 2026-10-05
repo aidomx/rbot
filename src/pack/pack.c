@@ -107,19 +107,23 @@ int64_t packNewestInput(const Config *c) {
     char src[MAX_PATH * 2], dst[MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
                         dst, sizeof(dst))) continue;
-    if (fsFileExists(src)) {
-      int64_t m = fsMTimeNs(src);
+    /* Fallback .exe (bin/rbot -> bin/rbot.exe di Windows) agar relink
+       binary tetap memicu kemasan ulang. */
+    char eff[MAX_PATH * 2];
+    if (!packResolveSource(src, eff, sizeof(eff))) continue;
+    if (fsFileExists(eff)) {
+      int64_t m = fsMTimeNs(eff);
       if (m > newest) newest = m;
-    } else if (fsDirExists(src)) {
+    } else if (fsDirExists(eff)) {
       /* folder: semua file di dalamnya + mtime folder itu sendiri. */
       List files = {0};
-      walkDir(src, "", &files);
+      walkDir(eff, "", &files);
       for (int j = 0; j < files.count; j++) {
         int64_t m = fsMTimeNs(files.items[j]);
         if (m > newest) newest = m;
       }
       listFree(&files);
-      int64_t dm = fsMTimeNs(src);
+      int64_t dm = fsMTimeNs(eff);
       if (dm > newest) newest = dm;
     }
     /* entri yang tidak ada diabaikan di sini; packRun melaporkannya. */
@@ -185,7 +189,8 @@ bool packRun(const Config *c) {
   if (!c->pack.requested) return true;
 
   /* Validasi entri dulu: paket dengan file yang hilang harus gagal jelas,
-     bukan diam-diam memaketkan sisanya. */
+     bukan diam-diam memaketkan sisanya. packResolveSource menoleransi
+     entri portabel tanpa .exe (bin/rbot -> bin/rbot.exe di Windows). */
   for (int i = 0; i < c->pack.files.count; i++) {
     char src[MAX_PATH * 2], dst[MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
@@ -193,7 +198,8 @@ bool packRun(const Config *c) {
       fprintf(stderr, "rbot: pack: mapping '%s' tidak valid\n", c->pack.files.items[i]);
       return false;
     }
-    if (!fsFileExists(src) && !fsDirExists(src)) {
+    char eff[MAX_PATH * 2];
+    if (!packResolveSource(src, eff, sizeof(eff))) {
       fprintf(stderr, "rbot: pack: '%s' tidak ditemukan\n", src);
       return false;
     }

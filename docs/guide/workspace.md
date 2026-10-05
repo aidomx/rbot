@@ -10,9 +10,26 @@ rbot init -w
 
 ## Basic form
 
+A minimal workspace only lists its projects:
+
 ```text
 use workspace
 
+projects = app, tool
+```
+
+Each project follows the standard project convention (see
+[Buildfile](buildfile.md)): a folder `<name>/` under the workspace root
+containing `src/` and optionally `include/`. The projects need no
+Buildfile of their own — rbot synthesizes one per project from the
+workspace settings, with the binary named after the project. Common
+settings (`flags`, `std`, ...) declared at the workspace level apply to
+every project.
+
+Non-standard projects stay free: declare per-project settings explicitly
+in the workspace file.
+
+```text
 projects.rupamod as mod
 projects.rupa as rupa
 projects.ruka as ruka

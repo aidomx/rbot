@@ -19,6 +19,11 @@ source:path/in/package
 
 Without a mapping, the source path is preserved.
 
+Binary entries may omit the `.exe` suffix: when the exact source is absent,
+the packer falls back to `<source>.exe` (a Windows-linked binary is
+`bin/rbot.exe` while the Buildfile says `bin/rbot`). The packaged path keeps
+the destination as configured.
+
 ## Package formats
 
 A package can select a format:
