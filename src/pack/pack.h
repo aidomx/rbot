@@ -20,4 +20,13 @@
  */
 bool packRun(const Config *c);
 
+/*
+ * packRunAt — fase release workspace: packRun dengan CWD PEMANGGIL
+ * (root workspace), bukan root proyek. Semua path dihitung relatif root
+ * workspace: pack.output (dist/release/...) dan entri pack.files
+ * berpath ../<root>/... menunjuk artefak proyek. Freshness tetap dari
+ * mtime input (mekanisme pack standar); tidak ada fast state terpisah.
+ */
+bool packRunAt(const Config *c);
+
 #endif /* RBOT_V0_1_0_PACK_H */

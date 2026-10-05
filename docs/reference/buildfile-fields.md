@@ -37,6 +37,9 @@ The following fields are part of the v0.2.0 configuration model or are exercised
 | `pack.deb.maintainer` | Debian maintainer |
 | `pack.deb.description` | Debian description |
 | `pack.deb.architecture` | Debian architecture |
+| `releases` | workspace releases (distribution units; see Releases guide) |
+| `releases.<n>.name` | source project of a release |
+| `releases.<n>.target` | release packaging format: `deb` or `tar` |
 
 Aliases can be introduced with `name as alias`, for example:
 

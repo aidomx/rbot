@@ -92,6 +92,41 @@ static void embArchiveStateSave(const EmbeddedEntry *e) {
   fclose(fp);
 }
 
+/* Entri exclude arsip (archive.exclude / embedded.<n>.exclude): nama file,
+   path relatif, atau direktori. Pencocokan konsisten dengan excludedSource
+   (compile.c), plus prefix direktori untuk entri tanpa ekstensi:
+   - path relatif sama persis ("LICENSE"), atau
+   - basename sama persis ("main.c" vs "src/main.c"), atau
+   - path di dalam direktori yang dinamai entri ("build" -> "build/x").
+   Dipakai oleh DAFTAR FILE tar dan SCAN FRESHNESS — tanpa ini, artefak
+   build di dalam tree sumber (mis. build/<n>.o.archive) ikut terhitung
+   sebagai input dan membuat arsip di-rebuild tiap run. */
+static bool embExcluded(const EmbeddedEntry *e, const char *rel) {
+  for (int i = 0; i < e->excludes.count; i++) {
+    const char *ex = e->excludes.items[i];
+    if (!ex || !*ex) continue;
+    if (strcmp(rel, ex) == 0) return true;
+    const char *base = strrchr(rel, '/');
+    if (base && strcmp(base + 1, ex) == 0) return true;
+    size_t el = strlen(ex);
+    if (strncmp(rel, ex, el) == 0 && rel[el] == '/') return true;
+  }
+  return false;
+}
+
+/* Path relatif terhadap e->src untuk pencocokan excludes. */
+static void embRelPath(const EmbeddedEntry *e, const char *path, char *rel, size_t n) {
+  size_t srcLen = strlen(e->src);
+  if (strncmp(path, e->src, srcLen) == 0 &&
+      (path[srcLen] == '/' || path[srcLen] == '\\' || path[srcLen] == '\0')) {
+    const char *r = path + srcLen;
+    while (*r == '/' || *r == '\\') r++;
+    snprintf(rel, n, "%s", r);
+    return;
+  }
+  snprintf(rel, n, "%s", path);
+}
+
 static bool embArchiveFresh(const EmbeddedEntry *e) {
   /* Arsip jadi (embedded.<n>.file): cukup bandingkan mtime file — tidak
      ada direktori sumber untuk discan. */
@@ -101,14 +136,18 @@ static bool embArchiveFresh(const EmbeddedEntry *e) {
 
   /* Scan freshness dengan resolusi nanodetik: perubahan source dan archive
      dapat terjadi dalam detik yang sama, sehingga time_t/fsMTime() terlalu
-     kasar untuk invalidasi build. */
+     kasar untuk invalidasi build. Entri yang di-exclude tidak dihitung —
+     sama seperti saat arsip dibangun. */
   List files = {0};
   if (e->pattern[0])
     walkDir(e->src, e->pattern, &files);
   else
     walkDir(e->src, "", &files);
   int64_t newest = 0;
+  char rel[MAX_PATH * 2];
   for (int i = 0; i < files.count; i++) {
+    embRelPath(e, files.items[i], rel, sizeof(rel));
+    if (!*rel || embExcluded(e, rel)) continue;
     int64_t mt = fsMTimeNs(files.items[i]);
     if (mt >= 0 && mt > newest) newest = mt;
   }
@@ -367,16 +406,11 @@ static bool buildEmbeddedArchiveEntry(const EmbeddedEntry *e) {
       return false;
     }
 
-    size_t srcLen = strlen(e->src);
+    char rel[MAX_PATH * 2];
     for (int i = 0; i < files.count; i++) {
       const char *path = files.items[i];
-      const char *rel = path;
-      if (strncmp(path, e->src, srcLen) == 0 &&
-          (path[srcLen] == '/' || path[srcLen] == '\\' || path[srcLen] == '\0')) {
-        rel = path + srcLen;
-        while (*rel == '/' || *rel == '\\') rel++;
-      }
-      if (*rel) fprintf(lf, "%s\n", rel);
+      embRelPath(e, path, rel, sizeof(rel));
+      if (*rel && !embExcluded(e, rel)) fprintf(lf, "%s\n", rel);
     }
     fclose(lf);
     listFree(&files);

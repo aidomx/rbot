@@ -41,6 +41,18 @@ rbot -w NAME
 
 Build all projects or one named project and its dependencies.
 
+## Workspace release
+
+```bash
+rbot -w release -- name=PROJECT[,key=value...]
+```
+
+Package a release from the CLI. `name=<project>` is required and the project
+must exist; `target=deb|tar` overrides the packaging format for this run.
+Artifacts go to `dist/release/` (or `dist/release/<name>/` for a selective
+release). Without `--`, `rbot -w` also builds and releases every declared
+release. See [Releases](../guide/releases.md).
+
 ## Clean
 
 ```bash

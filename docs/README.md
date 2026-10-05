@@ -6,7 +6,7 @@ Documentation package for rbot. This archive contains documentation only; it doe
 
 ## Contents
 
-- `docs/guide/` — getting started, Buildfile, incremental builds, workspace, packaging, platform usage
+- `docs/guide/` — getting started, Buildfile, incremental builds, workspace, releases, packaging, platform usage
 - `docs/reference/` — CLI and Buildfile reference
 - `docs/design/` — design philosophy and architecture notes
 - `docs/benchmark/` — benchmark methodology and interpretation

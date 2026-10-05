@@ -37,6 +37,7 @@ void showHelp(void) {
   printf("%-8s%s\n", "-j[N]", "- build paralel, N job (tanpa -j: jumlah core CPU; -j1 = serial)");
   printf("%-8s%s\n", "-w", "- mode workspace: build semua proyek (Buildfile.ws)");
   printf("%-8s%s\n", "", "- rbot -w <nama>: hanya proyek itu (+ dependency-nya)");
+  printf("%-8s%s\n", "", "- rbot -w release -- name=rupa: kemas release selektif (dist/release/<nama>)");
   printf("%-8s%s\n", "init", "- create a default Buildfile if none exists yet");
   printf("%-8s%s\n", "", "- rbot init -w: buat Buildfile.ws (mode workspace) bila belum ada");
   printf("%-8s%s\n", "clean", "- clean build artifacts (Buildfile: clean)");

@@ -25,10 +25,16 @@
 /*
  * Jalankan mode workspace untuk command `cmd` ("build"/"clean").
  * only: NULL/"" = semua proyek sesuai urutan depends_on; selain itu hanya
- * proyek itu (+ dependency-nya). Return code gaya main(): 0 sukses, 1
- * gagal, 130 interupsi.
+ * proyek itu (+ dependency-nya).
+ * releaseSel: `-- key=value[,key=value...]` (mis. "name=rupa") — release
+ * via CLI: konfigurasi boleh penuh dari CLI tanpa deklarasi `releases`
+ * di Buildfile.ws. `name=<proyek>` wajib (error bila proyek tidak ada;
+ * release implisit dibuat bila proyek ada tapi belum dideklarasikan);
+ * `target=<tar|deb>` override format kemasan. NULL/"" = build + release
+ * seluruh workspace (dist/release).
+ * Return code gaya main(): 0 sukses, 1 gagal, 130 interupsi.
  */
-int workspaceRun(const char *cmd, int jobs, const char *only);
+int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel);
 
 /* true bila Buildfile.ws (atau nama lama Buildfile.workspace) ada di cwd. */
 bool workspaceFileExists(void);

@@ -7,6 +7,7 @@
 #include "../commands.h"
 #include "../config.h"
 #include "../embed.h"
+#include "../pack/pack.h"
 #include "../portability.h"
 #include "../prof/prof.h"
 #include "alias.h"
@@ -41,6 +42,7 @@
 
 #define WS_NAME_LEN 64
 #define WS_MAX_PROJECTS 16
+#define WS_MAX_RELEASES 8
 #define WS_LINE_LEN 1024
 
 typedef struct {
@@ -49,9 +51,29 @@ typedef struct {
   List lines; /* baris setting per proyek TANPA prefix projects.<nama>. */
 } WsProject;
 
+/*
+ * Release — unit distribusi workspace (design/release.md):
+ *   releases = rupa, ruka      (daftar; berisi NAMA PROYEK, bukan nama baru)
+ *   releases.rupa as rrupa     (opsional; alias memungkinkan konfigurasi
+ *                               release terpisah dari konfigurasi project)
+ *   rrupa.name = rupa          (proyek sumber artefak; default = nama)
+ *   rrupa.target = deb         (opsional; format kemasan release — override
+ *                               pack.format proyek untuk artefak release)
+ * Selektor CLI `-- key=value` (mis. `rbot -w release -- name=rupa`)
+ * memilih satu release; build selektif menarik seluruh closure proyek,
+ * termasuk proyek lain yang dirujuk pack.merge proyek sumber.
+ */
+typedef struct {
+  char alias[WS_NAME_LEN]; /* key alias pada Buildfile.ws ("rrupa") */
+  char name[WS_NAME_LEN];  /* proyek sumber artefak (default = alias) */
+  char target[16];         /* "" = pack.format proyek; selain itu override */
+} WsRelease;
+
 typedef struct {
   WsProject projects[WS_MAX_PROJECTS];
   int projectCount;
+  WsRelease releases[WS_MAX_RELEASES];
+  int releaseCount;
   List commonLines; /* key selain projects/projects.<nama> — default bersama */
   List order;       /* urutan build hasil topo sort (nama) */
   List depends[WS_MAX_PROJECTS];
@@ -60,6 +82,9 @@ typedef struct {
      proyek (rupa <-> ruka) sah; dua fase build yang menyelesaikannya.
      Dipakai untuk memperluas build selektif `-w <nama>`. */
   List libDeps[WS_MAX_PROJECTS];
+  /* Folder output fase release; kosong = dist/release. Diisi
+     dist/release/<nama> bila selektor release `-- name=<x>` aktif. */
+  char releaseStage[MAX_PATH];
 } WsModel;
 
 /* ==================== util kecil ==================== */
@@ -81,6 +106,24 @@ static int wsFindProject(const WsModel *m, const char *name) {
   return -1;
 }
 
+static WsRelease *wsFindRelease(WsModel *m, const char *alias) {
+  for (int i = 0; i < m->releaseCount; i++)
+    if (strcmp(m->releases[i].alias, alias) == 0) return &m->releases[i];
+  return NULL;
+}
+
+static WsRelease *wsEnsureRelease(WsModel *m, const char *alias) {
+  WsRelease *r = wsFindRelease(m, alias);
+  if (r) return r;
+  if (m->releaseCount >= WS_MAX_RELEASES) return NULL;
+  if (!wsValidName(alias)) return NULL;
+  r = &m->releases[m->releaseCount++];
+  memset(r, 0, sizeof(*r));
+  copyStr(r->alias, sizeof(r->alias), alias);
+  copyStr(r->name, sizeof(r->name), alias); /* default: proyek bernama sama */
+  return r;
+}
+
 static WsProject *wsEnsureProject(WsModel *m, const char *name);
 
 /* Section engine yang dikenali Config — segmen pertama key dengan salah
@@ -91,7 +134,7 @@ static bool wsIsEngineSection(const char *seg) {
                                 "clean",  "progress", "output",     "embedded",
                                 "archive", "sources",  "flags",      "compiler",
                                 "exclude", "headers",  "library",    "depends_on",
-                                NULL};
+                                "releases", NULL};
   for (int i = 0; names[i]; i++)
     if (strcmp(seg, names[i]) == 0) return true;
   return false;
@@ -129,6 +172,46 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
   const char *setting = NULL;
 
   if (strcmp(key, "projects") == 0) return; /* daftar proyek, bukan setting */
+
+  /* releases = rupa, ruka : daftar release (nama proyek; alias = nama). */
+  if (strcmp(key, "releases") == 0) {
+    char buf[WS_LINE_LEN];
+    if (strlen(value) >= sizeof(buf)) return;
+    copyStr(buf, sizeof(buf), value);
+    for (char *save = buf;;) {
+      char *comma = strchr(save, ',');
+      if (comma) *comma = '\0';
+      char *item = trim(save);
+      if (*item && !wsEnsureRelease(m, item))
+        fprintf(stderr, "rbot: workspace: invalid release '%s'\n", item);
+      if (!comma) break;
+      save = comma + 1;
+    }
+    return;
+  }
+
+  /* releases.<alias>.<setting> — konfigurasi release (name, target). */
+  if (strncmp(key, "releases.", 9) == 0) {
+    const char *rest = key + 9;
+    const char *dot = strchr(rest, '.');
+    if (!dot || dot == rest) return;
+    size_t nl = (size_t)(dot - rest);
+    if (nl >= sizeof(name)) return;
+    memcpy(name, rest, nl);
+    name[nl] = '\0';
+    WsRelease *r = wsEnsureRelease(m, name);
+    if (!r) return;
+    if (strcmp(dot + 1, "name") == 0) {
+      if (wsFindProject(m, value) < 0)
+        fprintf(stderr, "rbot: workspace: release '%s' refers to unknown project '%s'\n",
+                r->alias, value);
+      else
+        copyStr(r->name, sizeof(r->name), value);
+    } else if (strcmp(dot + 1, "target") == 0) {
+      copyStr(r->target, sizeof(r->target), value);
+    }
+    return;
+  }
 
   if (strncmp(key, "projects.", 9) == 0) {
     const char *rest = key + 9;
@@ -362,6 +445,70 @@ static bool wsValidatePackMerges(WsModel *m) {
   return true;
 }
 
+/* ==================== validasi releases ==================== */
+
+static bool wsValidateReleases(WsModel *m) {
+  for (int i = 0; i < m->releaseCount; i++) {
+    WsRelease *r = &m->releases[i];
+    if (wsFindProject(m, r->name) < 0) {
+      fprintf(stderr, "rbot: workspace: release '%s' refers to unknown project '%s'\n",
+              r->alias, r->name);
+      return false;
+    }
+    if (r->target[0] && strcmp(r->target, "tar") != 0 && strcmp(r->target, "deb") != 0) {
+      fprintf(stderr, "rbot: workspace: release '%s' unknown target '%s' (tar, deb)\n",
+              r->alias, r->target);
+      return false;
+    }
+  }
+  return true;
+}
+
+/* ==================== dependensi pack lintas proyek ==================== */
+
+/* Pack build selektif (-w <proyek>): entri pack.files yang menunjuk
+   artefak proyek lain (src berprefix ../<nama>/... ) bermakna "hasil
+   build proyek lain". Tanpa derekaman ini, build selektif tidak
+   membangun proyek pemilik artefak itu, padahal entri berpath menuntut
+   file jadi. Hasil: depends[] proyek pemilik pack.files bertambah
+   (dedup — entri yang sudah ada tidak ditulis ulang). */
+static void wsCollectPackDeps(WsModel *m) {
+  for (int i = 0; i < m->projectCount; i++) {
+    for (int j = 0; j < m->projects[i].lines.count; j++) {
+      const char *ln = m->projects[i].lines.items[j];
+      if (strncmp(ln, "pack.files = ", 13) != 0) continue;
+      const char *v = ln + 13;
+      char buf[WS_LINE_LEN * 2];
+      if (strlen(v) >= sizeof(buf)) continue;
+      copyStr(buf, sizeof(buf), v);
+      for (char *save = buf;;) {
+        char *comma = strchr(save, ',');
+        if (comma) *comma = '\0';
+        /* src:dst — src bagian kiri; hanya src berprefix ../ yang lintas
+           proyek (mis. arsip hasil pack proyek lain). */
+        char *colon = strchr(save, ':');
+        if (colon) *colon = '\0';
+        if (strncmp(save, "../", 3) == 0) {
+          char *seg = save + 3;
+          char *slash = strchr(seg, '/');
+          if (slash && slash != seg) {
+            *slash = '\0';
+            int dep = wsFindProject(m, seg);
+            if (dep >= 0 && dep != i) {
+              bool exists = false;
+              for (int k = 0; k < m->depends[i].count; k++)
+                if (strcmp(m->depends[i].items[k], seg) == 0) exists = true;
+              if (!exists) listAdd(&m->depends[i], seg);
+            }
+          }
+        }
+        if (!comma) break;
+        save = comma + 1;
+      }
+    }
+  }
+}
+
 /* ==================== topo sort depends_on ==================== */
 
 /* DFS berwarna (0 putih, 1 abu, 2 hitam): siklus terdeteksi pasti, dan
@@ -408,6 +555,11 @@ static bool wsTopoSort(WsModel *m) {
     }
   }
 
+  /* Proyek lain yang dirujuk lewat pack.files berpath ../<nama>/...
+     (hasil pack proyek lain) juga build dependency. wsCollectPackDeps
+     harus berjalan SEBELUM topo sort, karena wsVisit membaca depends[]. */
+  wsCollectPackDeps(m);
+
   /* Kumpulkan juga dependensi library lintas-proyek (library.<os> =
      <nama proyek lain>). Sengaja TIDAK masuk DFS topo: siklus library
      sah (dua fase build), hanya dipakai untuk memperluas `-w <nama>`. */
@@ -442,7 +594,6 @@ static bool wsTopoSort(WsModel *m) {
 }
 
 /* ==================== sintesis Buildfile per proyek ==================== */
-
 
 /* Ubah shorthand library workspace: `library.linux = ruka` menjadi path
    artifact project (`../ruka/lib/libruka.a`). Nilai project tidak boleh
@@ -510,6 +661,28 @@ static bool wsLibraryValue(const WsModel *m, const WsProject *owner,
     if (!comma) break;
     p = comma + 1;
   }
+  return true;
+}
+
+/* Tulis file hanya bila isinya berubah — mtime stabil agar cache config
+   & fast path tidak miss sia-sia. */
+static bool wsWriteIfChanged(const char *path, const char *body) {
+  bool same = false;
+  FILE *rf = fopen(path, "rb");
+  if (rf) {
+    char old[16384];
+    size_t got = fread(old, 1, sizeof(old), rf);
+    fclose(rf);
+    same = (got == strlen(body)) && memcmp(old, body, got) == 0;
+  }
+  if (same) return true;
+  FILE *wf = fopen(path, "w");
+  if (!wf) {
+    fprintf(stderr, "rbot: cannot write %s\n", path);
+    return false;
+  }
+  fputs(body, wf);
+  fclose(wf);
   return true;
 }
 
@@ -583,27 +756,59 @@ static bool wsSynthesize(const WsModel *m, const char *outDir, const char *wsNam
       strcat(body, "\n");
     }
 
+    /* Buildfile utama (fase build: library & binary pass) — TANPA blok
+       release, agar pack default (pack.* proyek -> project/dist) tetap
+       berjalan normal pada kedua jalur cmdBuild. */
     /* outDir (2*MAX_PATH) + WS_NAME_LEN + "/"+".Buildfile" — tak pernah
        terpotong (nama proyek maks. WS_NAME_LEN-1). */
     char path[MAX_PATH * 2 + WS_NAME_LEN + 16];
     snprintf(path, sizeof(path), "%s/%s.Buildfile", outDir, p->name);
-    bool same = false;
-    FILE *rf = fopen(path, "rb");
-    if (rf) {
-      char old[16384];
-      size_t got = fread(old, 1, sizeof(old), rf);
-      fclose(rf);
-      same = (got == strlen(body)) && memcmp(old, body, got) == 0;
+    if (!wsWriteIfChanged(path, body)) {
+      free(body);
+      return false;
     }
-    if (!same) {
-      FILE *wf = fopen(path, "w");
-      if (!wf) {
-        fprintf(stderr, "rbot: cannot write %s\n", path);
+
+    /* Blok release — Buildfile TERPISAH untuk fase release (design/
+       release.md): isi sama + blok release di akhir yang menimpa pack.*
+       proyek (parser last-wins). Dipisah supaya pack default fase build
+       tidak hilang dan fase 3 tidak dobel. packRunAt menjalankan file
+       ini pada root WORKSPACE, jadi path output relatif root workspace:
+       - target deb : output = <stage>/<name>-<version>.deb, format deb
+       - target tar : output = <stage>/<name>-<version>.tar.gz
+       <stage> = dist/release; selektor `-- name=rupa` mengisinya dengan
+       dist/release/<nama> (lihat workspaceRun). */
+    const WsRelease *rel = NULL;
+    for (int ri = 0; ri < m->releaseCount && !rel; ri++)
+      if (strcmp(m->releases[ri].name, p->name) == 0) rel = &m->releases[ri];
+    if (rel) {
+      const char *stage = m->releaseStage[0] ? m->releaseStage : "dist/release";
+      char relblock[WS_LINE_LEN * 3];
+      char outTpl[WS_LINE_LEN];
+      if (rel->target[0] && strcmp(rel->target, "deb") == 0) {
+        snprintf(outTpl, sizeof(outTpl), "%s/{name}-{version}.deb", stage);
+        snprintf(relblock, sizeof(relblock),
+                 "\n# release '%s' (target %s)\n"
+                 "pack.name = %s\n"
+                 "pack.output = %s\n"
+                 "pack.format = deb\n",
+                 rel->alias, rel->target, p->name, outTpl);
+      } else {
+        snprintf(outTpl, sizeof(outTpl), "%s/{name}-{version}.tar.gz", stage);
+        snprintf(relblock, sizeof(relblock),
+                 "\n# release '%s' (target tar)\n"
+                 "pack.name = %s\n"
+                 "pack.output = %s\n"
+                 "pack.format = tar\n"
+                 "pack.checksum = sha256\n",
+                 rel->alias, p->name, outTpl);
+      }
+      strcat(body, relblock);
+      char rpath[MAX_PATH * 2 + WS_NAME_LEN + 24];
+      snprintf(rpath, sizeof(rpath), "%s/%s.release.Buildfile", outDir, p->name);
+      if (!wsWriteIfChanged(rpath, body)) {
         free(body);
         return false;
       }
-      fputs(body, wf);
-      fclose(wf);
     }
     free(body);
   }
@@ -674,7 +879,21 @@ static int wsExecOne(const WsModel *m, const char *name, const char *cmd, int jo
     fprintf(stderr, "rbot: cannot enter project root '%s'\n", m->projects[idx].root);
     return 1;
   }
-  printf("\n> Project   : %s%s\n", name, libOnly ? "  (library pass)" : "");
+  /* Label fase: proyek kemasan (output.binary = false) fase 1-nya adalah
+     ARSIP (buildEmbedded), bukan library — label harus mencerminkan itu. */
+  const char *passLabel = "";
+  if (libOnly) {
+    bool isArchive = false;
+    const WsProject *p = &m->projects[idx];
+    for (int i = 0; i < p->lines.count; i++) {
+      if (strcmp(p->lines.items[i], "output.binary = false") == 0) {
+        isArchive = true;
+        break;
+      }
+    }
+    passLabel = isArchive ? "  (archive pass)" : "  (library pass)";
+  }
+  printf("\n> Project   : %s%s\n", name, passLabel);
   int rc = cmdBuildEx(jobs, bf, libOnly);
   fsSetCwd(wsDir);
   return rc;
@@ -720,7 +939,96 @@ static void wsExpandLibDeps(const WsModel *m, unsigned char *needed) {
   }
 }
 
-int workspaceRun(const char *cmd, int jobs, const char *only) {
+/*
+ * wsReleaseOne — fase release workspace untuk satu release (design/
+ * release.md): kemas artefak proyek sumber lewat packRunAt pada root
+ * WORKSPACE, dengan konfigurasi pack hasil timpaan blok release di
+ * Buildfile sintesis (pack.output = <stage>/<name>-<version>.<ext>,
+ * pack.format = target release).
+ *
+ * Entri pack.files di-rewrite RELATIF ROOT WORKSPACE: relatif root
+ * proyek saja (tanpa ../) menjadi ../<root>/<p>, karena packRunAt
+ * berjalan di root workspace. Entri sudah berprefix ../ (hasil merge
+ * antar-proyek) tidak diubah. pack.output dari blok release sudah
+ * relatif root workspace. Tidak ada fast state di root workspace —
+ * freshness kemasan murni dari mtime input packRun.
+ */
+static int wsReleaseOne(WsModel *m, int relIdx, int jobs, const char *wsDir) {
+  (void)jobs;
+  WsRelease *r = &m->releases[relIdx];
+  int idx = wsFindProject(m, r->name);
+  if (idx < 0) {
+    fprintf(stderr, "rbot: workspace: release '%s' refers to unknown project '%s'\n",
+            r->alias, r->name);
+    return 1;
+  }
+  const WsProject *p = &m->projects[idx];
+
+  /* Proyek tanpa pack.files tidak punya input kemasan — error di sini,
+     SEBELUM loadConfig: blok release di Buildfile sintesis menyetel
+     pack.output sendiri, sehingga c.pack.requested selalu true dan tidak
+     bisa dipakai mendeteksi proyek yang memang tidak bisa direlease. */
+  bool hasPackFiles = false;
+  for (int i = 0; i < p->lines.count; i++)
+    if (strncmp(p->lines.items[i], "pack.files = ", 13) == 0) hasPackFiles = true;
+  if (!hasPackFiles) {
+    fprintf(stderr,
+            "rbot: workspace: release '%s': project '%s' tidak memiliki pack.files "
+            "— tidak ada yang bisa direlease\n",
+            r->alias, p->name);
+    return 1;
+  }
+
+  /* Buildfile sintesis fase release: isi sama dengan fase binary + blok
+     release yang menimpa pack.* proyek. */
+  char bf[MAX_PATH * 2];
+  snprintf(bf, sizeof(bf), "%s/%s/%s.release.Buildfile", wsDir, WORKSPACE_SYNTH_DIR, p->name);
+
+  Config c = configDefaults();
+  if (!loadConfig(&c, bf)) return 1;
+
+  /* Path pack milik proyek ini relatif ROOT PROYEK -> relatif ROOT
+     WORKSPACE (root workspace = induk folder proyek):
+     - entri polos (bin/rupa)        -> <root>/bin/rupa
+     - entri merge (../ruka/dist/x)  -> ruka/dist/x (strip ../) */
+  List relFiles = {0};
+  for (int i = 0; i < c.pack.files.count; i++) {
+    char entry[WS_LINE_LEN * 2];
+    const char *src = c.pack.files.items[i];
+    int written;
+    if (strncmp(src, "../", 3) == 0) {
+      written = snprintf(entry, sizeof(entry), "%s", src + 3);
+    } else {
+      const char *colon = strchr(src, ':');
+      written = colon ? snprintf(entry, sizeof(entry), "%s/%.*s%s", p->root,
+                                 (int)(colon - src), src, colon)
+                      : snprintf(entry, sizeof(entry), "%s/%s", p->root, src);
+    }
+    if (written < 0 || (size_t)written >= sizeof(entry) || !listAdd(&relFiles, entry)) {
+      listFree(&relFiles);
+      return 1;
+    }
+  }
+  listFree(&c.pack.files);
+  c.pack.files = relFiles;
+
+  /* packRunAt berjalan di CWD sekarang — pastikan itu root workspace. */
+  if (!fsSetCwd(wsDir)) {
+    fprintf(stderr, "rbot: cannot enter workspace root\n");
+    listFree(&c.pack.files);
+    return 1;
+  }
+  bool ok = packRunAt(&c);
+  fsSetCwd("."); /* nilai wsDir; diri sendiri sebagai pemulih sederhana */
+  listFree(&c.pack.files);
+  if (!ok) {
+    fprintf(stderr, "rbot: workspace: release '%s' gagal\n", r->alias);
+    return 1;
+  }
+  return 0;
+}
+
+int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel) {
   char wsDir[MAX_PATH];
   if (!fsGetCwd(wsDir, sizeof(wsDir))) {
     fprintf(stderr, "rbot: cannot determine current directory\n");
@@ -753,6 +1061,130 @@ int workspaceRun(const char *cmd, int jobs, const char *only) {
     return 1;
   }
 
+  /* Tiga mode:
+     - releaseSel : `rbot -w release -- name=rupa` — release yang cocok
+                    (AND antar pasangan `key=value` dipisah koma).
+     - only       : `rbot -w <proyek>` — build proyek + closure-nya.
+     - keduanya kosong : build + release seluruh workspace. */
+  bool releaseOnly = releaseSel && *releaseSel;
+  unsigned char relNeeded[WS_MAX_RELEASES] = {0};
+
+  /* Selektor release via CLI (`rbot -w release -- key=value[,k=v]`):
+     DIREKTIF, bukan filter — konfigurasi release boleh datang penuh dari
+     CLI tanpa deklarasi `releases` di Buildfile.ws:
+       name=<proyek>    pilih release proyek itu; bila proyek ada tapi
+                        belum dideklarasikan, release IMPLISIT dibuat
+                        (alias = name = proyek). Proyek tidak ada ->
+                        error (satu-satunya error wajar).
+       target=<tar|deb> override format kemasan run ini (menimpa target
+                        deklarasi; tanpa target = tarball).
+  */
+  if (releaseOnly) {
+    bool hasName = false;
+    char targetOv[16] = {0};
+    for (const char *p = releaseSel; *p;) {
+      char pair[WS_LINE_LEN];
+      const char *comma = strchr(p, ',');
+      size_t len = comma ? (size_t)(comma - p) : strlen(p);
+      if (len == 0 || len >= sizeof(pair)) {
+        fprintf(stderr, "rbot: workspace: release selector tidak valid\n");
+        wsModelFree(&m);
+        return 1;
+      }
+      memcpy(pair, p, len);
+      pair[len] = '\0';
+      char *eq = strchr(pair, '=');
+      if (!eq) {
+        fprintf(stderr,
+                "rbot: workspace: selector '%s' tidak valid (pakai key=value, mis. name=rupa)\n",
+                trim(pair));
+        wsModelFree(&m);
+        return 1;
+      }
+      *eq = '\0';
+      char *k = trim(pair);
+      char *v = trim(eq + 1);
+      if (strcmp(k, "name") == 0) {
+        if (!wsValidName(v)) {
+          fprintf(stderr, "rbot: workspace: nama proyek '%s' tidak valid\n", v);
+          wsModelFree(&m);
+          return 1;
+        }
+        if (wsFindProject(&m, v) < 0) {
+          fprintf(stderr,
+                  "rbot: workspace: project '%s' tidak ada — tidak ada yang bisa direlease\n", v);
+          wsModelFree(&m);
+          return 1;
+        }
+        int ri = -1;
+        for (int i = 0; i < m.releaseCount; i++)
+          if (strcmp(m.releases[i].name, v) == 0) { ri = i; break; }
+        if (ri < 0) { /* belum dideklarasikan: release implisit dari CLI */
+          WsRelease *nr = wsEnsureRelease(&m, v);
+          if (!nr) {
+            fprintf(stderr, "rbot: workspace: terlalu banyak release\n");
+            wsModelFree(&m);
+            return 1;
+          }
+          ri = (int)(nr - m.releases);
+        }
+        relNeeded[ri] = 1;
+        hasName = true;
+      } else if (strcmp(k, "target") == 0) {
+        if (strcmp(v, "tar") != 0 && strcmp(v, "deb") != 0) {
+          fprintf(stderr, "rbot: workspace: target '%s' tidak dikenal (tar, deb)\n", v);
+          wsModelFree(&m);
+          return 1;
+        }
+        snprintf(targetOv, sizeof(targetOv), "%s", v);
+      } else {
+        fprintf(stderr, "rbot: workspace: key selektor '%s' tidak dikenal (name, target)\n", k);
+        wsModelFree(&m);
+        return 1;
+      }
+      if (!comma) break;
+      p = comma + 1;
+    }
+    if (!hasName) {
+      fprintf(stderr, "rbot: workspace: release memerlukan name=<project>\n");
+      wsModelFree(&m);
+      return 1;
+    }
+    /* Override format semua release terpilih (menimpa target deklarasi). */
+    if (targetOv[0]) {
+      for (int i = 0; i < m.releaseCount; i++)
+        if (relNeeded[i])
+          copyStr(m.releases[i].target, sizeof(m.releases[i].target), targetOv);
+    }
+
+    /* Folder output fase release: default dist/release; selektor dengan
+       pasangan `name=<x>` mengarahkan ke dist/release/<x> agar artefak
+       selektif tidak tercampur artefak release workspace penuh. */
+    for (const char *p = releaseSel; *p;) {
+      char pair[WS_LINE_LEN];
+      const char *comma = strchr(p, ',');
+      size_t len = comma ? (size_t)(comma - p) : strlen(p);
+      if (len < sizeof(pair)) {
+        memcpy(pair, p, len);
+        pair[len] = '\0';
+        char *eq = strchr(pair, '=');
+        if (eq) {
+          *eq = '\0';
+          char *v = trim(eq + 1);
+          if (strcmp(trim(pair), "name") == 0 && wsValidName(v))
+            snprintf(m.releaseStage, sizeof(m.releaseStage), "dist/release/%s", v);
+        }
+      }
+      if (!comma) break;
+      p = comma + 1;
+    }
+  }
+
+  if (!wsValidateReleases(&m)) {
+    wsModelFree(&m);
+    return 1;
+  }
+
   char synthDir[MAX_PATH * 2];
   snprintf(synthDir, sizeof(synthDir), "%s/%s", wsDir, WORKSPACE_SYNTH_DIR);
   if (!wsSynthesize(&m, synthDir, wsName)) {
@@ -762,7 +1194,21 @@ int workspaceRun(const char *cmd, int jobs, const char *only) {
   profMark("workspace-parse+synth");
 
   unsigned char needed[WS_MAX_PROJECTS] = {0};
-  if (only && *only) {
+  if (releaseOnly) {
+    /* Mode release: bangun proyek sumber tiap release terpilih +
+       closure-nya (depends_on + library + pack.files berpath). */
+    for (int i = 0; i < m.releaseCount; i++) {
+      if (!relNeeded[i]) continue;
+      int target = wsFindProject(&m, m.releases[i].name);
+      if (target < 0) continue;
+      unsigned char visiting[WS_MAX_PROJECTS] = {0};
+      if (!wsMarkNeeded(&m, target, needed, visiting)) {
+        wsModelFree(&m);
+        return 1;
+      }
+    }
+    wsExpandLibDeps(&m, needed);
+  } else if (only && *only) {
     int target = wsFindProject(&m, only);
     if (target < 0) {
       fprintf(stderr, "rbot: workspace: unknown project '%s'\n", only);
@@ -783,7 +1229,7 @@ int workspaceRun(const char *cmd, int jobs, const char *only) {
   }
 
   int rc = 0;
-  if (strcmp(cmd, "build") == 0) {
+  if (strcmp(cmd, "build") == 0 && !releaseOnly) {
     /* FASE 1 — library pass: tiap proyek mengkompilasi source-nya dan
        mengemas lib<name>.a/.so TANPA link binary. Proyek yang saling
        memakai library lintas-proyek (rupa <-> ruka) baru bisa link
@@ -796,15 +1242,46 @@ int workspaceRun(const char *cmd, int jobs, const char *only) {
     }
   }
 
-  /* FASE 2 — binary pass (atau command selain build): link binary dengan
-     seluruh library lintas-proyek yang kini sudah ada. */
-  for (int i = 0; rc == 0 && i < m.order.count; i++) {
-    int idx = wsFindProject(&m, m.order.items[i]);
-    if (idx < 0 || !needed[idx]) continue;
-    int one = wsExecOne(&m, m.order.items[i], cmd, jobs, wsDir, false);
-    if (one != 0) {
-      rc = one;
-      if (strcmp(cmd, "build") == 0) break; /* gagal: hentikan rantai */
+  if (strcmp(cmd, "build") == 0) {
+    /* FASE 2 — binary pass: link binary dengan seluruh library lintas-
+       proyek yang kini sudah ada (command selain build tidak lewat sini). */
+    for (int i = 0; rc == 0 && i < m.order.count; i++) {
+      int idx = wsFindProject(&m, m.order.items[i]);
+      if (idx < 0 || !needed[idx]) continue;
+      rc = wsExecOne(&m, m.order.items[i], cmd, jobs, wsDir, false);
+      if (rc != 0) break; /* gagal: hentikan rantai */
+    }
+  } else {
+    /* clean: satu pass cukup (binary pass), tanpa fase library. */
+    for (int i = 0; rc == 0 && i < m.order.count; i++) {
+      int idx = wsFindProject(&m, m.order.items[i]);
+      if (idx < 0 || !needed[idx]) continue;
+      rc = wsExecOne(&m, m.order.items[i], cmd, jobs, wsDir, false);
+    }
+  }
+
+  /* FASE 3 — release pass: pack tiap release pada root workspace, output
+     ke dist/release (workspace penuh) atau dist/release/<name> (selektif).
+     packRunAt memakai Buildfile sintesis yang sama — blok release di
+     dalamnya menimpa pack.* proyek. */
+  if (rc == 0 && strcmp(cmd, "build") == 0) {
+    for (int i = 0; i < m.releaseCount && rc == 0; i++) {
+      const WsRelease *r = &m.releases[i];
+      if (releaseOnly) {
+        if (!relNeeded[i]) continue;
+      } else if (only && *only) {
+        /* Build selektif: hanya release milik proyek yang diminta — proyek
+           lain dalam closure hanyalah dependensi build, bukan target
+           release (design/release.md §9). `-w rupa` me-release rupa saja,
+           meski ruka ikut dibangun sebagai peer library. */
+        if (strcmp(r->name, only) != 0) continue;
+      } else {
+        int owner = wsFindProject(&m, r->name);
+        if (owner < 0 || !needed[owner]) continue;
+      }
+      printf("\n> Release    : %s (project %s%s%s)\n", r->alias, r->name,
+             r->target[0] ? ", target " : "", r->target);
+      rc = wsReleaseOne(&m, i, jobs, wsDir);
     }
   }
 

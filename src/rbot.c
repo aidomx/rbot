@@ -35,6 +35,9 @@ const char *rbotVersion(void) {
    tertimpa oleh hasil konversi. */
 #define XF_TMP "Buildfile.xf.tmp"
 
+/* Kapasitas gabungan pasangan selektor release setelah `--`. */
+#define WS_SEL_MAX 1024
+
 /* ---------- Opsi CLI: -jN / -j / --jobs=N ---------- */
 
 static bool parseJobsArg(const char *inlineVal, bool hasInline, int *outJobs, const char **err) {
@@ -84,6 +87,7 @@ int rbotRun(int argc, const char *argv[]) {
   bool haveF = false;        /* true bila -f diberikan secara eksplisit */
   bool wantWorkspace = false; /* -w: paksa mode workspace */
   const char *wsOnly = NULL;  /* -w <nama>: hanya proyek itu */
+  const char *wsRelSel = NULL; /* -w release -- key=value: selektor release */
 
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
@@ -100,7 +104,7 @@ int rbotRun(int argc, const char *argv[]) {
       if (i + 1 < argc && argv[i + 1][0] && argv[i + 1][0] != '-' &&
           strcmp(argv[i + 1], "build") != 0 && strcmp(argv[i + 1], "clean") != 0 &&
           strcmp(argv[i + 1], "init") != 0 && strcmp(argv[i + 1], "help") != 0 &&
-          strcmp(argv[i + 1], "version") != 0)
+          strcmp(argv[i + 1], "version") != 0 && strcmp(argv[i + 1], "release") != 0)
         wsOnly = argv[++i];
       continue;
     }
@@ -149,6 +153,34 @@ int rbotRun(int argc, const char *argv[]) {
         fprintf(stderr, "rbot: invalid job count '%s'\n", err ? err : a + 7);
         return 2;
       }
+      continue;
+    }
+
+    /* `-- key=value ...`: release via CLI (design/release.md). SEMUA
+       token setelah -- dikonsumsi dan digabung dengan koma — dipisah
+       shell jadi argv terpisah, jadi ini tidak mengubah konfigurasi
+       Buildfile.ws: `rbot -w release -- name=rupa target=deb` =>
+       "name=rupa,target=deb". Diterima sebelum/sesudah command. */
+    if (strcmp(a, "--") == 0) {
+      if (i + 1 >= argc || !argv[i + 1][0]) {
+        fprintf(stderr, "rbot: -- requires key=value (mis. name=rupa)\n");
+        return 2;
+      }
+      char sel[WS_SEL_MAX];
+      size_t off = 0;
+      sel[0] = '\0';
+      while (i + 1 < argc && argv[i + 1][0]) {
+        const char *tok = argv[++i];
+        size_t tl = strlen(tok);
+        if (off + tl + 2 >= sizeof(sel)) {
+          fprintf(stderr, "rbot: --: terlalu banyak pasangan key=value\n");
+          return 2;
+        }
+        if (off) sel[off++] = ',';
+        memcpy(sel + off, tok, tl + 1);
+        off += tl;
+      }
+      wsRelSel = sel[0] ? strdup(sel) : NULL;
       continue;
     }
 
@@ -226,11 +258,27 @@ int rbotRun(int argc, const char *argv[]) {
   if (wantWorkspace || (wsAuto)) {
     if (cmd && *cmd && strcmp(cmd, "init") == 0)
       return cmdInitWorkspace(haveF ? buildfile : WORKSPACE_FILENAME);
-    if (cmd && *cmd && strcmp(cmd, "clean") != 0) {
-      fprintf(stderr, "rbot: command '%s' tidak berlaku di mode workspace (pakai build/clean)\n", cmd);
+    if (cmd && *cmd && strcmp(cmd, "build") != 0 && strcmp(cmd, "clean") != 0 &&
+        strcmp(cmd, "release") != 0) {
+      fprintf(stderr, "rbot: command '%s' tidak berlaku di mode workspace (pakai build/clean/release)\n",
+              cmd);
       return 2;
     }
-    return workspaceRun(cmd && *cmd ? cmd : "build", jobs, wsOnly);
+    /* `rbot -w release -- name=rupa`: command release + selektor --.
+       Selektor tanpa command release juga sah (default build + release
+       selektif). */
+    if (wsRelSel && cmd && *cmd && strcmp(cmd, "release") != 0) {
+      fprintf(stderr, "rbot: -- <key=value> hanya berlaku untuk release (pakai 'rbot -w release -- ...')\n");
+      return 2;
+    }
+    if (cmd && *cmd && strcmp(cmd, "release") == 0 && !wsRelSel) {
+      fprintf(stderr, "rbot: release memerlukan selektor (pakai 'rbot -w release -- name=rupa')\n");
+      return 2;
+    }
+    /* `release` = build selektif + kemas release yang cocok; di workspace
+       command ini berjalan sebagai build dengan selektor aktif. */
+    const char *wsCmd = (cmd && *cmd && strcmp(cmd, "release") == 0) ? "build" : (cmd && *cmd ? cmd : "build");
+    return workspaceRun(wsCmd, jobs, wsOnly, wsRelSel);
   }
 
   int rc;

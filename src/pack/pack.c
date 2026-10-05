@@ -175,6 +175,12 @@ static bool packChecksumApply(const Config *c, const char *artifactPath) {
 
 /* ---- packRun ---- */
 
+bool packRunAt(const Config *c) {
+  /* Tidak ada fast state terpisah untuk fase release: freshness kemasan
+     sudah divalidasi lewat mtime input di packRun (mekanisme standar). */
+  return packRun(c);
+}
+
 bool packRun(const Config *c) {
   if (!c->pack.requested) return true;
 

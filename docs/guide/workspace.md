@@ -34,6 +34,14 @@ rbot -w rupa
 
 Build a named project and the dependencies needed by it.
 
+```bash
+rbot -w release -- name=rupa
+cd ../ruka && rbot -w clean
+```
+
+Release a single project (see [Releases](releases.md)); `clean` works per
+project root like build.
+
 ## Dependencies
 
 A project can declare another workspace project as a dependency:
@@ -54,3 +62,18 @@ The important model is:
 2. link the final binaries once their library dependencies exist.
 
 This avoids forcing users to manually orchestrate intermediate library builds.
+
+Cross-project library references (`<n>.library.<os> = <project>`) resolve to
+the other project's library artifact. Cyclic references (`rupa <-> ruka`) are
+allowed: the two-phase build resolves them, and selective builds pull the
+referenced projects transitively.
+
+Packaging a project's files can reference another project's build outputs;
+such path references become build dependencies automatically.
+
+## Releases
+
+A workspace can also declare distribution units — see
+[Releases](releases.md). In short: `releases = ...` names the projects whose
+artifacts get packaged into the workspace-level `dist/release/`, and
+`rbot -w release -- name=<project>` packages a release straight from the CLI.
