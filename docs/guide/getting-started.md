@@ -82,7 +82,7 @@ The project version lives in `.rbot-version` at the project root and is
 embedded into the binary at build time:
 
 ```bash
-printf 'v0.1.8\n' > .rbot-version
+printf 'v0.2.0\n' > .rbot-version
 rbot
 rbot version
 ```

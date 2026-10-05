@@ -26,7 +26,7 @@ const char *rbotVersion(void) {
 #ifdef RBOT_VERSION_EMBEDDED
   return RBOT_VERSION_EMBEDDED;
 #else
-  return "v0.1.8";
+  return "v0.2.0";
 #endif
 }
 

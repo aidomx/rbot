@@ -25,7 +25,7 @@ $ErrorActionPreference = "Stop"
 $GitHubUser = "aidomx"
 $RepoName   = "rbot"
 $Branch     = "main"
-$Version    = "v0.1.8"   # fallback terakhir; ditimpa oleh --version / RBOT_VERSION / .rbot-version
+$Version    = "v0.2.0"   # fallback terakhir; ditimpa oleh --version / RBOT_VERSION / .rbot-version
 
 # ---------------------------------------------------------------------------
 # Helper umum

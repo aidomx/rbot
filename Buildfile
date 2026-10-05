@@ -34,7 +34,7 @@ o.buildDir = build
 o.compileCommands = auto 
 
 pack.name = rbot
-pack.version = 0.2.0
+pack.version = 0.2.1
 pack.output = dist/{name}-v{version}.tar.gz
 
 pack.files = bin/rbot:bin/rbot, README.md:share/rbot/README.md, LICENSE:share/rbot/LICENSE

@@ -22,7 +22,7 @@ set -eu
 GITHUB_USER="aidomx"
 REPO_NAME="rbot"
 BRANCH="main"
-VERSION="v0.1.8"   # fallback terakhir; ditimpa oleh --version / RBOT_VERSION / .rbot-version
+VERSION="v0.2.0"   # fallback terakhir; ditimpa oleh --version / RBOT_VERSION / .rbot-version
 
 # Nama asset di GitHub Releases (harus persis sama dengan yang
 # di-upload oleh .github/workflows/release.yml).
