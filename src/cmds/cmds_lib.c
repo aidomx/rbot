@@ -39,7 +39,7 @@ bool cmdsPackAfterBinary(const Config *c, bool *fastStateSaved, const List *srcs
     return true;
   }
   if (!packRun(c)) return false; /* gagal kemasan: state tidak direkam */
-  cmdsFastStateSave(c, srcs, target, buildfilePath);
+  cmdsFastStateSave(c, srcs, target, buildfilePath, false);
   *fastStateSaved = true;
   return true;
 }
@@ -291,7 +291,11 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
         strcat(cmd, ".lib");
       }
     } else {
-      snprintf(cmd, n, "%s -shared", c->cc);
+      /* Driver C (mis. compiler = gcc eksplisit) tetap harus bisa me-link
+         object C++: tambahkan -lstdc++ saat proyek berbahasa C++. */
+      snprintf(cmd, n, c->langCpp && !compilerIsCppDriver(c) ? "%s -shared -lstdc++"
+                                                             : "%s -shared",
+               c->cc);
       for (int i = 0; i < objs.count; i++) {
         strcat(cmd, " ");
         strcat(cmd, objs.items[i]);

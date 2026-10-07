@@ -36,6 +36,7 @@
 #   ./bench/workspace.sh                  # default: 80 source/proyek, 5 run
 #   ./bench/workspace.sh -n 30 -r 2       # cepat
 #   ./bench/workspace.sh -s mod,leaf      # subset skenario
+#   ./bench/workspace.sh -t rbot,ninja    # subset tool (default: rbot,ninja,make)
 #   ./bench/workspace.sh -a "--foo"       # argumen tambahan untuk rbot
 #   ./bench/workspace.sh -c "gcc, clang"  # compiler di Buildfile.ws
 #   ./bench/workspace.sh -d 1.1           # jeda detik antara build & edit berikutnya
@@ -59,27 +60,34 @@ RBOT_ARGS=""    # -a : argumen tambahan untuk rbot
 COMPILERS="gcc" # -c : nilai 'compiler =' di Buildfile.ws
 KEEP=0          # -k : jangan hapus workspace di akhir
 ONLY=""         # -s : subset skenario
+TOOLS_OPT="rbot,ninja,make"  # -t : subset tool pembanding
 OUTDIR=""       # -o : direktori kerja (default ws.tmp di cwd)
 NPROC=$(nproc 2>/dev/null || echo 4)
 MUT_DELAY=0     # -d : jeda (detik) sebelum tiap edit; 0 = langsung
 
 usage() { sed -n '2,/^# ====.*$/p' "$0"; exit 0; }
-while getopts "n:H:m:r:b:a:c:d:ko:s:h" opt; do
+while getopts "n:H:m:r:b:a:c:d:ko:s:t:h" opt; do
   case $opt in
     n) NSRC=$OPTARG ;;   H) NHEAD=$OPTARG ;;  m) NMOD=$OPTARG ;;
     r) NRUN=$OPTARG ;;   b) RBOT=$OPTARG ;;   a) RBOT_ARGS=$OPTARG ;;
     c) COMPILERS=$OPTARG ;;  k) KEEP=1 ;;     o) OUTDIR=$OPTARG ;;
-    s) ONLY=$OPTARG ;;   d) MUT_DELAY=$OPTARG ;;   *) usage ;;
+    s) ONLY=$OPTARG ;;   t) TOOLS_OPT=$OPTARG ;;   d) MUT_DELAY=$OPTARG ;;   *) usage ;;
   esac
 done
 
 [ -x "$RBOT" ] || { echo "rbot tidak ditemukan/dieksekusi: $RBOT" >&2; exit 1; }
 RBOT=$(cd "$(dirname "$RBOT")" && pwd)/$(basename "$RBOT")
-for t in ninja make gcc tar; do
+IFS=, read -r -a TOOLS <<<"$TOOLS_OPT"
+for t in "${TOOLS[@]}"; do
+  case $t in
+    rbot|ninja|make) ;;
+    *) echo "tool tidak dikenal: $t (pilihan: rbot, ninja, make)" >&2; exit 1 ;;
+  esac
+done
+for t in gcc tar $(printf '%s\n' "${TOOLS[@]}" | grep -vx rbot); do
   command -v "$t" >/dev/null 2>&1 || { echo "tool wajib tidak ada: $t" >&2; exit 1; }
 done
 
-TOOLS=(rbot ninja make)
 HAVE_STRACE=0
 command -v strace >/dev/null 2>&1 && HAVE_STRACE=1
 label_of() { echo "$1"; }
@@ -87,16 +95,38 @@ label_of() { echo "$1"; }
 # ---------------------------- versi ----------------------------------------
 first_ver() { grep -oE '[0-9]+(\.[0-9]+)+' | head -1; }
 rbot_id() {
-  local d c h
-  d=$(dirname "$RBOT")
-  c=$(git -C "$d" describe --always --dirty 2>/dev/null)
-  h=$(sha1sum "$RBOT" 2>/dev/null | cut -c1-6)
-  echo "dev git:${c:-n/a} bin:${h:-n/a}"
+    local d c h v_bin
+    d=$(dirname "$RBOT")
+
+    # 1. PRIORITAS: Cek apakah ini persis di Git Tag (Release Resmi)
+    c=$(git -C "$d" describe --tags --exact-match 2>/dev/null)
+    if [ -n "$c" ]; then
+        c="release ${c}"
+    else
+        # 2. FALLBACK 1: Build Development (ada commit setelah tag, atau dirty)
+        c=$(git -C "$d" describe --tags --always --dirty 2>/dev/null)
+        if [ -n "$c" ]; then
+            c="dev git:${c}"
+        else
+            # 3. FALLBACK 2: Binary sudah di-install (tidak ada folder .git)
+            # Coba ambil versi dari output binary itu sendiri, atau dari strings
+            v_bin=$($RBOT version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+            if [ -z "$v_bin" ]; then
+                v_bin=$(strings "$RBOT" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+            fi
+            c="release ${v_bin:-unknown}"
+        fi
+    fi
+
+    # Hash unik untuk file binary (tetap berguna untuk melacak build yang sama)
+    h=$(sha1sum "$RBOT" 2>/dev/null | cut -c1-6)
+
+    echo "${c} bin:${h:-n/a}"
 }
 declare -A VER
 VER_GCC=$(gcc -dumpfullversion 2>/dev/null || gcc -dumpversion 2>/dev/null)
-VER[ninja]=$(ninja --version 2>&1 | first_ver)
-VER[make]=$(make --version 2>&1 | first_ver)
+command -v ninja >/dev/null 2>&1 && VER[ninja]=$(ninja --version 2>&1 | first_ver)
+command -v make >/dev/null 2>&1 && VER[make]=$(make --version 2>&1 | first_ver)
 VER[rbot]=$(rbot_id)
 
 # ---------------------------- direktori kerja ------------------------------

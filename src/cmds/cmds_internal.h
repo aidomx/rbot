@@ -79,11 +79,15 @@ void cmdsFingerprintSave(const CmdsBuildFingerprint *fp);
 void cmdsFingerprintInvalidate(void);
 
 /* Fast no-op: true bila state build terakhir masih persis sama — summary
-   diulang dari cache dan build dilewati sepenuhnya. */
-bool cmdsFastStateValid(const char *buildfilePath);
+   diulang dari cache dan build dilewati sepenuhnya. libOnly memilih file
+   state fase library (.rbot/build.lib.state); fase binary memakai
+   .rbot/build.state. */
+bool cmdsFastStateValid(const char *buildfilePath, bool libOnly);
 
-/* Rekam state build sukses (mtime+size seluruh input) untuk fast no-op. */
+/* Rekam state build sukses (mtime+size seluruh input) untuk fast no-op.
+   target = "" (fase library tanpa library) direkam sebagai "-" — validasi
+   murni dari stamp input + object. */
 void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
-                       const char *buildfilePath);
+                       const char *buildfilePath, bool libOnly);
 
 #endif /* RBOT_V0_1_0_CMDS_INTERNAL_H */

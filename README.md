@@ -1,194 +1,121 @@
 <div align="center">
-  <img src="rbot_logo.webp" alt="rbot logo" width="auto" height="auto">
+ <img src="rbot_logo.webp" alt="rbot logo" width="auto" height="auto">
 </div>
 
 # rbot
-
 **A simple builder for you.**
 
-rbot is a simple build tool for C projects, driven by a declarative
-`Buildfile`. No Makefile or CMake project is required — define the project
-once and let rbot handle compilation, dependencies, libraries, workspace
-projects, embedded assets, packaging, and releases.
+`rbot` is a simple build tool for C projects, driven by a declarative `Buildfile`. No Makefile or CMake project is required — define the project once and let rbot handle compilation, dependencies, libraries, workspace projects, embedded assets, packaging, and releases.
 
 Cross-platform: Linux, macOS, and Windows (MSVC + MinGW).
 
-Full documentation lives in [docs/](./docs/README.md): guides
-([getting started](./docs/guide/getting-started.md),
-[Buildfile](./docs/guide/buildfile.md),
-[workspace](./docs/guide/workspace.md),
-[releases](./docs/guide/releases.md),
-[packaging](./docs/guide/packaging.md)) and references
-([CLI](./docs/reference/cli.md),
-[Buildfile fields](./docs/reference/buildfile-fields.md)).
+Full documentation lives in [docs/](./docs/README.md): guides ([getting started](./docs/guide/getting-started.md), [Buildfile](./docs/guide/buildfile.md), [workspace](./docs/guide/workspace.md), [releases](./docs/guide/releases.md), [packaging](./docs/guide/packaging.md)) and references ([CLI](./docs/reference/cli.md), [Buildfile fields](./docs/reference/buildfile-fields.md)).
 
-## Instalasi
+## Installation
 
 ### Linux/macOS
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh
 ```
-
 The script installs the prebuilt `rbot` binary from the repository.
 
 ### Bootstrap from source
-
 ```bash
 ./install.sh --dev
 ```
-
-Requires a C compiler such as `gcc` or `clang`. The resulting binary is
-`build/bin/rbot`.
+Requires a C compiler such as `gcc` or `clang`. The resulting binary is `build/bin/rbot`.
 
 ### Windows
-
 From a source tree, use MSVC (`cl.exe`) or MinGW (`gcc`) without CMake:
-
 ```powershell
 .\install.ps1 --dev
 ```
-
 The resulting binary is `build\bin\rbot.exe`.
 
-## Pemakaian
-
+## Usage
 ```bash
-rbot            # build project dari Buildfile
-rbot -f FILE    # gunakan Buildfile lain
-rbot init       # buat Buildfile baru
-rbot init -w    # buat Buildfile.ws baru
-rbot -w         # build semua project dalam workspace
-rbot -w NAME    # build project NAME dan dependency-nya
-rbot -w release -- name=NAME    # release satu project via CLI
-rbot clean      # bersihkan hasil build
-rbot version    # tampilkan versi rbot
-rbot help       # tampilkan bantuan
+rbot            # build project from Buildfile
+rbot -f FILE    # use a different Buildfile
+rbot init       # create a new Buildfile
+rbot init -w    # create a new Buildfile.ws
+rbot -w         # build all projects in the workspace
+rbot -w NAME    # build project NAME and its dependencies
+rbot -w release -- name=NAME    # release a single project via CLI
+rbot clean      # clean build artifacts
+rbot version    # display rbot version
+rbot help       # display help
 ```
-
-Tanpa argumen, rbot mencari `Buildfile`. Di root workspace, `Buildfile.ws`
-dapat digunakan untuk mengelola beberapa project.
+Without arguments, `rbot` looks for a `Buildfile`. At the workspace root, `Buildfile.ws` can be used to manage multiple projects.
 
 ## Buildfile
-
-Proyek standar — folder `src/` (dan opsional `include/`) — cukup satu
-baris; sisanya mengikuti konvensi rbot:
-
+For a standard project — a `src/` folder (and an optional `include/` folder) — a single line is enough; the rest follows rbot conventions:
 ```text
 use project
 ```
-
-Konvensi default: `sources = src`, `headers = include` (bila foldernya
-ada), nama binary = nama folder proyek, `std = gnu11`, output di `bin/`
-dan `build/`. Proyek non-standard tetap bebas mendeklarasikan semuanya —
-field eksplisit selalu menimpa konvensi:
-
+Default conventions: `sources = src`, `headers = include` (if the folder exists), binary name = project folder name, `std = gnu11`, output in `bin/` and `build/`. C++ projects need no extra declaration: when sources contain `.cpp`, `std` defaults to `c++17` and the toolchain switches to `g++`/`clang++` automatically. Non-standard projects are still free to declare everything explicitly — explicit fields always override conventions:
 ```text
 use alias
-
 clean as c
 output as o
-
 root = .
 sources = src
 headers = include, I.
 flags = Wall, Wextra, O2, MMD, MP
 std = gnu11
 compiler = gcc, clang
-
 o.binaryName = app
 o.binaryDir = bin
 o.buildDir = build
 o.compileCommands = auto
 ```
+The old Buildfile format is still supported. The complete list of fields and defaults is available at [docs/reference/buildfile-fields.md](./docs/reference/buildfile-fields.md).
 
-Format Buildfile lama tetap didukung. Daftar lengkap field dan default
-ada di [docs/reference/buildfile-fields.md](./docs/reference/buildfile-fields.md).
-
-## Workspace multi-project
-
-`Buildfile.ws` mengelola beberapa project sekaligus. Workspace minimal
-cukup mendaftar project-nya — tiap project mengikuti konvensi standar
-(folder `<nama>/` berisi `src/`), tanpa Buildfile sendiri:
-
+## Multi-project Workspace
+`Buildfile.ws` manages multiple projects at once. A minimal workspace just lists the projects — each project follows the standard convention (a `<name>/` folder containing `src/`), without needing its own Buildfile:
 ```text
 use workspace
-
 projects = rupamod, rupa, ruka
 ```
-
-Setting per project, dependency, dan referensi library antar project tetap
-bisa dideklarasikan untuk tata letak non-standard:
-
+Per-project settings, dependencies, and cross-project library references can still be declared for non-standard layouts:
 ```text
 projects.rupamod as mod
 projects.rupa as rupa
-
 ruka.depends_on = rupamod
 rukalib.linux = rupa
 rupalib.linux = ruka
 ```
-
-Perintah:
-
+Commands:
 ```bash
-rbot -w          # build + release semua project
-rbot -w rupa     # build rupa dan dependency-nya
-rbot -w clean    # bersihkan seluruh workspace
+rbot -w          # build + release all projects
+rbot -w rupa     # build rupa and its dependencies
+rbot -w clean    # clean the entire workspace
 ```
-
-rbot membangun workspace dalam dua fase — library pass membuat
-`lib<name>.a`/`.so` tanpa link, binary pass link binary final setelah semua
-library tersedia — sehingga dependency library silang (`rupa <-> ruka`)
-tetap bisa dibangun. Detail di
-[docs/guide/workspace.md](./docs/guide/workspace.md).
+rbot builds the workspace in two phases — the library pass creates `lib<name>.a`/`.so` without linking, and the binary pass links the final binaries after all libraries are available — so cross-library dependencies (`rupa <-> ruka`) can still be built. Details in [docs/guide/workspace.md](./docs/guide/workspace.md).
 
 ## Release
-
-Workspace memisahkan `projects` (unit build) dan `releases` (unit
-distribusi):
-
+The workspace separates `projects` (build units) and `releases` (distribution units):
 ```text
 releases = rupa, ruka
-
 releases.rupa as rrupa
 rrupa.name = rupa
 rrupa.target = deb
 ```
-
 ```bash
-rbot -w                          # build + release semua -> dist/release/
-rbot -w release -- name=rupa     # release satu project via CLI
+rbot -w                          # build + release all -> dist/release/
+rbot -w release -- name=rupa     # release a single project via CLI
 ```
+Releases can be fully triggered from the CLI without declaration in `Buildfile.ws`. Details in [docs/guide/releases.md](./docs/guide/releases.md).
 
-Release bisa dipicu penuh dari CLI tanpa deklarasi di `Buildfile.ws`.
-Detail di [docs/guide/releases.md](./docs/guide/releases.md).
+## Other Features
+- **Incremental build** — two-layer header tracking (mtime + content hash), dependency/fingerprint cache; see [docs/guide/incremental.md](./docs/guide/incremental.md).
+- **Parallel build** — `-j[N]`, defaults to the number of CPU cores.
+- **compile_commands.json** — `o.compileCommands = auto` for clangd; see [docs/reference/compdb.md](./docs/reference/compdb.md).
+- **Archive** — `archive.*` for archive-packaged projects; see [docs/guide/embedded-and-archives.md](./docs/guide/embedded-and-archives.md).
+- **Embedded files** — archives become binary objects and are embedded into binaries/libraries; see [docs/guide/embedded-and-archives.md](./docs/guide/embedded-and-archives.md).
+- **Packaging** — `pack.*`: tarball, `.deb` (file mapping, merging across projects, sha256 checksum); see [docs/guide/packaging.md](./docs/guide/packaging.md).
+- **Library output** — static + shared from the same objects (`output.libraryName`, `output.libraryShared`).
+- **build.ninja conversion** — `rbot -xf build.ninja` (temporary) or `-xcf` (kept); see [docs/reference/rbot-ninja-import.md](./docs/reference/rbot-ninja-import.md).
+- **Interrupt (Ctrl+C)** — SIGINT is forwarded to compiler jobs; a canceled build does not record a success snapshot. Details in [docs/reference/errors-and-interrupts.md](./docs/reference/errors-and-interrupts.md).
 
-## Fitur lain
-
-- **Incremental build** — header tracking dua lapis (mtime + hash konten),
-  cache dependency/fingerprint; lihat
-  [docs/guide/incremental.md](./docs/guide/incremental.md).
-- **Build paralel** — `-j[N]`, default sebanyak core CPU.
-- **compile_commands.json** — `o.compileCommands = auto` untuk clangd;
-  lihat [docs/reference/compdb.md](./docs/reference/compdb.md).
-- **Archive** — `archive.*` untuk project kemasan arsip; lihat
-  [docs/guide/embedded-and-archives.md](./docs/guide/embedded-and-archives.md).
-- **Embedded files** — archive menjadi object binary dan di-embed ke
-  binary/library; lihat
-  [docs/guide/embedded-and-archives.md](./docs/guide/embedded-and-archives.md).
-- **Packaging** — `pack.*`: tarball, `.deb` (mapping file, merge antar
-  project, checksum sha256); lihat
-  [docs/guide/packaging.md](./docs/guide/packaging.md).
-- **Library output** — static + shared dari object yang sama
-  (`output.libraryName`, `output.libraryShared`).
-- **Konversi build.ninja** — `rbot -xf build.ninja` (sementara) atau
-  `-xcf` (dipertahankan); lihat
-  [docs/reference/rbot-ninja-import.md](./docs/reference/rbot-ninja-import.md).
-- **Interrupt (Ctrl+C)** — SIGINT diteruskan ke job compiler; build yang
-  dibatalkan tidak merekam snapshot sukses. Detail di
-  [docs/reference/errors-and-interrupts.md](./docs/reference/errors-and-interrupts.md).
-
-## Lisensi
-
-MIT — lihat [LICENSE](./LICENSE).
+## License
+MIT — see [LICENSE](./LICENSE).

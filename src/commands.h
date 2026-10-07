@@ -19,6 +19,27 @@ int cmdInit(const char *buildfilePath);
  */
 int cmdInitWorkspace(const char *buildfilePath);
 
+/*
+ * `rbot init -p` — scaffold interaktif (implementasi di commands.c):
+ *   | Project name? [Enter for random name]
+ *   | language? [c, cpp] [Enter = c; cpp => src/main.cpp + std = c++17]
+ *   | std? / compiler? / flags? [Enter = default konvensi]
+ *   | Create include/? [y/N]
+ *   | Uses workspace? [y/N]
+ *     | Workspace projects? [Enter = app,tool]
+ *     | depends_on? (format: <proyek> depends <proyek>) [Enter = none]
+ *
+ * Simbol `|` pada prompt berwarna cyan bila stdout terminal; otomatis
+ * polos di pipe/CI atau saat NO_COLOR/RBOT_NO_COLOR/TERM=dumb.
+ * Nama selalu menjadi folder scaffold <nama>/: single-project berisi
+ * Buildfile + src/ (+ include/ bila diminta); proyek workspace tidak
+ * punya Buildfile sendiri (rbot mensintesisnya dari Buildfile.ws).
+ * Jawaban non-default ditulis eksplisit ke Buildfile; sisanya konvensi.
+ * Pra-cek overwrite: satu saja file target sudah ada => init dibatalkan
+ * tanpa menimpa apa pun. EOF di stdin => dibatalkan.
+ */
+int cmdInteractiveInit(void);
+
 /* jobs <= 0 berarti serial (1); >= 2 memicu kompilasi paralel -jN. */
 int cmdBuild(int jobs, const char *buildfilePath);
 

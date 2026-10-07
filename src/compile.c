@@ -7,8 +7,9 @@
 #include "portability.h"
 #include "util.h"
 
-/* Keluarga toolchain yang didukung */
-typedef enum { CC_GCC, CC_CLANG, CC_MSVC, CC_UNKNOWN } CompilerKind;
+/* Keluarga toolchain yang didukung. CC_GXX = driver C++ (berakhiran "++":
+   g++, clang++, c++, g++-13, dst.) — runtime C++ sudah di-link-nya. */
+typedef enum { CC_GCC, CC_GXX, CC_CLANG, CC_MSVC, CC_UNKNOWN } CompilerKind;
 
 static CompilerKind compilerKind(const char *cc) {
   const char *base = strrchr(cc, '/');
@@ -21,12 +22,21 @@ static CompilerKind compilerKind(const char *cc) {
   basebuf[bl] = '\0';
 
   if (strcmp(basebuf, "cl") == 0) return CC_MSVC;
-  if (strncmp(basebuf, "clang", 5) == 0) return CC_CLANG;
+  if (bl >= 2 && basebuf[bl - 2] == '+' && basebuf[bl - 1] == '+') return CC_GXX;
+  if (strncmp(basebuf, "clang", 5) == 0) return CC_CLANG; /* clang, clang-*, dst. */
   return CC_GCC; /* gcc, cc, mingw32-gcc, dst. */
 }
 
 bool compilerIsMSVC(const Config *c) {
   return compilerKind(c->cc) == CC_MSVC;
+}
+
+/* cc adalah driver C++ (g++/clang++/cl) — runtime C++ sudah di-link-nya.
+   Driver tak dikenal dianggap C-driver: -lstdc++ tetap ditambahkan
+   (tak berbahaya bila driver ternyata memang C++). */
+bool compilerIsCppDriver(const Config *c) {
+  CompilerKind k = compilerKind(c->cc);
+  return k == CC_GXX || k == CC_MSVC;
 }
 
 /*
@@ -56,13 +66,26 @@ char *targetFlags(const Config *c) {
 
 bool resolveCompiler(Config *c) {
   if (c->compilers.count == 0) {
+    /* Konvensi bahasa: proyek C++ (langCpp, diturunkan dari sources .cpp)
+       default ke driver C++; sisanya gcc/clang seperti biasa. */
 #ifdef _WIN32
-    listAdd(&c->compilers, "cl");
-    listAdd(&c->compilers, "gcc");
-    listAdd(&c->compilers, "clang");
+    if (c->langCpp) {
+      listAdd(&c->compilers, "cl");
+      listAdd(&c->compilers, "g++");
+      listAdd(&c->compilers, "clang++");
+    } else {
+      listAdd(&c->compilers, "cl");
+      listAdd(&c->compilers, "gcc");
+      listAdd(&c->compilers, "clang");
+    }
 #else
-    listAdd(&c->compilers, "gcc");
-    listAdd(&c->compilers, "clang");
+    if (c->langCpp) {
+      listAdd(&c->compilers, "g++");
+      listAdd(&c->compilers, "clang++");
+    } else {
+      listAdd(&c->compilers, "gcc");
+      listAdd(&c->compilers, "clang");
+    }
 #endif
   }
   for (int i = 0; i < c->compilers.count; i++) {
@@ -293,9 +316,18 @@ char *compileCmd(const Config *c, const char *inc, const char *wf, const char *s
   if (compilerKind(c->cc) == CC_MSVC) {
     /* MSVC (cl.exe): flag GNU diterjemahkan ke /I, /W4|/W3; gnu11/c11 ->
        /std:c11, c17 -> /std:c17; object -> /Fo<path>. Flag -D diteruskan
-       (MSVC menerima -DNAME juga). */
-    char msvcstd[16] = "c11";
-    if (strstr(c->std, "17"))
+       (MSVC menerima -DNAME juga). Proyek C++: /std:c++14 (std generik
+       tanpa "++"), /std:c++17, /std:c++20 ("2" di dalamnya), /std:c++latest. */
+    char msvcstd[16];
+    strcpy(msvcstd, c->langCpp ? "c++14" : "c11");
+    if (strstr(c->std, "++")) {
+      if (strstr(c->std, "latest"))
+        strcpy(msvcstd, "c++latest");
+      else if (strstr(c->std, "2"))
+        strcpy(msvcstd, "c++20");
+      else if (strstr(c->std, "17"))
+        strcpy(msvcstd, "c++17");
+    } else if (strstr(c->std, "17"))
       strcpy(msvcstd, "c17");
     else if (strstr(c->std, "2"))
       strcpy(msvcstd, "clatest");

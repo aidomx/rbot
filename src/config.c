@@ -16,6 +16,37 @@
 #include "portability.h"
 #include "util.h"
 
+/* true bila salah satu entri sources memuat source .cpp — dipakai untuk
+   default bahasa C++ (std, compiler, linker). Dipanggil SEBELUM
+   configFinalize menambahkan default "src", jadi di sini belum ada
+   sources sintetis. */
+static bool sourcesHaveCpp(const Config *c) {
+  for (int i = 0; i < c->sources.count; i++) {
+    const char *entry = c->sources.items[i];
+    size_t len = strlen(entry);
+    if (len >= 4 && strcmp(entry + len - 4, ".cpp") == 0) return true;
+    if (!fsDirExists(entry)) continue;
+    List dirs = {0}, files = {0};
+    fsListDir(entry, &dirs, &files);
+    bool found = false;
+    for (int f = 0; f < files.count && !found; f++) {
+      const char *path = files.items[f];
+      size_t fl = strlen(path);
+      if (fl >= 4 && strcmp(path + fl - 4, ".cpp") == 0) found = true;
+    }
+    for (int d = 0; d < dirs.count && !found; d++) {
+      List sub = {0};
+      walkDir(dirs.items[d], ".cpp", &sub);
+      if (sub.count > 0) found = true;
+      listFree(&sub);
+    }
+    listFree(&dirs);
+    listFree(&files);
+    if (found) return true;
+  }
+  return false;
+}
+
 /*
  * ==================== Alias (format "use alias") ====================
  *
@@ -29,7 +60,8 @@
 Config configDefaults(void) {
   Config c = {0};
   copyStr(c.root, sizeof(c.root), ".");
-  copyStr(c.std, sizeof(c.std), "gnu11");
+  /* c.std sengaja kosong: default bahasa (gnu11 / c++17) ditentukan
+     configFinalize setelah bahasa proyek diketahui (lihat langCpp). */
   c.binary = true;
   c.cleanBuildDir = true;
   c.cleanCompileCommands = false;
@@ -95,6 +127,21 @@ static void configFinalize(Config *c) {
   if (c->sources.count == 0) listAdd(&c->sources, "src");
   if (c->headerPublic.count == 0 && fsDirExists("include"))
     listAdd(&c->headerPublic, "include");
+
+  /* Deteksi bahasa C++ dari sources final (termasuk default "src" yang baru
+     diisi — proyek standar tanpa deklarasi pun terdeteksi). Proyek campuran
+     C/C++ ikut jalur C++ (runtime libstdc++ diselesaikan linker C++). */
+  c->langCpp = sourcesHaveCpp(c);
+
+  /* Konvensi bahasa C++: sources memuat .cpp -> std c++17 + toolchain C++
+     (g++/clang++), tanpa perlu menulis std/compiler di Buildfile.
+     Nilai eksplisit selalu menang — hanya mengisi yang kosong. */
+  if (!c->std[0]) copyStr(c->std, sizeof(c->std), c->langCpp ? "c++17" : "gnu11");
+  if (c->langCpp && c->compilers.count == 0) {
+    listAdd(&c->compilers, "g++");
+    listAdd(&c->compilers, "clang++");
+  }
+
   if (!c->outBinaryName[0]) {
     char cwd[MAX_PATH];
     if (fsGetCwd(cwd, sizeof(cwd))) {
@@ -235,6 +282,10 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       copyStr(e->archiveName, sizeof(e->archiveName), sub);
       copyStr(e->ext, sizeof(e->ext), "gz");
       listAdd(&e->excludes, ".git");
+      /* State/cache rbot bukan aset: tanpa exclude ini scan freshness
+         menganggap arsip basi setiap run (folder .rbot berubah) dan
+         tar diulang percuma — biaya no-op workspace membesar. */
+      listAdd(&e->excludes, ".rbot");
     }
 
     if (subsub && strcmp(subsub, "with") == 0) {
@@ -306,6 +357,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       copyStr(e->ext, sizeof(e->ext), "gz");
       copyStr(e->pattern, sizeof(e->pattern), "");
       listAdd(&e->excludes, ".git");
+      listAdd(&e->excludes, ".rbot"); /* state/cache rbot bukan aset */
     }
     EmbeddedEntry *e = &c->emb[0];
 

@@ -83,6 +83,10 @@ int cpuCount(void);
 /* Detik monotonic untuk pengukuran durasi build. */
 double monotonicSeconds(void);
 
+/* true bila stdout terhubung ke terminal (prompt interaktif & warna).
+   Aman di-pipe: false saat output dialihkan ke file/pipe. */
+bool termIsTTY(void);
+
 /* ==================== Filesystem ==================== */
 
 void fsMakeDir(const char *path); /* mkdir satu level, diam bila sudah ada */

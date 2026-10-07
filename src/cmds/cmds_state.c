@@ -19,6 +19,7 @@
 #include "../commands.h"
 #include "../compdb.h"
 #include "../compile.h"
+#include "../embed_ld_cache.h"
 #include "../portability.h"
 #include "../util.h"
 
@@ -51,6 +52,8 @@ static uint64_t fpList(uint64_t h, const List *list) {
 void cmdsFingerprintMake(const Config *c, const List *srcs, CmdsBuildFingerprint *fp) {
   fp->compile = 14695981039346656037ULL;
   fp->compile = fpString(fp->compile, c->cc);
+  /* std selalu terisi configFinalize sesuai bahasa (gnu11/c++17), jadi
+     peralihan bahasa proyek otomatis mengubah fingerprint compile. */
   fp->compile = fpString(fp->compile, c->std);
   fp->compile = fpString(fp->compile, c->target);
   fp->compile = fpString(fp->compile, c->outBuildDir);
@@ -115,8 +118,16 @@ void cmdsFingerprintSave(const CmdsBuildFingerprint *fp) {
 void cmdsFingerprintInvalidate(void) { fsRemoveFile(BUILD_FP_FILE); }
 
 /* ==================== Fast no-op snapshot ==================== */
+/* Dua file state per fase build:
+   - build.state     : fase binary (rbot / -w fase 2) — target = binary.
+   - build.lib.state : fase library workspace (cmdBuildEx libOnly) —
+     target = library proyek (atau tanpa target bila proyek tak meminta
+     library; state-nya murni "semua input & object masih sama").
+   Dengan state fase library, no-op `rbot -w` tidak membayar loadConfig +
+   scan fingerprint + decide penuh per proyek (miniws: jalur ringan). */
 #define BUILD_STATE_FILE ".rbot/build.state"
-#define BUILD_STATE_MAGIC "RBOTFAST2"
+#define BUILD_STATE_FILE_LIB ".rbot/build.lib.state"
+#define BUILD_STATE_MAGIC "RBOTFAST3"
 
 typedef struct {
   char kind;
@@ -136,6 +147,7 @@ typedef struct {
   int compiled;
   int skipped;
   int count;
+  int phase; /* 0 = binary pass, 1 = library pass */
   FastStamp *stamps;
   /* Ringkasan library: no-op berikutnya tetap menampilkan status lib. */
   bool libRequested, libStaticUp, libSharedUp;
@@ -168,25 +180,30 @@ static void fastCollectTree(const char *dir, List *paths) {
   listFree(&files);
 }
 
-static bool fastStateLoad(FastState *s) {
+static const char *stateFileFor(bool libOnly) {
+  return libOnly ? BUILD_STATE_FILE_LIB : BUILD_STATE_FILE;
+}
+
+static bool fastStateLoad(FastState *s, bool libOnly) {
   memset(s, 0, sizeof(*s));
-  FILE *f = fopen(BUILD_STATE_FILE, "r");
+  FILE *f = fopen(stateFileFor(libOnly), "r");
   if (!f) return false;
   char magic[32];
   long long bfm = 0, tm = 0;
-  int libReq = 0, libSt = 0, libSh = 0;
+  int libReq = 0, libSt = 0, libSh = 0, phase = 0;
   if (fscanf(f, "%31s", magic) != 1 || strcmp(magic, BUILD_STATE_MAGIC) != 0 ||
       fscanf(f,
-             "%1023s %1023s %lld %lld %2047s %lld %lld %d %d %d %d %d %d %2047s %2047s %lld %lld",
+             "%1023s %1023s %lld %lld %2047s %lld %lld %d %d %d %d %d %d %d %2047s %2047s %lld %lld",
              s->cwd, s->buildfile, &bfm, &s->buildfileSize, s->target, &tm, &s->targetSize,
-             &s->compiled, &s->skipped, &s->count, &libReq, &libSt, &libSh, s->libStaticPath,
-             s->libSharedPath, &s->libStaticSize, &s->libSharedSize) != 17 ||
+             &s->compiled, &s->skipped, &s->count, &phase, &libReq, &libSt, &libSh,
+             s->libStaticPath, s->libSharedPath, &s->libStaticSize, &s->libSharedSize) != 18 ||
       s->count < 0 || s->count > 200000) {
     fclose(f);
     return false;
   }
   s->buildfileMtime = (int64_t)bfm;
   s->targetMtime = (int64_t)tm;
+  s->phase = phase;
   s->libRequested = libReq != 0;
   s->libStaticUp = libSt != 0;
   s->libSharedUp = libSh != 0;
@@ -213,19 +230,35 @@ static bool fastStateLoad(FastState *s) {
   return true;
 }
 
-bool cmdsFastStateValid(const char *buildfilePath) {
+/* Placeholder "-" = target/varian library tidak aktif (path kosong tidak
+   bisa dibaca %s). Target "-" sah untuk state fase library proyek tanpa
+   library: validasi murni dari stamp input + object. */
+static bool fastTargetRecorded(const char *target) {
+  return target[0] && strcmp(target, "-") != 0;
+}
+
+bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
   FastState s;
-  if (!fastStateLoad(&s)) return false;
+  if (!fastStateLoad(&s, libOnly)) return false;
+  if (s.phase != (libOnly ? 1 : 0)) {
+    fastStateFree(&s);
+    return false;
+  }
   char cwd[MAX_PATH];
   int64_t buildfileMtime = -1, targetMtime = -1;
   long long buildfileSize = -1, targetSize = -1;
   bool buildfileStamp = fsStampNsSize(s.buildfile, &buildfileMtime, &buildfileSize);
-  bool targetStamp = fsStampNsSize(s.target, &targetMtime, &targetSize);
+  bool targetStamp = fastTargetRecorded(s.target)
+                         ? fsStampNsSize(s.target, &targetMtime, &targetSize)
+                         : true;
+  bool targetOk =
+      !fastTargetRecorded(s.target) || (targetStamp && targetMtime == s.targetMtime &&
+                                        targetSize == s.targetSize);
   bool ok =
       fsGetCwd(cwd, sizeof(cwd)) && strcmp(cwd, s.cwd) == 0 &&
       strcmp(buildfilePath && *buildfilePath ? buildfilePath : "Buildfile", s.buildfile) == 0 &&
       buildfileStamp && buildfileMtime == s.buildfileMtime && buildfileSize == s.buildfileSize &&
-      targetStamp && targetMtime == s.targetMtime && targetSize == s.targetSize;
+      targetOk;
   for (int i = 0; ok && i < s.count; i++) {
     FastStamp *st = &s.stamps[i];
     int64_t currentMtime = -1;
@@ -248,24 +281,45 @@ bool cmdsFastStateValid(const char *buildfilePath) {
     }
   }
   if (ok) {
-    printf("> Build with cached state (fingerprint unchanged)\n");
-    printf("> Linking   : %s (up-to-date)\n", s.target);
-    if (s.libRequested) {
-      if (s.libStaticPath[0])
-        printf("> Library   : %s%s\n", s.libStaticPath, s.libStaticUp ? " (up-to-date)" : "");
-      if (s.libSharedPath[0])
-        printf("> Library   : %s%s\n", s.libSharedPath, s.libSharedUp ? " (up-to-date)" : "");
+    if (s.phase == 1) {
+      /* Fase library: tidak ada link binary — lapor status library saja. */
+      if (s.libRequested) {
+        if (s.libStaticPath[0])
+          printf("> Library   : %s%s\n", s.libStaticPath, s.libStaticUp ? " (up-to-date)" : "");
+        if (s.libSharedPath[0])
+          printf("> Library   : %s%s\n", s.libSharedPath, s.libSharedUp ? " (up-to-date)" : "");
+      }
+    } else {
+      printf("> Build with cached state (fingerprint unchanged)\n");
+      printf("> Linking   : %s (up-to-date)\n", s.target);
+      if (s.libRequested) {
+        if (s.libStaticPath[0])
+          printf("> Library   : %s%s\n", s.libStaticPath, s.libStaticUp ? " (up-to-date)" : "");
+        if (s.libSharedPath[0])
+          printf("> Library   : %s%s\n", s.libSharedPath, s.libSharedUp ? " (up-to-date)" : "");
+      }
     }
     printf("\n> Summary\n");
-    printf("Target   : %s\n", s.target);
-    printf("Size     : %.1fKB\n", s.targetSize > 0 ? (double)s.targetSize / 1024.0 : 0);
-    if (s.libRequested) {
-      if (s.libStaticPath[0])
-        printf("Library  : %s (%.1fKB)\n", s.libStaticPath,
-               s.libStaticSize > 0 ? (double)s.libStaticSize / 1024.0 : 0);
-      if (s.libSharedPath[0])
-        printf("Library  : %s (%.1fKB)\n", s.libSharedPath,
-               s.libSharedSize > 0 ? (double)s.libSharedSize / 1024.0 : 0);
+    if (s.phase == 1) {
+      if (s.libRequested) {
+        if (s.libStaticPath[0])
+          printf("Library  : %s (%.1fKB)\n", s.libStaticPath,
+                 s.libStaticSize > 0 ? (double)s.libStaticSize / 1024.0 : 0);
+        if (s.libSharedPath[0])
+          printf("Library  : %s (%.1fKB)\n", s.libSharedPath,
+                 s.libSharedSize > 0 ? (double)s.libSharedSize / 1024.0 : 0);
+      }
+    } else {
+      printf("Target   : %s\n", s.target);
+      printf("Size     : %.1fKB\n", s.targetSize > 0 ? (double)s.targetSize / 1024.0 : 0);
+      if (s.libRequested) {
+        if (s.libStaticPath[0])
+          printf("Library  : %s (%.1fKB)\n", s.libStaticPath,
+                 s.libStaticSize > 0 ? (double)s.libStaticSize / 1024.0 : 0);
+        if (s.libSharedPath[0])
+          printf("Library  : %s (%.1fKB)\n", s.libSharedPath,
+                 s.libSharedSize > 0 ? (double)s.libSharedSize / 1024.0 : 0);
+      }
     }
     printf("Compiled : %d\n", s.compiled);
     printf("Skipped  : %d\n", s.skipped);
@@ -276,11 +330,12 @@ bool cmdsFastStateValid(const char *buildfilePath) {
 }
 
 void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
-                       const char *buildfilePath) {
+                       const char *buildfilePath, bool libOnly) {
+  const char *stateFile = stateFileFor(libOnly);
   /* Fast path hanya aman bila root build sama dengan cwd. Untuk root khusus,
      gunakan jalur normal sampai tersedia normalisasi path absolut. */
   if (strcmp(c->root, ".") != 0) {
-    fsRemoveFile(BUILD_STATE_FILE);
+    fsRemoveFile(stateFile);
     return;
   }
   char cwd[MAX_PATH];
@@ -288,11 +343,24 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   const char *bf = buildfilePath && *buildfilePath ? buildfilePath : "Buildfile";
   int64_t bfm = fsMTimeNs(bf);
   long long bfs = fsFileSize(bf);
-  int64_t tm = fsMTimeNs(target);
-  long long ts = fsFileSize(target);
-  if (bfm < 0 || tm < 0 || bfs < 0 || ts < 0) return;
+  /* Fase library proyek tanpa library tidak punya target: simpan "-" —
+     validasi murni dari stamp input + object (lihat fastTargetRecorded). */
+  char targetBuf[MAX_PATH * 2];
+  const char *tgt = target;
+  if (!tgt || !tgt[0]) {
+    copyStr(targetBuf, sizeof(targetBuf), "-");
+    tgt = targetBuf;
+  }
+  int64_t tm = 0;
+  long long ts = 0;
+  if (fastTargetRecorded(tgt)) {
+    tm = fsMTimeNs(tgt);
+    ts = fsFileSize(tgt);
+    if (tm < 0 || ts < 0) return;
+  }
+  if (bfm < 0 || bfs < 0) return;
   /* Format cache is whitespace-delimited; disable it for paths with spaces. */
-  if (strpbrk(cwd, " \t\r\n") || strpbrk(bf, " \t\r\n") || strpbrk(target, " \t\r\n")) return;
+  if (strpbrk(cwd, " \t\r\n") || strpbrk(bf, " \t\r\n") || strpbrk(tgt, " \t\r\n")) return;
 
   /* Library: status up-to-date saat build sukses selesai — ditampilkan
      lagi pada no-op berikutnya (dulu informasi ini hilang di fast path). */
@@ -340,9 +408,11 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     fastStampAdd(&paths, c->emb[i].objectPath);
     /* embedded.<n>.file adalah input eksternal proyek ini. Tanpa dicatat
        di fast-state, perubahan archive dapat terlewat sebelum cmdBuild()
-       sempat menjalankan fase embed/link normal. */
-    if (c->emb[i].usePrebuilt && c->emb[i].archivePath[0])
-      fastStampAdd(&paths, c->emb[i].archivePath);
+       sempat menjalankan fase embed/link normal. Arsip yang DIHASILKAN
+       (generate) juga dicatat: walkDir koleksi source proyek (jalur
+       commands.c) tidak menyentuh folder archiveDir, jadi tanpa ini
+       perubahan archive tidak membatalkan fast path. */
+    if (c->emb[i].archivePath[0]) fastStampAdd(&paths, c->emb[i].archivePath);
   }
   /* Library masuk stamp seperti file biasa ('F'): berubah -> fast path
      batal dan jalur normal meng-rebuild varian yang perlu (per-varian). */
@@ -382,14 +452,16 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   }
   listFree(&paths);
   mkdirs(".rbot");
-  FILE *f = fopen(BUILD_STATE_FILE ".tmp", "w");
+  char stateTmp[MAX_PATH + 16];
+  snprintf(stateTmp, sizeof(stateTmp), "%s.tmp", stateFile);
+  FILE *f = fopen(stateTmp, "w");
   if (!f) {
     free(stamps);
     return;
   }
-  fprintf(f, "%s\n%s %s %lld %lld %s %lld %lld %d %d %d %d %d %d %s %s %lld %lld\n",
-          BUILD_STATE_MAGIC, cwd, bf, (long long)bfm, bfs, target, (long long)tm, ts, 0,
-          srcs->count, count, c->libRequested ? 1 : 0, staticUp ? 1 : 0, sharedUp ? 1 : 0,
+  fprintf(f, "%s\n%s %s %lld %lld %s %lld %lld %d %d %d %d %d %d %d %s %s %lld %lld\n",
+          BUILD_STATE_MAGIC, cwd, bf, (long long)bfm, bfs, tgt, (long long)tm, ts, 0, srcs->count,
+          count, libOnly ? 1 : 0, c->libRequested ? 1 : 0, staticUp ? 1 : 0, sharedUp ? 1 : 0,
           staticLib[0] ? staticLib : "-", sharedLib[0] ? sharedLib : "-", staticSz, sharedSz);
   for (int i = 0; i < count; i++)
     fprintf(f, "%c %lld %lld %s\n", stamps[i].kind, (long long)stamps[i].mtime, stamps[i].size,
@@ -398,12 +470,11 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   free(stamps);
   if (ok) {
 #ifdef _WIN32
-    fsRemoveFile(BUILD_STATE_FILE);
+    fsRemoveFile(stateFile);
 #endif
-    if (rename(BUILD_STATE_FILE ".tmp", BUILD_STATE_FILE) != 0)
-      fsRemoveFile(BUILD_STATE_FILE ".tmp");
+    if (rename(stateTmp, stateFile) != 0) fsRemoveFile(stateTmp);
   } else
-    fsRemoveFile(BUILD_STATE_FILE ".tmp");
+    fsRemoveFile(stateTmp);
 }
 
 /* ==================== clean ==================== */
@@ -450,6 +521,26 @@ int cmdClean(const char *buildfilePath) {
   if (fsFileExists(".rbot/deps.cache")) {
     fsRemoveFile(".rbot/deps.cache");
     printf("> Removed   : .rbot/deps.cache\n");
+    any = true;
+  }
+  /* State fast no-op kedua fase (binary & library) ikut dibuang. */
+  if (fsFileExists(BUILD_STATE_FILE)) {
+    fsRemoveFile(BUILD_STATE_FILE);
+    printf("> Removed   : %s\n", BUILD_STATE_FILE);
+    any = true;
+  }
+  if (fsFileExists(BUILD_STATE_FILE_LIB)) {
+    fsRemoveFile(BUILD_STATE_FILE_LIB);
+    printf("> Removed   : %s\n", BUILD_STATE_FILE_LIB);
+    any = true;
+  }
+  /* Cache verdict deteksi GNU ld (.rbot/ld.cache) ikut dibuang: clean
+     berarti mulai dari nol, run berikutnya mem-probe ulang `ld --version`
+     sekali lalu merekamnya lagi. */
+  const char *ldCache = ldCacheFile(); /* satu sumber nama file: embed_ld_cache */
+  if (fsFileExists(ldCache)) {
+    fsRemoveFile(ldCache);
+    printf("> Removed   : %s\n", ldCache);
     any = true;
   }
   /* Staging packaging (.rbot/pack) adalah cache — artefak final di dist/

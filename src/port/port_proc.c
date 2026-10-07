@@ -259,6 +259,8 @@ void procStopAll(ProcHandle *handles, int count) {
   }
 }
 
+bool termIsTTY(void) { return _isatty(_fileno(stdout)) != 0; }
+
 double monotonicSeconds(void) {
   LARGE_INTEGER freq, counter;
   if (!QueryPerformanceFrequency(&freq) || !QueryPerformanceCounter(&counter)) return 0.0;
@@ -274,6 +276,8 @@ int cpuCount(void) {
 #else /* !_WIN32 */
 
 /* ========== POSIX: Proses ========== */
+
+bool termIsTTY(void) { return isatty(1) == 1; }
 
 bool probeAvailable(const char *exe) {
   if (!exe || !*exe) return false;

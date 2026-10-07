@@ -107,11 +107,33 @@ label_of() {
 # ---------------------------- versi tool -----------------------------------
 first_ver() { grep -oE '[0-9]+(\.[0-9]+)+' | head -1; }
 rbot_id() {
-  local d c h
-  d=$(dirname "$RBOT")
-  c=$(git -C "$d" describe --always --dirty 2>/dev/null)
-  h=$(sha1sum "$RBOT" 2>/dev/null | cut -c1-6)
-  echo "dev git:${c:-n/a} bin:${h:-n/a}"
+    local d c h v_bin
+    d=$(dirname "$RBOT")
+
+    # 1. PRIORITAS: Cek apakah ini persis di Git Tag (Release Resmi)
+    c=$(git -C "$d" describe --tags --exact-match 2>/dev/null)
+    if [ -n "$c" ]; then
+        c="release ${c}"
+    else
+        # 2. FALLBACK 1: Build Development (ada commit setelah tag, atau dirty)
+        c=$(git -C "$d" describe --tags --always --dirty 2>/dev/null)
+        if [ -n "$c" ]; then
+            c="dev git:${c}"
+        else
+            # 3. FALLBACK 2: Binary sudah di-install (tidak ada folder .git)
+            # Coba ambil versi dari output binary itu sendiri, atau dari strings
+            v_bin=$($RBOT version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+            if [ -z "$v_bin" ]; then
+                v_bin=$(strings "$RBOT" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+            fi
+            c="release ${v_bin:-unknown}"
+        fi
+    fi
+
+    # Hash unik untuk file binary (tetap berguna untuk melacak build yang sama)
+    h=$(sha1sum "$RBOT" 2>/dev/null | cut -c1-6)
+    
+    echo "${c} bin:${h:-n/a}"
 }
 declare -A VER
 VER_GCC=$(gcc -dumpfullversion 2>/dev/null || gcc -dumpversion 2>/dev/null)

@@ -22,7 +22,46 @@ Use another Buildfile.
 rbot init
 ```
 
-Create a project Buildfile.
+Create a project Buildfile — for a standard project this is just `use project`.
+
+## Interactive init
+
+```bash
+rbot init -p
+```
+
+Interactive scaffold. Enter accepts the default at every question; the
+scaffold is written into a new project folder, so it can be run from
+anywhere:
+
+| Question | Default (Enter) |
+|---|---|
+| `Project name?` | random name (`rbot-xxxxxx`) — the name is always the scaffold folder |
+| `language?` | `c` — answering `cpp` scaffolds `src/main.cpp` (iostream) and writes `std = c++17` |
+| `std?` | none written — convention (`gnu11`, or `c++17` for cpp) |
+| `compiler?` | none written — auto-detect |
+| `flags?` | none written — defaults |
+| `Create include/?` | `N` |
+| `Uses workspace?` | `N` |
+| `Workspace projects?` (workspace only) | `app,tool` |
+| `depends_on?` (workspace only) | none — format `<project> depends <project>` |
+
+Non-default answers are written explicitly into the Buildfile (`std = ...`,
+`compiler = ...`, `flags = ...`); everything else stays convention-based.
+The scaffold builds and runs out of the box:
+
+```text
+<name>/
+├── Buildfile        # single-project only; workspace projects need none
+├── include/<name>.h # when include/ is requested
+└── src/main.c       # src/main.cpp when language = cpp
+```
+
+A workspace scaffold writes `Buildfile.ws` (`projects = ...`, optional
+`<p>.depends_on = <p>` lines) plus a `src/main.c` per member — no per-project
+Buildfiles; rbot synthesizes them. `init -p` never overwrites: if any target
+file already exists, it aborts before writing anything. Ctrl+C or EOF on a
+question cancels the scaffold.
 
 ## Initialize workspace
 

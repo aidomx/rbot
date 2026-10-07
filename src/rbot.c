@@ -86,6 +86,7 @@ int rbotRun(int argc, const char *argv[]) {
   const char *buildfile = "Buildfile"; /* -f <file> untuk memakai yang lain */
   bool haveF = false;        /* true bila -f diberikan secara eksplisit */
   bool wantWorkspace = false; /* -w: paksa mode workspace */
+  bool interactive = false;   /* init -p: scaffold interaktif */
   const char *wsOnly = NULL;  /* -w <nama>: hanya proyek itu */
   const char *wsRelSel = NULL; /* -w release -- key=value: selektor release */
 
@@ -106,6 +107,11 @@ int rbotRun(int argc, const char *argv[]) {
           strcmp(argv[i + 1], "init") != 0 && strcmp(argv[i + 1], "help") != 0 &&
           strcmp(argv[i + 1], "version") != 0 && strcmp(argv[i + 1], "release") != 0)
         wsOnly = argv[++i];
+      continue;
+    }
+
+    if (strcmp(a, "-p") == 0) { /* rbot init -p: mode interaktif */
+      interactive = true;
       continue;
     }
 
@@ -256,6 +262,10 @@ int rbotRun(int argc, const char *argv[]) {
      `init -w` yang menulis template workspace (Buildfile.ws). */
   bool wsAuto = !wantWorkspace && (!cmd || !*cmd) && workspaceFileExists();
   if (wantWorkspace || (wsAuto)) {
+    /* init -p di mode workspace: scaffold interaktif bisa menghasilkan
+       Buildfile.ws sendiri (pilihan "Uses workspace?"), jadi diajukan
+       sebelum template cmdInitWorkspace. */
+    if (cmd && *cmd && strcmp(cmd, "init") == 0 && interactive) return cmdInteractiveInit();
     if (cmd && *cmd && strcmp(cmd, "init") == 0)
       return cmdInitWorkspace(haveF ? buildfile : WORKSPACE_FILENAME);
     if (cmd && *cmd && strcmp(cmd, "build") != 0 && strcmp(cmd, "clean") != 0 &&
@@ -285,7 +295,7 @@ int rbotRun(int argc, const char *argv[]) {
   if (!cmd || !*cmd) {
     rc = cmdBuild(jobs, buildfile);
   } else if (strcmp(cmd, "init") == 0) {
-    rc = cmdInit(buildfile);
+    rc = interactive ? cmdInteractiveInit() : cmdInit(buildfile);
   } else if (strcmp(cmd, "clean") == 0) {
     rc = cmdClean(buildfile);
   } else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 ||

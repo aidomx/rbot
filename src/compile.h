@@ -11,6 +11,10 @@ bool resolveCompiler(Config *c);
 /* true bila compiler aktif adalah MSVC (cl.exe) — flag & linker beda. */
 bool compilerIsMSVC(const Config *c);
 
+/* true bila cc adalah driver C++ (g++/clang++/cl) — runtime C++ (libstdc++)
+   otomatis di-link; driver C butuh -lstdc++ eksplisit untuk proyek C++. */
+bool compilerIsCppDriver(const Config *c);
+
 char *includeFlags(const Config *c);
 
 /* Direktori -I dari headers (tanpa flag non-I) — dipakai pelacak header. */

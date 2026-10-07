@@ -18,6 +18,9 @@ use project
 Everything else follows rbot conventions: `sources` defaults to `src`,
 `headers` to `include` when that folder exists, the binary is named after
 the project folder, and `std = gnu11`, `bin/`, `build/` fill in the rest.
+C++ works the same way with zero declarations — `src/main.cpp` instead of
+`src/main.c` gives you `std = c++17` and the `g++`/`clang++` toolchain
+automatically.
 A quick test:
 
 ```bash
@@ -36,6 +39,17 @@ rbot init
 ```
 
 Creates the minimal Buildfile above — just `use project`.
+
+For a guided walkthrough — project name, optional `include/`, workspace
+with member projects and `depends_on` — use the interactive scaffold:
+
+```bash
+rbot init -p
+```
+
+Enter accepts the default at every question (a random name for an empty
+answer). It scaffolds a new project folder that builds and runs
+immediately; see [CLI](../reference/cli.md) for the full question list.
 
 For a workspace:
 

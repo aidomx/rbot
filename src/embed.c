@@ -5,12 +5,17 @@
 #include <string.h>
 
 #include "compile.h"
+#include "embed_ld_cache.h"
 #include "portability.h"
 #include "util.h"
 
-/* Deteksi GNU ld untuk jalur embed; hasil di-cache per proses.
+/* Deteksi GNU ld untuk jalur embed; verdict di-cache per proses
+   (g_ldAvailable) DAN lintas-run (.rbot/ld.cache via embed_ld_cache),
+   sehingga probe `ld --version` (fork sh + exec ld, 3-5 ms) hanya jalan
+   pada RUN PERTAMA atau setelah ld berganti di PATH — run berikutnya
+   cukup satu stat ke binary ld yang direkam.
    RBOT_NO_LD=1 memaksa jalur fallback (C array) — berguna untuk testing
-   dan lingkungan yang ld-nya rusak. */
+   dan lingkungan yang ld-nya rusak; env ini JANGAN dicache. */
 static int g_ldAvailable = -1;
 
 /* Cek apakah 'ld' yang ada di PATH adalah GNU ld (bukan LLD/LLD-compatible).
@@ -39,32 +44,53 @@ static bool isGnuLd(void) {
 }
 
 static bool ldAvailable(void) {
-  if (g_ldAvailable < 0) {
-    if (getenv("RBOT_NO_LD")) {
-      g_ldAvailable = 0;
-    } else if (probeAvailable("ld") && isGnuLd()) {
-      g_ldAvailable = 1;
-    } else {
-      g_ldAvailable = 0;
+  if (g_ldAvailable >= 0) return g_ldAvailable == 1;
+  /* Env override TIDAK boleh menyentuh cache: RBOT_NO_LD diputus di sini
+     sebelum resolve/load, jadi testing fallback tidak ikut tersimpan
+     sebagai verdict "tanpa ld" (Uji 2 verify-fpic.sh harus tetap jalan). */
+  char ldPath[MAX_PATH];
+  if (!getenv("RBOT_NO_LD") && ldCacheResolve("ld", ldPath, sizeof(ldPath))) {
+    bool cached = false;
+    if (cacheReadLD(ldPath, &cached)) {
+      /* Cache valid: path + mtime ns + size binary ld tidak berubah. */
+      g_ldAvailable = cached ? 1 : 0;
+      return g_ldAvailable == 1;
     }
+    bool gnu = isGnuLd(); /* probe fisik, sekali per perubahan ld */
+    cacheWriteLD(ldPath, gnu);
+    g_ldAvailable = gnu ? 1 : 0;
+    return g_ldAvailable == 1;
   }
-  return g_ldAvailable == 1;
+  /* Tidak ada RBOT_NO_LD dan ld tidak ditemukan di PATH (murah, stat-only):
+     tidak direkam — bisa berubah kapan saja lewat PATH, dan procRun ld
+     pasti gagal juga. */
+  g_ldAvailable = 0;
+  return false;
 }
 
 static uint64_t embArchiveConfigHash(const EmbeddedEntry *e) {
   uint64_t h = UINT64_C(1469598103934665603);
-#define HASH_BYTES(p, n) do { \
-    const unsigned char *_b = (const unsigned char *)(p); \
-    for (size_t _i = 0; _i < (n); _i++) { h ^= _b[_i]; h *= UINT64_C(1099511628211); } \
+#define HASH_BYTES(p, n)                                                                           \
+  do {                                                                                             \
+    const unsigned char *_b = (const unsigned char *)(p);                                          \
+    for (size_t _i = 0; _i < (n); _i++) {                                                          \
+      h ^= _b[_i];                                                                                 \
+      h *= UINT64_C(1099511628211);                                                                \
+    }                                                                                              \
   } while (0)
-#define HASH_STR(x) do { const char *_s = (x); HASH_BYTES(_s, strlen(_s) + 1); } while (0)
+#define HASH_STR(x)                                                                                \
+  do {                                                                                             \
+    const char *_s = (x);                                                                          \
+    HASH_BYTES(_s, strlen(_s) + 1);                                                                \
+  } while (0)
   HASH_STR(e->src);
   HASH_STR(e->pattern);
   HASH_STR(e->archiveDir);
   HASH_STR(e->archiveName);
   HASH_STR(e->ext);
   HASH_BYTES(&e->tar, sizeof(e->tar));
-  for (int i = 0; i < e->excludes.count; i++) HASH_STR(e->excludes.items[i]);
+  for (int i = 0; i < e->excludes.count; i++)
+    HASH_STR(e->excludes.items[i]);
 #undef HASH_STR
 #undef HASH_BYTES
   return h;
@@ -120,7 +146,8 @@ static void embRelPath(const EmbeddedEntry *e, const char *path, char *rel, size
   if (strncmp(path, e->src, srcLen) == 0 &&
       (path[srcLen] == '/' || path[srcLen] == '\\' || path[srcLen] == '\0')) {
     const char *r = path + srcLen;
-    while (*r == '/' || *r == '\\') r++;
+    while (*r == '/' || *r == '\\')
+      r++;
     snprintf(rel, n, "%s", r);
     return;
   }
@@ -441,8 +468,7 @@ static bool buildEmbeddedArchiveEntry(const EmbeddedEntry *e) {
   fsRemoveFile(e->archivePath);
   if (rename(tmpArchive, e->archivePath) != 0) {
     fsRemoveFile(tmpArchive);
-    fprintf(stderr, "rbot: %s: cannot move archive into place (%s)\n", e->name,
-            e->archivePath);
+    fprintf(stderr, "rbot: %s: cannot move archive into place (%s)\n", e->name, e->archivePath);
     return false;
   }
   embArchiveStateSave(e);
@@ -463,7 +489,7 @@ static bool buildEmbeddedEntry(const Config *c, const EmbeddedEntry *e) {
   if (ldAvailable()) {
     char *cmd = malloc(strlen(e->archivePath) + strlen(e->objectPath) + 64);
     if (!cmd) return false;
-    sprintf(cmd, "ld -r -b binary -o %s %s", e->objectPath, e->archivePath);
+    sprintf(cmd, "ld -r -z noexecstack -b binary -o %s %s", e->objectPath, e->archivePath);
     bool ok = runCmd(cmd);
     free(cmd);
     if (!ok) fprintf(stderr, "rbot: %s: failed to embed %s\n", e->name, e->archivePath);

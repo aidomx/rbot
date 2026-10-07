@@ -48,7 +48,7 @@ free to declare `sources`, `headers`, and output names explicitly.
 | `sources` | `src` |
 | `headers` | `include` — only when an `include/` folder exists |
 | `output.binaryName` | the project folder name (see below) |
-| `std` | `gnu11` |
+| `std` | `gnu11` — or `c++17` when sources contain `.cpp` |
 | `output.binaryDir` | `bin` |
 | `output.buildDir` | `build` |
 | `output.compileCommands` | `auto` |

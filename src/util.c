@@ -33,6 +33,22 @@ void listFree(List *l) {
   l->capacity = 0;
 }
 
+/* Pembanding leksikografis byte demi byte (strcmp) untuk qsort List.
+   Dipakai semua pemakai walkDir yang hasilnya menentukan urutan output
+   (daftar link, daftar entri tar) supaya hasil tidak bergantung urutan
+   readdir filesystem — link dan arsip jadi reprodusible antar mesin, dan
+   urutan inisialisasi object statis C++ tidak lagi melekat pada readdir. */
+static int cmpStr(const void *a, const void *b) {
+  const char *const *sa = (const char *const *)a;
+  const char *const *sb = (const char *const *)b;
+  return strcmp(*sa, *sb);
+}
+
+void listSort(List *l) {
+  if (!l || l->count < 2) return;
+  qsort(l->items, (size_t)l->count, sizeof(l->items[0]), cmpStr);
+}
+
 void copyStr(char *dst, size_t n, const char *src) {
   snprintf(dst, n, "%s", src ? src : "");
 }
@@ -105,9 +121,12 @@ void mkparent(const char *path) {
   if (fsDirExists(tmp)) snprintf(last, sizeof(last), "%s", tmp);
 }
 
-/* Recursively collect paths under `dir` whose name ends with `ext`.
+/** Recursively collect paths under `dir` whose name ends with `ext`.
    With ext == "" every regular file matches; with ext == "/" only
-   directories are collected (used by fsRemoveTree). */
+   directories are collected (used by fsRemoveTree).
+   Hasil DIURUTKAN leksikografis (listSort): urutan readdir bergantung
+   filesystem, sedangkan pemakai walkDir untuk link/embed/pack
+   menuntut urutan stabil antar mesin. */
 void walkDir(const char *dir, const char *ext, List *out) {
   List dirs = {0}, files = {0};
   fsListDir(dir, &dirs, &files);
@@ -118,6 +137,7 @@ void walkDir(const char *dir, const char *ext, List *out) {
       walkDir(dirs.items[i], ext, out);
     listFree(&dirs);
     listFree(&files);
+    listSort(out);
     return;
   }
   for (int i = 0; i < files.count; i++) {
@@ -129,6 +149,7 @@ void walkDir(const char *dir, const char *ext, List *out) {
     walkDir(dirs.items[i], ext, out);
   listFree(&dirs);
   listFree(&files);
+  listSort(out);
 }
 
 bool newerThan(const char *a, const char *b) {

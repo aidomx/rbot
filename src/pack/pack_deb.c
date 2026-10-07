@@ -57,13 +57,13 @@ static void debArch(const Config *c, char *out, size_t n) {
        sampai orang lain mencoba memasangnya di perangkat target. */
     if (strcmp(host, "all") != 0 && strcmp(c->pack.debArchitecture, host) != 0) {
       fprintf(stderr,
-        "rbot: pack: peringatan: pack.deb.architecture='%s' tidak cocok dengan "
-        "arsitektur compiler saat ini ('%s'); binary yang dikemas kemungkinan "
-        "dikompilasi untuk '%s', bukan '%s'. Pastikan ini memang cross-build yang "
-        "disengaja — jika tidak, paket .deb ini tidak akan bisa dijalankan di "
-        "perangkat '%s'.\n",
-        c->pack.debArchitecture, host, host, c->pack.debArchitecture,
-        c->pack.debArchitecture);
+              "rbot: pack: peringatan: pack.deb.architecture='%s' tidak cocok dengan "
+              "arsitektur compiler saat ini ('%s'); binary yang dikemas kemungkinan "
+              "dikompilasi untuk '%s', bukan '%s'. Pastikan ini memang cross-build yang "
+              "disengaja — jika tidak, paket .deb ini tidak akan bisa dijalankan di "
+              "perangkat '%s'.\n",
+              c->pack.debArchitecture, host, host, c->pack.debArchitecture,
+              c->pack.debArchitecture);
     }
     return;
   }
@@ -119,8 +119,8 @@ static void debSetFileMode(const char *srcPath, const char *relPath, const char 
 static bool debStageData(const Config *c, const char *dataDir, const char *prefixRel) {
   for (int i = 0; i < c->pack.files.count; i++) {
     char src[MAX_PATH * 2], dstRoot[MAX_PATH * 2];
-    if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
-                        dstRoot, sizeof(dstRoot))) return false;
+    if (!packEntryParts(c->pack.files.items[i], src, sizeof(src), dstRoot, sizeof(dstRoot)))
+      return false;
 
     /* Fallback .exe — sama dengan packStageEntries; tanpa ini .deb di
        Windows dibangun tanpa binary secara diam-diam. */
@@ -128,7 +128,7 @@ static bool debStageData(const Config *c, const char *dataDir, const char *prefi
     packResolveSource(src, eff, sizeof(eff));
 
     if (fsFileExists(eff)) {
-      char dest[MAX_PATH * 2];
+      char dest[MAX_PATH * 3];
       snprintf(dest, sizeof(dest), "%s/%s/%s", dataDir, prefixRel, dstRoot);
       mkparent(dest);
       if (!copyFileBytes(eff, dest)) {
@@ -146,18 +146,20 @@ static bool debStageData(const Config *c, const char *dataDir, const char *prefi
       const char *file = files.items[j];
       const char *suffix = file + srcLen;
       if (*suffix == '/') suffix++;
-      char dest[MAX_PATH * 2];
+      char dest[MAX_PATH * 3];
       if (*suffix)
-        snprintf(dest, sizeof(dest), "%s/%s/%s/%s", dataDir, prefixRel,
-                 dstRoot, suffix);
+        snprintf(dest, sizeof(dest), "%s/%s/%s/%s", dataDir, prefixRel, dstRoot, suffix);
       else
         snprintf(dest, sizeof(dest), "%s/%s/%s", dataDir, prefixRel, dstRoot);
+
       mkparent(dest);
-      char rel[MAX_PATH * 2];
-      if (*suffix)
+      char rel[MAX_PATH * 3];
+      if (*suffix) {
         snprintf(rel, sizeof(rel), "%s/%s", dstRoot, suffix);
-      else
+      } else {
         copyStr(rel, sizeof(rel), dstRoot);
+      }
+
       if (!copyFileBytes(file, dest)) {
         fprintf(stderr, "rbot: pack: gagal menyalin %s\n", file);
         listFree(&files);
@@ -261,7 +263,8 @@ bool packBuildDeb(const Config *c, const PackArtifact *a) {
 
   /* install_prefix wajib absolut; relatif terhadap '/' jadi path staging. */
   const char *prefix = c->pack.debInstallPrefix;
-  while (*prefix == '/') prefix++;
+  while (*prefix == '/')
+    prefix++;
   if (!*prefix) {
     fprintf(stderr, "rbot: pack: pack.deb.install_prefix harus absolut (mis. /usr/local)\n");
     return false;
@@ -310,10 +313,8 @@ bool packBuildDeb(const Config *c, const PackArtifact *a) {
     fprintf(stderr, "rbot: pack: tidak bisa menulis %s\n", a->tmp);
     return false;
   }
-  bool ok = fwrite("!<arch>\n", 1, 8, fp) == 8 &&
-            arMemberBuf(fp, "debian-binary", "2.0\n", 4) &&
-            arMemberFile(fp, "control.tar.gz", ctlTar) &&
-            arMemberFile(fp, "data.tar.gz", dataTar);
+  bool ok = fwrite("!<arch>\n", 1, 8, fp) == 8 && arMemberBuf(fp, "debian-binary", "2.0\n", 4) &&
+            arMemberFile(fp, "control.tar.gz", ctlTar) && arMemberFile(fp, "data.tar.gz", dataTar);
   if (fclose(fp) != 0) ok = false;
   if (!ok) {
     fsRemoveFile(a->tmp);

@@ -22,6 +22,9 @@ typedef struct {
 
 bool listAdd(List *l, const char *s);
 void listFree(List *l);
+/* Urutkan isi List leksikografis (strcmp) — dipakai walkDir agar hasil
+   scan tidak bergantung urutan readdir filesystem. */
+void listSort(List *l);
 void copyStr(char *dst, size_t n, const char *src);
 
 char *trim(char *s);

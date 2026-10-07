@@ -11,13 +11,14 @@
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../portability.h"
 #include "../util.h"
 
 #define CONFIG_CACHE_MAGIC "RBOTCFG1"
-#define CONFIG_CACHE_VERSION 8u /* 8: konvensi proyek standar (src/include/nama folder) */
+#define CONFIG_CACHE_VERSION 9u /* 9: bahasa turunan langCpp (konvensi C++) */
 #define CONFIG_CACHE_DIR ".rbot"
 #define CONFIG_CACHE_FILE "buildfile.cache"
 
@@ -97,11 +98,9 @@ static bool cacheReadEmbedded(FILE *fp, EmbeddedEntry *e) {
       !cacheReadString(fp, e->archiveName, sizeof(e->archiveName)) || !cacheReadU8(fp, &tar) ||
       !cacheReadString(fp, e->ext, sizeof(e->ext)) ||
       !cacheReadString(fp, e->archivePath, sizeof(e->archivePath)) ||
-      !cacheReadString(fp, e->objectPath, sizeof(e->objectPath)) ||
-      !cacheReadU8(fp, &pre) ||
+      !cacheReadString(fp, e->objectPath, sizeof(e->objectPath)) || !cacheReadU8(fp, &pre) ||
       !cacheReadString(fp, e->prebuiltPath, sizeof(e->prebuiltPath)) ||
-      !cacheReadString(fp, e->variable, sizeof(e->variable)) ||
-      !cacheReadList(fp, &e->excludes))
+      !cacheReadString(fp, e->variable, sizeof(e->variable)) || !cacheReadList(fp, &e->excludes))
     return false;
   e->enable = b != 0;
   e->tar = tar != 0;
@@ -126,20 +125,20 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
       !cacheWriteString(fp, c->target) || !cacheWriteU8(fp, cleanBuild) ||
       !cacheWriteU8(fp, cleanCompdb) || !cacheWriteU8(fp, progress) ||
       !cacheWriteU8(fp, progressError) || !cacheWriteU8(fp, foreground) ||
-      !cacheWriteU8(fp, binary) ||
-      !cacheWriteString(fp, c->outBinaryName) || !cacheWriteString(fp, c->outBinaryDir) ||
-      !cacheWriteString(fp, c->outBuildDir) || !cacheWriteString(fp, c->outCompileCommands) ||
-      !cacheWriteString(fp, c->outLibName) || !cacheWriteString(fp, c->outLibDir) ||
-      !cacheWriteU8(fp, c->libRequested ? 1 : 0) || !cacheWriteU8(fp, c->libStatic ? 1 : 0) ||
-      !cacheWriteU8(fp, c->libShared ? 1 : 0) || !cacheWriteList(fp, &c->excludes) ||
-      !cacheWriteString(fp, c->pack.name) || !cacheWriteString(fp, c->pack.version) ||
-      !cacheWriteList(fp, &c->pack.files) || !cacheWriteString(fp, c->pack.output) ||
-      !cacheWriteString(fp, c->pack.compress) || !cacheWriteString(fp, c->pack.checksum) ||
-      !cacheWriteString(fp, c->pack.format) || !cacheWriteString(fp, c->pack.debMaintainer) ||
+      !cacheWriteU8(fp, binary) || !cacheWriteString(fp, c->outBinaryName) ||
+      !cacheWriteString(fp, c->outBinaryDir) || !cacheWriteString(fp, c->outBuildDir) ||
+      !cacheWriteString(fp, c->outCompileCommands) || !cacheWriteString(fp, c->outLibName) ||
+      !cacheWriteString(fp, c->outLibDir) || !cacheWriteU8(fp, c->libRequested ? 1 : 0) ||
+      !cacheWriteU8(fp, c->libStatic ? 1 : 0) || !cacheWriteU8(fp, c->libShared ? 1 : 0) ||
+      !cacheWriteList(fp, &c->excludes) || !cacheWriteString(fp, c->pack.name) ||
+      !cacheWriteString(fp, c->pack.version) || !cacheWriteList(fp, &c->pack.files) ||
+      !cacheWriteString(fp, c->pack.output) || !cacheWriteString(fp, c->pack.compress) ||
+      !cacheWriteString(fp, c->pack.checksum) || !cacheWriteString(fp, c->pack.format) ||
+      !cacheWriteString(fp, c->pack.debMaintainer) ||
       !cacheWriteString(fp, c->pack.debDescription) ||
       !cacheWriteString(fp, c->pack.debInstallPrefix) ||
       !cacheWriteString(fp, c->pack.debArchitecture) ||
-      !cacheWriteU8(fp, c->pack.requested ? 1 : 0) ||
+      !cacheWriteU8(fp, c->pack.requested ? 1 : 0) || !cacheWriteU8(fp, c->langCpp ? 1 : 0) ||
       !cacheWriteU32(fp, (uint32_t)c->embCount))
     return false;
 
@@ -151,7 +150,7 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
 static bool cacheReadConfig(FILE *fp, Config *c) {
   uint8_t cleanBuild = 0, cleanCompdb = 0, progress = 0, progressError = 0, foreground = 0;
   uint8_t binary = 1;
-  uint8_t libRequested = 0, libStatic = 0, libShared = 0, packRequested = 0;
+  uint8_t libRequested = 0, libStatic = 0, libShared = 0, packRequested = 0, langCpp = 0;
   uint32_t embCount = 0;
 
   if (!cacheReadString(fp, c->root, sizeof(c->root)) || !cacheReadList(fp, &c->sources) ||
@@ -183,10 +182,11 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
       !cacheReadString(fp, c->pack.debDescription, sizeof(c->pack.debDescription)) ||
       !cacheReadString(fp, c->pack.debInstallPrefix, sizeof(c->pack.debInstallPrefix)) ||
       !cacheReadString(fp, c->pack.debArchitecture, sizeof(c->pack.debArchitecture)) ||
-      !cacheReadU8(fp, &packRequested) || !cacheReadU32(fp, &embCount) ||
-      embCount > MAX_EMBEDDED)
+      !cacheReadU8(fp, &packRequested) || !cacheReadU8(fp, &langCpp) ||
+      !cacheReadU32(fp, &embCount) || embCount > MAX_EMBEDDED)
     return false;
   c->pack.requested = packRequested != 0;
+  c->langCpp = langCpp != 0;
 
   c->cleanBuildDir = cleanBuild != 0;
   c->cleanCompileCommands = cleanCompdb != 0;

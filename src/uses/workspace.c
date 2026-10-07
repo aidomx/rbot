@@ -225,6 +225,17 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
   } else {
     const char *dot = strchr(key, '.');
     if (!dot) {
+      /* root di level workspace DIBAULKAN (warning + abaikan): build
+         selalu berjalan dengan cwd = folder proyek, jadi root berlaku
+         per proyek — nilai workspace-level tidak mengagregasi output
+         ke root workspace. Agregasi lewat path per proyek (../bin). */
+      if (strcmp(key, "root") == 0) {
+        fprintf(stderr,
+                "rbot: workspace: 'root' diabaikan (root berlaku per proyek — "
+                "cwd build = folder proyek; agregasi output ke root workspace "
+                "pakai output.binaryDir = ../bin dsb.)\n");
+        return;
+      }
       if (wsIsEngineSection(key)) wsAddCommon(m, key, value);
       return;
     }
@@ -783,7 +794,9 @@ static bool wsSynthesize(const WsModel *m, const char *outDir, const char *wsNam
     if (rel) {
       const char *stage = m->releaseStage[0] ? m->releaseStage : "dist/release";
       char relblock[WS_LINE_LEN * 3];
-      char outTpl[WS_LINE_LEN];
+      /* releaseStage (MAX_PATH) + "/{name}-{version}.tar.gz" (24) — buffer
+         WS_LINE_LEN dulu terlalu kecil, gcc -Wformat-truncation menolak. */
+      char outTpl[MAX_PATH + 96];
       if (rel->target[0] && strcmp(rel->target, "deb") == 0) {
         snprintf(outTpl, sizeof(outTpl), "%s/{name}-{version}.deb", stage);
         snprintf(relblock, sizeof(relblock),
@@ -1229,6 +1242,7 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
   }
 
   int rc = 0;
+  profMark("ws-parse+synth");
   if (strcmp(cmd, "build") == 0 && !releaseOnly) {
     /* FASE 1 — library pass: tiap proyek mengkompilasi source-nya dan
        mengemas lib<name>.a/.so TANPA link binary. Proyek yang saling
@@ -1238,7 +1252,9 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
     for (int i = 0; i < m.order.count && rc == 0; i++) {
       int idx = wsFindProject(&m, m.order.items[i]);
       if (idx < 0 || !needed[idx]) continue;
+      profMark("ws-libpass-pre");
       rc = wsExecOne(&m, m.order.items[i], cmd, jobs, wsDir, true);
+      profMark("ws-libpass-post");
     }
   }
 
@@ -1248,7 +1264,20 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
     for (int i = 0; rc == 0 && i < m.order.count; i++) {
       int idx = wsFindProject(&m, m.order.items[i]);
       if (idx < 0 || !needed[idx]) continue;
+      /* Proyek kemasan (output.binary = false) tuntas di fase library
+         (archive/pack pass) — fase binary tidak punya link binary.
+         Lewati dengan status jelas, jangan jalankan ulang dua kali. */
+      const WsProject *ap = &m.projects[idx];
+      bool archiveOnly = false;
+      for (int l = 0; l < ap->lines.count; l++)
+        if (strcmp(ap->lines.items[l], "output.binary = false") == 0) archiveOnly = true;
+      if (archiveOnly) {
+        printf("\n> Project   : %s  (skip: selesai di fase library)\n", ap->name);
+        continue;
+      }
+      profMark("ws-binpass-pre");
       rc = wsExecOne(&m, m.order.items[i], cmd, jobs, wsDir, false);
+      profMark("ws-binpass-post");
       if (rc != 0) break; /* gagal: hentikan rantai */
     }
   } else {
@@ -1281,10 +1310,14 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
       }
       printf("\n> Release    : %s (project %s%s%s)\n", r->alias, r->name,
              r->target[0] ? ", target " : "", r->target);
+      profMark("release-pre");
       rc = wsReleaseOne(&m, i, jobs, wsDir);
+      profMark("release-post");
     }
   }
 
+  if (profOn()) profReport(); /* delta antar fase workspace (build no-op:
+                                 seluruh fase berada antara dua penanda) */
   wsModelFree(&m);
   return rc;
 }

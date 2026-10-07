@@ -107,6 +107,16 @@ typedef struct {
   bool cleanBuildDir;
   bool cleanCompileCommands;
 
+  /*
+   * Bahasa proyek (diturunkan, bukan setting Buildfile): true bila salah
+   * satu sumber berakhiran .cpp (folder/entri sources discan saat
+   * loadConfig — SEBELUM defaults & finalisasi). Mengubah default std
+   * (c++17 vs gnu11), urutan kandidat compiler (g++/clang++ vs gcc/clang),
+   * dan pemilihan toolchain link. Proyek campuran C/C++ ikut jalur C++
+   * (linker C++ menyelesaikan runtime keduanya).
+   */
+  bool langCpp;
+
   bool progressBar;
   bool progressErrorAlways;
 

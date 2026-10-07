@@ -60,7 +60,7 @@ Undeclared fields follow rbot conventions, so a standard project (folders
 | `sources` | `src` |
 | `headers` | `include` (only when the folder exists) |
 | `output.binaryName` | project folder name, sanitized (fallback `rbot`) |
-| `std` | `gnu11` |
+| `std` | `gnu11` — or `c++17` when sources contain `.cpp` (compiler then defaults to `g++`/`clang++`) |
 | `output.binaryDir` | `bin` |
 | `output.buildDir` | `build` |
 | `output.compileCommands` | `auto` |

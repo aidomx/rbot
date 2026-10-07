@@ -37,6 +37,28 @@ projects.ruka as ruka
 
 A workspace can define common compiler settings and project-specific settings.
 
+## Root and output locations
+
+Every project builds with the project folder as its working directory, so
+`root` is a **per-project** setting. A workspace-level `root = .` is
+**ignored with a warning** — it does not aggregate outputs into the
+workspace folder. Each project writes its own `bin/`, `lib/`, `build/`
+inside its folder.
+
+To aggregate outputs at the workspace root, point each project's output
+folders there with relative paths (`..` = workspace root):
+
+```text
+app.output.binaryDir = ../bin
+app.output.libDir = ../lib
+mod.archive.dir = ../modules
+```
+
+Packaging (archive) projects such as `mod` above run once during the
+library phase and are skipped in the binary phase
+(`skip: selesai di fase library`) — their artifacts (archives, packages)
+are produced there and are not rebuilt.
+
 ## Build commands
 
 ```bash
