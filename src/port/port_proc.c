@@ -15,6 +15,7 @@
 #include <string.h>
 
 #ifdef _WIN32
+#include <io.h> /* _isatty */
 #include <windows.h>
 #else
 #include <errno.h>
@@ -218,7 +219,8 @@ int procWaitAny(ProcHandle *handles, int count, ProcHandle **finished) {
     if (n == 0) return -1;
 
     DWORD w = WaitForMultipleObjects((DWORD)n, hs, FALSE, INFINITE);
-    if (w < WAIT_OBJECT_0 || w >= WAIT_OBJECT_0 + (DWORD)n) {
+    /* WAIT_OBJECT_0 == 0 dan w unsigned: batas bawah sudah implisit. */
+    if (w >= WAIT_OBJECT_0 + (DWORD)n) {
       if (w == WAIT_FAILED) return -1;
       continue; /* WAIT_ABANDONED_0 dsb: tunggu lagi */
     }
