@@ -171,6 +171,14 @@ bool cacheReadLD(const char *ldPath, bool *out) {
   return ok;
 }
 
+/* Cache-level helpers consumed by fastState/ldAvailable.
+ * cacheCheckLD() never probes: caller resolves ld, then cacheReadLD only.
+ * cacheUpdateLD() only records a verdict already obtained by the caller.
+ */
+bool cacheCheckLD(const char *ldPath, bool *out) {
+  return cacheReadLD(ldPath, out);
+}
+
 void cacheWriteLD(const char *ldPath, bool gnu) {
   if (!ldPath || !*ldPath) return;
   int64_t mtimeNs = 0;
@@ -201,4 +209,9 @@ void cacheWriteLD(const char *ldPath, bool gnu) {
   fsRemoveFile(LD_CACHE_FILE);
 #endif
   if (rename(tmp, LD_CACHE_FILE) != 0) fsRemoveFile(tmp);
+}
+
+/* Update the persistent verdict for the currently resolved ld. */
+void cacheUpdateLD(const char *ldPath, bool gnu) {
+  cacheWriteLD(ldPath, gnu);
 }

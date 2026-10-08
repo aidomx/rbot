@@ -7,20 +7,51 @@
 #include "compile.h"
 #include "portability.h"
 
+#ifdef _WIN32
+#define strtok_r strtok_s
+#endif
+
 bool compdbEnabled(const Config *c) {
   /* Nonaktif hanya kalau eksplisit "false"; "true" maupun "auto" (default)
      sama-sama berarti compile_commands.json dibuat/diperbarui otomatis. */
   return strcmp(c->outCompileCommands, "false") != 0;
 }
 
-static void jsonQuote(FILE *fp, const char *s) {
-  fputc('"', fp);
+// ============================================================================
+// 1. Macro Pembantu untuk Append String Terformat ke Buffer
+// ============================================================================
+#define APPEND(buf, len, cap, fmt, ...)                                                            \
+  do {                                                                                             \
+    int n = snprintf((buf) + (len), (cap) - (len), fmt, ##__VA_ARGS__);                            \
+    if (n > 0 && (len) + n < (cap)) (len) += n;                                                    \
+  } while (0)
+
+// ============================================================================
+// 2. Helper untuk JSON Quote tanpa Alokasi Memori (Zero Allocation)
+// ============================================================================
+static void jsonQuoteAppend(char *buf, size_t *len, size_t cap, const char *s) {
+  size_t slen = strlen(s);
+  // Cek kapasitas: worst case setiap karakter di-escape (x2), plus 2 untuk tanda kutip
+  if (*len + slen * 2 + 2 >= cap) return;
+
+  buf[(*len)++] = '"'; // Buka kutip
   for (const char *p = s; *p; p++) {
-    if (*p == '"' || *p == '\\') fputc('\\', fp);
-    fputc(*p, fp);
+    if (*p == '"' || *p == '\\') {
+      buf[(*len)++] = '\\'; // Tambah backslash escape
+    }
+    buf[(*len)++] = *p; // Tulis karakter asli
   }
-  fputc('"', fp);
+  buf[(*len)++] = '"'; // Tutup kutip
 }
+
+/*static void jsonQuote(FILE *fp, const char *s) {*/
+/*fputc('"', fp);*/
+/*for (const char *p = s; *p; p++) {*/
+/*if (*p == '"' || *p == '\\') fputc('\\', fp);*/
+/*fputc(*p, fp);*/
+/*}*/
+/*fputc('"', fp);*/
+/*}*/
 
 static uint64_t hashBytes(uint64_t h, const void *data, size_t n) {
   const unsigned char *p = (const unsigned char *)data;
@@ -59,8 +90,7 @@ static uint64_t compdbFingerprint(const Config *c, List *srcs, const char *cwd) 
   for (int i = 0; i < srcs->count; i++) {
     char obj[MAX_PATH];
     h = hashString(h, srcs->items[i]);
-    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj)))
-      h = hashString(h, obj);
+    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) h = hashString(h, obj);
   }
   return h;
 }
@@ -91,6 +121,82 @@ static void saveCompdbCache(uint64_t fingerprint) {
   rename(".rbot/compile_commands.cache.tmp", ".rbot/compile_commands.cache");
 }
 
+/* ============ restore dari blob (optimasi jalur restore) ============
+ * compile_commands.json yang hilang (terhapus manual / antar bench run)
+ * dulu selalu dirender ulang penuh. Padahal fingerprint yang sama
+ * menghasilkan byte JSON yang sama persis (deterministik). Konten json
+ * terakhir ikut disimpan sebagai blob .rbot/compile_commands.blob —
+ * restore = fingerprint cocok + salin file, tanpa render ulang. */
+
+static bool compdbCacheFingerprint(uint64_t fingerprint) {
+  FILE *fp = fopen(".rbot/compile_commands.cache", "r");
+  if (!fp) return false;
+  unsigned long long cached = 0;
+  bool ok = fscanf(fp, "%llx", &cached) == 1;
+  fclose(fp);
+  return ok && (uint64_t)cached == fingerprint;
+}
+
+static bool compdbCopyFile(const char *src, const char *dst) {
+  FILE *in = fopen(src, "rb");
+  if (!in) return false;
+  FILE *out = fopen(dst, "wb");
+  if (!out) {
+    fclose(in);
+    return false;
+  }
+  char buf[65536];
+  size_t n;
+  bool ok = true;
+  while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+    if (fwrite(buf, 1, n, out) != n) {
+      ok = false;
+      break;
+    }
+  }
+  if (ferror(in)) ok = false;
+  if (fclose(out) != 0) ok = false;
+  fclose(in);
+  return ok;
+}
+
+static bool compdbRestoreFromBlob(uint64_t fingerprint) {
+  if (!fsFileExists(".rbot/compile_commands.blob")) return false;
+  if (!compdbCacheFingerprint(fingerprint)) return false;
+  if (!compdbCopyFile(".rbot/compile_commands.blob", ".rbot/compile_commands.json.tmp"))
+    return false;
+  remove("compile_commands.json");
+  if (rename(".rbot/compile_commands.json.tmp", "compile_commands.json") != 0) {
+    fsRemoveFile(".rbot/compile_commands.json.tmp");
+    return false;
+  }
+  return true;
+}
+
+static void saveCompdbBlob(const char *buf, size_t len) {
+  mkdirs(".rbot");
+  FILE *fp = fopen(".rbot/compile_commands.blob.tmp", "wb");
+  if (!fp) return;
+  size_t wrote = fwrite(buf, 1, len, fp);
+  if (wrote != len) {
+    fclose(fp);
+    fsRemoveFile(".rbot/compile_commands.blob.tmp");
+    return;
+  }
+  if (fclose(fp) != 0) {
+    fsRemoveFile(".rbot/compile_commands.blob.tmp");
+    return;
+  }
+#ifdef _WIN32
+  fsRemoveFile(".rbot/compile_commands.blob");
+#endif
+  if (rename(".rbot/compile_commands.blob.tmp", ".rbot/compile_commands.blob") != 0)
+    fsRemoveFile(".rbot/compile_commands.blob.tmp");
+}
+
+// ============================================================================
+// 3. Fungsi Utama: writeCompdb (Memory-First Serialization)
+// ============================================================================
 void writeCompdb(const Config *c, List *srcs) {
   char cwd[MAX_PATH];
   if (!fsGetCwd(cwd, sizeof(cwd))) return;
@@ -100,70 +206,106 @@ void writeCompdb(const Config *c, List *srcs) {
     printf("> CompDB    : compile_commands.json unchanged (cache hit)\n");
     return;
   }
+  /* Json hilang tapi blob + fingerprint masih cocok: restore tanpa render. */
+  if (!fsFileExists("compile_commands.json") && compdbRestoreFromBlob(fingerprint)) {
+    printf("> CompDB    : compile_commands.json restored (blob)\n");
+    return;
+  }
 
-  FILE *fp = fopen("compile_commands.json", "w");
-  if (!fp) return;
-  fprintf(fp, "[\n");
+  // 1. Alokasi buffer di memori (2MB aman untuk ribuan file)
+  size_t bufCap = 2 * 1024 * 1024;
+  char *buf = malloc(bufCap);
+  if (!buf) return;
+  size_t bufLen = 0;
+
+  APPEND(buf, bufLen, bufCap, "[\n");
 
   for (int i = 0; i < srcs->count; i++) {
     const char *src = srcs->items[i];
     char obj[MAX_PATH];
     if (!objectPathFor(c, src, obj, sizeof(obj))) continue;
 
-    fprintf(fp, "  {\n    \"arguments\": [\n      ");
-    jsonQuote(fp, c->cc);
-    fprintf(fp, ",\n      ");
+    APPEND(buf, bufLen, bufCap, "  {\n    \"arguments\": [\n      ");
+
+    // Compiler
+    jsonQuoteAppend(buf, &bufLen, bufCap, c->cc);
+    APPEND(buf, bufLen, bufCap, ",\n      ");
+
+    // Target Flags
     char *tf = targetFlags(c);
     if (tf && tf[0]) {
-      /* target dipisah per token (mis. "-march=armv8-a -mabi=lp64d") */
-      char *tok = strtok(tf, " ");
+      char *savePtr = NULL;
+      char *tok = strtok_r(tf, " ", &savePtr);
       while (tok) {
-        jsonQuote(fp, tok);
-        fprintf(fp, ",\n      ");
-        tok = strtok(NULL, " ");
+        jsonQuoteAppend(buf, &bufLen, bufCap, tok);
+        APPEND(buf, bufLen, bufCap, ",\n      ");
+        tok = strtok_r(NULL, " ", &savePtr);
       }
     }
     free(tf);
+
+    // Header Public
     for (int h = 0; h < c->headerPublic.count; h++) {
       const char *entry = c->headerPublic.items[h];
       char flag[MAX_PATH + 8];
       if (entry[0] == '-')
         snprintf(flag, sizeof(flag), "%s", entry);
       else
-        snprintf(flag, sizeof(flag), "-I%s", entry[0] == 'I' && entry[1] == '.' ? entry + 1 : entry);
-      jsonQuote(fp, flag);
-      fprintf(fp, ",\n      ");
+        snprintf(flag, sizeof(flag), "-I%s",
+                 entry[0] == 'I' && entry[1] == '.' ? entry + 1 : entry);
+
+      jsonQuoteAppend(buf, &bufLen, bufCap, flag);
+      APPEND(buf, bufLen, bufCap, ",\n      ");
     }
+
+    // Flags
     for (int f = 0; f < c->flags.count; f++) {
       const char *fl = c->flags.items[f];
+      char withDash[MAX_PATH + 8];
       if (fl[0] == '-')
-        jsonQuote(fp, fl);
-      else {
-        char withDash[128];
+        snprintf(withDash, sizeof(withDash), "%s", fl);
+      else
         snprintf(withDash, sizeof(withDash), "-%s", fl);
-        jsonQuote(fp, withDash);
-      }
-      fprintf(fp, ",\n      ");
+
+      jsonQuoteAppend(buf, &bufLen, bufCap, withDash);
+      APPEND(buf, bufLen, bufCap, ",\n      ");
     }
-    fprintf(fp, "\"-std=");
-    fputs(c->std, fp);
-    fprintf(fp, "\",\n      \"-c\",\n      \"-o\",\n      ");
-    jsonQuote(fp, obj);
-    fprintf(fp, ",\n      ");
-    jsonQuote(fp, src);
-    fprintf(fp, "\n    ],\n    \"directory\": ");
-    jsonQuote(fp, cwd);
-    fprintf(fp, ",\n    \"file\": ");
-    char abs[MAX_PATH * 2];
-    snprintf(abs, sizeof(abs), "%s/%s", cwd, src);
-    jsonQuote(fp, abs);
-    fprintf(fp, ",\n    \"output\": ");
-    snprintf(abs, sizeof(abs), "%s/%s", cwd, obj);
-    jsonQuote(fp, abs);
-    fprintf(fp, "\n  }%s\n", i + 1 < srcs->count ? "," : "");
+
+    // Std, -c, -o, obj, src
+    APPEND(buf, bufLen, bufCap, "\"-std=%s\",\n      \"-c\",\n      \"-o\",\n      ", c->std);
+    jsonQuoteAppend(buf, &bufLen, bufCap, obj);
+    APPEND(buf, bufLen, bufCap, ",\n      ");
+    jsonQuoteAppend(buf, &bufLen, bufCap, src);
+    APPEND(buf, bufLen, bufCap, "\n    ],\n");
+
+    // Directory, File, Output
+    char absPath[MAX_PATH * 2];
+
+    APPEND(buf, bufLen, bufCap, "    \"directory\": ");
+    jsonQuoteAppend(buf, &bufLen, bufCap, cwd);
+
+    APPEND(buf, bufLen, bufCap, ",\n    \"file\": ");
+    snprintf(absPath, sizeof(absPath), "%s/%s", cwd, src);
+    jsonQuoteAppend(buf, &bufLen, bufCap, absPath);
+
+    APPEND(buf, bufLen, bufCap, ",\n    \"output\": ");
+    snprintf(absPath, sizeof(absPath), "%s/%s", cwd, obj);
+    jsonQuoteAppend(buf, &bufLen, bufCap, absPath);
+
+    APPEND(buf, bufLen, bufCap, "\n  }%s\n", i + 1 < srcs->count ? "," : "");
   }
-  fprintf(fp, "]\n");
-  fclose(fp);
+
+  APPEND(buf, bufLen, bufCap, "]\n");
+
+  // 2. SATU KALI TULIS KE DISK (The Magic Happens Here)
+  FILE *fp = fopen("compile_commands.json", "w");
+  if (fp) {
+    fwrite(buf, 1, bufLen, fp);
+    fclose(fp);
+  }
+
+  saveCompdbBlob(buf, bufLen); /* konten json untuk restore tanpa render */
+  free(buf);
   saveCompdbCache(fingerprint);
   printf("> CompDB    : compile_commands.json refreshed\n");
 }

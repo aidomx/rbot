@@ -91,6 +91,10 @@ bool packStageEntries(const Config *c, const char *root) {
     }
     List files = {0};
     walkDir(eff, "", &files);
+    /* Urutan salin menentukan urutan file di staging (dan arsip tar/deb
+       yang dirakit darinya): sortir sekali pada data lengkap supaya hasil
+       tidak bergantung urutan readdir filesystem. */
+    listSort(&files);
     size_t srcLen = strlen(eff);
     for (int j = 0; j < files.count; j++) {
       const char *file = files.items[j];

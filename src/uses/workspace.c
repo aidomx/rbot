@@ -593,6 +593,28 @@ static bool wsTopoSort(WsModel *m) {
     }
   }
 
+  /* cdeps = <proyek lain> juga memperluas build selektif — semantik sama
+     dengan library.<os>: siklus sah (dua fase build), tidak masuk topo. */
+  for (int i = 0; i < m->projectCount; i++) {
+    for (int j = 0; j < m->projects[i].lines.count; j++) {
+      const char *ln = m->projects[i].lines.items[j];
+      if (strncmp(ln, "cdeps = ", 8) != 0) continue;
+      const char *v = ln + 8;
+      char buf[WS_LINE_LEN];
+      if (strlen(v) >= sizeof(buf)) continue;
+      copyStr(buf, sizeof(buf), v);
+      for (char *save = buf;;) {
+        char *comma = strchr(save, ',');
+        if (comma) *comma = '\0';
+        char *item = trim(save);
+        if (*item && strcmp(item, m->projects[i].name) != 0 && wsFindProject(m, item) >= 0)
+          listAdd(&m->libDeps[i], item);
+        if (!comma) break;
+        save = comma + 1;
+      }
+    }
+  }
+
   unsigned char color[WS_MAX_PROJECTS] = {0};
   List order = {0};
   for (int i = 0; i < m->projectCount; i++)
@@ -675,6 +697,179 @@ static bool wsLibraryValue(const WsModel *m, const WsProject *owner,
   return true;
 }
 
+/* ==================== cdeps ==================== */
+/*
+ * cdeps = <proyek lain>[, ...] — ketergantungan compile-time lintas proyek
+ * dalam satu key (todos/7_10_2026.txt). Menggantikan penulisan manual:
+ *     <n>.headers = ../<dep>/include      (folder header publik proyek)
+ *     <n>.library.<os> = <dep>            (artifact library per-OS)
+ * Dengan cdeps, sintesis workspace menerbitkan `library = ../<dep>/...
+ * dan `headers = ../<dep>/<dir>` secara internal. Siklus antar proyek
+ * sah — sama seperti library.<os>: dua fase build workspace yang
+ * menyelesaikannya (fase library melewatkan artifact path proyek lain).
+ */
+
+/* Folder header publik proyek `dep`: semua nilai `headers = ...` proyek
+   itu (diprefix ../<root>/), default "include" bila proyek tidak
+   menulis headers sama sekali. */
+static void wsProjectHeaderDirs(const WsProject *dep, List *out) {
+  bool any = false;
+  for (int j = 0; j < dep->lines.count; j++) {
+    const char *ln = dep->lines.items[j];
+    if (strncmp(ln, "headers = ", 10) != 0) continue;
+    const char *v = ln + 10;
+    char buf[WS_LINE_LEN];
+    if (strlen(v) >= sizeof(buf)) continue;
+    copyStr(buf, sizeof(buf), v);
+    for (char *save = buf;;) {
+      char *comma = strchr(save, ',');
+      if (comma) *comma = '\0';
+      char *item = trim(save);
+      if (*item) {
+        /* "../" + root + "/" + item — dibangun manual (memcpy) agar
+           gcc -Wformat-truncation tidak menolak path panjang. */
+        char joined[MAX_PATH];
+        size_t need = 3 + strlen(dep->root) + 1 + strlen(item) + 1;
+        if (need > sizeof(joined)) continue;
+        char *dst = joined;
+        memcpy(dst, "../", 3); dst += 3;
+        size_t rl = strlen(dep->root);
+        memcpy(dst, dep->root, rl); dst += rl;
+        *dst++ = '/';
+        memcpy(dst, item, strlen(item)); dst += strlen(item);
+        *dst = '\0';
+        listAdd(out, joined);
+        any = true;
+      }
+      if (!comma) break;
+      save = comma + 1;
+    }
+  }
+  if (!any) {
+    char joined[MAX_PATH];
+    size_t need = 3 + strlen(dep->root) + strlen("/include") + 1;
+    if (need <= sizeof(joined)) {
+      char *dst = joined;
+      memcpy(dst, "../", 3); dst += 3;
+      size_t rl = strlen(dep->root);
+      memcpy(dst, dep->root, rl); dst += rl;
+      memcpy(dst, "/include", 8); dst += 8;
+      *dst = '\0';
+      listAdd(out, joined);
+    }
+  }
+}
+
+/* Sudah ada di list? (dedup persis string — cukup untuk path folder). */
+static bool wsListHas(const List *l, const char *s) {
+  for (int i = 0; i < l->count; i++)
+    if (strcmp(l->items[i], s) == 0) return true;
+  return false;
+}
+
+/* Ekspansi blok cdeps proyek `p` menjadi baris Buildfile sintesis:
+   satu `library = ...` per proyek dep + satu `headers = ...` gabungan.
+   Baris `cdeps = ...` asli TIDAK ikut ditulis (sudah dikonsumsi). */
+static bool wsEmitCdeps(const WsModel *m, const WsProject *p, char *body, size_t cap) {
+  List deps = {0}, hdirs = {0}, ownHeaders = {0};
+  bool found = false;
+
+  /* Folder header milik proyek sendiri — supaya emit tidak menduplikasi
+     entri yang sudah eksplisit di Buildfile user. */
+  for (int j = 0; j < p->lines.count; j++) {
+    const char *ln = p->lines.items[j];
+    if (strncmp(ln, "headers = ", 10) != 0) continue;
+    const char *v = ln + 10;
+    char buf[WS_LINE_LEN];
+    if (strlen(v) >= sizeof(buf)) continue;
+    copyStr(buf, sizeof(buf), v);
+    for (char *save = buf;;) {
+      char *comma = strchr(save, ',');
+      if (comma) *comma = '\0';
+      char *item = trim(save);
+      if (*item) listAdd(&ownHeaders, item);
+      if (!comma) break;
+      save = comma + 1;
+    }
+  }
+
+  for (int j = 0; j < p->lines.count; j++) {
+    const char *ln = p->lines.items[j];
+    if (strncmp(ln, "cdeps = ", 8) != 0) continue;
+    found = true;
+    const char *v = ln + 8;
+    char buf[WS_LINE_LEN];
+    if (strlen(v) >= sizeof(buf)) continue;
+    copyStr(buf, sizeof(buf), v);
+    for (char *save = buf;;) {
+      char *comma = strchr(save, ',');
+      if (comma) *comma = '\0';
+      char *item = trim(save);
+      if (*item) {
+        if (strcmp(item, p->name) == 0) {
+          fprintf(stderr, "rbot: workspace: '%s' cdeps berisi dirinya sendiri\n", p->name);
+        } else if (wsFindProject(m, item) < 0) {
+          fprintf(stderr, "rbot: workspace: '%s' cdeps unknown project '%s'\n", p->name, item);
+        } else if (!wsListHas(&deps, item)) {
+          listAdd(&deps, item);
+        }
+      }
+      if (!comma) break;
+      save = comma + 1;
+    }
+  }
+  if (!found) {
+    listFree(&ownHeaders);
+    return true;
+  }
+
+  for (int j = 0; j < deps.count; j++) {
+    int di = wsFindProject(m, deps.items[j]);
+    const WsProject *dep = &m->projects[di];
+    char mapped[WS_LINE_LEN];
+    if (!wsLibraryValue(m, p, dep->name, mapped, sizeof(mapped))) continue;
+    char line[WS_LINE_LEN * 2];
+    int written = snprintf(line, sizeof(line), "library = %s", mapped);
+    if (written < 0 || (size_t)written >= sizeof(line)) continue;
+    if (strlen(body) + strlen(line) + 2 > cap) {
+      listFree(&deps); listFree(&hdirs); listFree(&ownHeaders);
+      return false;
+    }
+    strcat(body, line);
+    strcat(body, "\n");
+    /* Header publik proyek dep — jangan duplikasi dengan own/terlanjur. */
+    List depHeaders = {0};
+    wsProjectHeaderDirs(dep, &depHeaders);
+    for (int k = 0; k < depHeaders.count; k++) {
+      const char *hd = depHeaders.items[k];
+      if (wsListHas(&hdirs, hd) || wsListHas(&ownHeaders, hd)) continue;
+      listAdd(&hdirs, hd);
+    }
+    listFree(&depHeaders);
+  }
+
+  if (hdirs.count > 0) {
+    char line[WS_LINE_LEN * 4];
+    size_t off = 0;
+    off += (size_t)snprintf(line + off, sizeof(line) - off, "headers = ");
+    for (int k = 0; k < hdirs.count; k++) {
+      if (k > 0) off += (size_t)snprintf(line + off, sizeof(line) - off, ", ");
+      off += (size_t)snprintf(line + off, sizeof(line) - off, "%s", hdirs.items[k]);
+      if (off >= sizeof(line) - 2) break;
+    }
+    if (strlen(body) + off + 2 > cap) {
+      listFree(&deps); listFree(&hdirs); listFree(&ownHeaders);
+      return false;
+    }
+    strcat(body, line);
+    strcat(body, "\n");
+  }
+  listFree(&deps);
+  listFree(&hdirs);
+  listFree(&ownHeaders);
+  return true;
+}
+
 /* Tulis file hanya bila isinya berubah — mtime stabil agar cache config
    & fast path tidak miss sia-sia. */
 static bool wsWriteIfChanged(const char *path, const char *body) {
@@ -733,6 +928,7 @@ static bool wsSynthesize(const WsModel *m, const char *outDir, const char *wsNam
     }
     for (int j = 0; j < p->lines.count; j++) {
       const char *ln = p->lines.items[j];
+      if (strncmp(ln, "cdeps = ", 8) == 0) continue; /* dikonsumsi wsEmitCdeps */
       if (strncmp(ln, "pack.merge = ", 13) == 0) continue;
       if (strncmp(ln, "pack.files = ", 13) == 0 && mergedFiles[0]) {
         char mergedLine[WS_LINE_LEN * 2 + 32];
@@ -765,6 +961,15 @@ static bool wsSynthesize(const WsModel *m, const char *outDir, const char *wsNam
       }
       strcat(body, ln);
       strcat(body, "\n");
+    }
+
+    /* cdeps: library artifact + folder header proyek lain — satu key
+       (lihat wsEmitCdeps). Dipanggil SETELAH baris proyek supaya pengaturan
+       eksplisit user tetap menang di parser (last-wins tidak relevan untuk
+       list, tapi posisi baris yang konsisten lebih mudah dibaca). */
+    if (!wsEmitCdeps(m, p, body, n)) {
+      free(body);
+      return false;
     }
 
     /* Buildfile utama (fase build: library & binary pass) — TANPA blok

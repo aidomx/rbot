@@ -27,6 +27,8 @@ static bool sourcesHaveCpp(const Config *c) {
     if (len >= 4 && strcmp(entry + len - 4, ".cpp") == 0) return true;
     if (!fsDirExists(entry)) continue;
     List dirs = {0}, files = {0};
+    listReserve(&dirs, 1024);
+    listReserve(&files, 1024);
     fsListDir(entry, &dirs, &files);
     bool found = false;
     for (int f = 0; f < files.count && !found; f++) {
@@ -125,8 +127,7 @@ static void configFinalize(Config *c) {
      Proyek non-standar tetap bebas mendeklarasikan semuanya secara
      eksplisit — defaults hanya mengisi yang kosong. */
   if (c->sources.count == 0) listAdd(&c->sources, "src");
-  if (c->headerPublic.count == 0 && fsDirExists("include"))
-    listAdd(&c->headerPublic, "include");
+  if (c->headerPublic.count == 0 && fsDirExists("include")) listAdd(&c->headerPublic, "include");
 
   /* Deteksi bahasa C++ dari sources final (termasuk default "src" yang baru
      diisi — proyek standar tanpa deklarasi pun terdeteksi). Proyek campuran
@@ -204,7 +205,8 @@ static void configApply(Config *c, const char *section, const char *sub, const c
     else if (strcmp(key, "foreground") == 0 && parseBool(value, &b))
       c->foreground = b;
     else if (strcmp(key, "target") == 0)
-      copyStr(c->target, sizeof(c->target), value);     /* Key bare hasil sintesis Buildfile.ws (prefix projects.<n>. dan
+      copyStr(c->target, sizeof(c->target),
+              value); /* Key bare hasil sintesis Buildfile.ws (prefix projects.<n>. dan
        aliasnya dilepas): name/version/files/output/... -> pack. Tanpa
        files/output proyek biasa tidak terpengaruh (pack tak aktif). */
     else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0 ||

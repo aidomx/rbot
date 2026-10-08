@@ -141,6 +141,10 @@ static bool debStageData(const Config *c, const char *dataDir, const char *prefi
 
     List files = {0};
     walkDir(eff, "", &files);
+    /* Urutan salin = urutan file di staging data/ dan tar.gz yang dirakit
+       darinya: sortir sekali pada data lengkap agar paket .deb reprodusible
+       antar mesin (urutan readdir tidak lagi melekat pada hasil). */
+    listSort(&files);
     size_t srcLen = strlen(eff);
     for (int j = 0; j < files.count; j++) {
       const char *file = files.items[j];

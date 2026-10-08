@@ -107,6 +107,30 @@ the other project's library artifact. Cyclic references (`rupa <-> ruka`) are
 allowed: the two-phase build resolves them, and selective builds pull the
 referenced projects transitively.
 
+### cdeps — compile-time dependencies in one key
+
+When a project consumes another project's headers **and** its library, the
+per-OS spellings add up. `cdeps` replaces them with a single key:
+
+```text
+# before
+ruka.headers = ../rupa/include
+rukalib.linux = rupa
+rukalib.macos = rupa
+rukalib.windows = rupa
+
+# after
+ruka.cdeps = rupa
+```
+
+Synthesis expands `cdeps` internally into the dependency's library artifact
+(`library = ../rupa/lib/librupa.a`) and its public include folders (the
+folders the dependency itself declares as `headers`; `include` by default).
+`cdeps` cycles are allowed exactly like `library.<os>` cycles — the two-phase
+build resolves them — and selective builds (`-w <name>`) pull `cdeps`
+projects transitively. The expanded lines win over nothing: any explicit
+`headers`/`library` you also write stays valid and is not duplicated.
+
 Packaging a project's files can reference another project's build outputs;
 such path references become build dependencies automatically.
 

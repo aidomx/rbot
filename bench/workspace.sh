@@ -585,10 +585,10 @@ report() {
   echo "${C_DIM}median ms · ★ tercepat · × = rasio vs tercepat${C_RST}"
   echo "${C_DIM}Invalidasi yang diharapkan (pembanding ninja/make):${C_RST}"
   echo "${C_DIM}  leaf : obj 1, bin 1 (rupa saja) · ruka: obj 1, bin 1${C_RST}"
-  echo "${C_DIM}  mod  : arc 1, bin 1 (ruka relink/embed ulang)${C_RST}"
+  echo "${C_DIM}  mod  : arc 1, bin 1 (ruka relink; rbot +obj 1 = .o embed arsip)${C_RST}"
   echo "${C_DIM}  touch: ninja/make rebuild; rbot 0 bila content-hash${C_RST}"
   echo "${C_DIM}  sel  : obj 1, bin 1 (hanya rupa; ruka dibiarkan kotor)${C_RST}"
-  echo "${C_DIM}  dep  : arc 1, bin 1, obj 0 (rupamod+ruka; rupa dibiarkan kotor)${C_RST}"
+  echo "${C_DIM}  dep  : arc 1, bin 1, obj 0 (rupamod+ruka; rupa kotor; rbot +obj 1 = .o embed)${C_RST}"
 }
 
 # ---------------------------- main -----------------------------------------

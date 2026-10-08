@@ -49,15 +49,16 @@ static bool ldAvailable(void) {
      sebelum resolve/load, jadi testing fallback tidak ikut tersimpan
      sebagai verdict "tanpa ld" (Uji 2 verify-fpic.sh harus tetap jalan). */
   char ldPath[MAX_PATH];
-  if (!getenv("RBOT_NO_LD") && ldCacheResolve("ld", ldPath, sizeof(ldPath))) {
+  if (!getenv("RBOT_NO_LD")) {
+    bool resolved = ldCacheResolve("ld", ldPath, sizeof(ldPath));
     bool cached = false;
-    if (cacheReadLD(ldPath, &cached)) {
+    if (resolved && cacheCheckLD(ldPath, &cached)) {
       /* Cache valid: path + mtime ns + size binary ld tidak berubah. */
       g_ldAvailable = cached ? 1 : 0;
       return g_ldAvailable == 1;
     }
     bool gnu = isGnuLd(); /* probe fisik, sekali per perubahan ld */
-    cacheWriteLD(ldPath, gnu);
+    if (resolved) cacheUpdateLD(ldPath, gnu);
     g_ldAvailable = gnu ? 1 : 0;
     return g_ldAvailable == 1;
   }
@@ -416,14 +417,17 @@ static bool buildEmbeddedArchiveEntry(const EmbeddedEntry *e) {
     const char *z = (strcmp(e->ext, "gz") == 0) ? "z" : "";
 
     /* Snapshot the files before invoking tar.  This is required when
-       archive.src is "."/"./": the archive output directory and rbot's
-       temporary files can live inside the source tree, so `tar ... .`
+       archive.src is "."/"./": the archive output directory and rbot's        temporary files can live inside the source tree, so `tar ... .`
        otherwise observes the tree changing while it is being read. */
     List files = {0};
     if (e->pattern[0])
       walkDir(e->src, e->pattern, &files);
     else
       walkDir(e->src, "", &files);
+    /* Listfile tar menentukan urutan entri arsip: sortir sekali pada data
+       lengkap agar arsip reprodusible antar mesin (urutan readdir tidak
+       lagi melekat pada hasil). */
+    listSort(&files);
 
     char listFile[MAX_PATH * 2 + 32];
     snprintf(listFile, sizeof(listFile), ".rbot-embed-%s.list", e->name);

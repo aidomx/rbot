@@ -26,7 +26,8 @@ bool listAdd(List *l, const char *s) {
 
 void listFree(List *l) {
   if (!l) return;
-  for (int i = 0; i < l->count; i++) free(l->items[i]);
+  for (int i = 0; i < l->count; i++)
+    free(l->items[i]);
   free(l->items);
   l->items = NULL;
   l->count = 0;
@@ -34,14 +35,26 @@ void listFree(List *l) {
 }
 
 /* Pembanding leksikografis byte demi byte (strcmp) untuk qsort List.
-   Dipakai semua pemakai walkDir yang hasilnya menentukan urutan output
-   (daftar link, daftar entri tar) supaya hasil tidak bergantung urutan
-   readdir filesystem — link dan arsip jadi reprodusible antar mesin, dan
-   urutan inisialisasi object statis C++ tidak lagi melekat pada readdir. */
+   Dipakai pemakai walkDir yang urutannya menentukan output (daftar link,
+   daftar entri tar) supaya hasil tidak bergantung urutan readdir
+   filesystem — link dan arsip jadi reprodusible antar mesin, dan urutan
+   inisialisasi object statis C++ tidak lagi melekat pada readdir. */
 static int cmpStr(const void *a, const void *b) {
   const char *const *sa = (const char *const *)a;
   const char *const *sb = (const char *const *)b;
   return strcmp(*sa, *sb);
+}
+
+/* Pesan kapasitas SEKALI di awal agar listAdd tidak realloc bolak-balik.
+   Gagal alokasi dibiarkan diam-diam: listAdd tetap tumbuh doubling seperti
+   biasa, reserve hanya optimasi. */
+void listReserve(List *l, int want) {
+  if (!l || want <= l->capacity) return;
+  if (want > 0x3fffffff) want = 0x3fffffff;
+  char **items = realloc(l->items, (size_t)want * sizeof(*items));
+  if (!items) return;
+  l->items = items;
+  l->capacity = want;
 }
 
 void listSort(List *l) {
@@ -80,12 +93,16 @@ bool parseBool(const char *s, bool *out) {
 
 #ifdef _WIN32
 /* MSVC: tidak ada popen/pclose (POSIX); _popen/_pclose setara (cmd.exe). */
-FILE *popenRB(const char *cmd) { return _popen(cmd, "r"); }
+FILE *popenRB(const char *cmd) {
+  return _popen(cmd, "r");
+}
 void pcloseRB(FILE *fp) {
   if (fp) _pclose(fp);
 }
 #else
-FILE *popenRB(const char *cmd) { return popen(cmd, "r"); }
+FILE *popenRB(const char *cmd) {
+  return popen(cmd, "r");
+}
 void pcloseRB(FILE *fp) {
   if (fp) pclose(fp);
 }
@@ -124,11 +141,17 @@ void mkparent(const char *path) {
 /** Recursively collect paths under `dir` whose name ends with `ext`.
    With ext == "" every regular file matches; with ext == "/" only
    directories are collected (used by fsRemoveTree).
-   Hasil DIURUTKAN leksikografis (listSort): urutan readdir bergantung
-   filesystem, sedangkan pemakai walkDir untuk link/embed/pack
-   menuntut urutan stabil antar mesin. */
+   Hasil TIDAK diurutkan: sortir di dalam rekursi berarti qsort O(n log n)
+   diulang di tiap level (pohon dalam = pergeseran pointer berulang) padahal
+   satu qsort pada data lengkap di pemanggil lebih murah. Pemanggil yang
+   butuh urutan stabil antar mesin memanggil listSort() sendiri SETELAH
+   walkDir selesai (lihat commands.c, embed.c, pack/). */
 void walkDir(const char *dir, const char *ext, List *out) {
   List dirs = {0}, files = {0};
+  /* Pre-alokasi kedua list per level: chunk 512 entry cukup untuk tipikal
+     satu folder; realokasi lanjutan tetap ditangani listAdd (doubling). */
+  listReserve(&dirs, 512);
+  listReserve(&files, 512);
   fsListDir(dir, &dirs, &files);
   if (ext[0] == '/') {
     for (int i = 0; i < dirs.count; i++)
@@ -137,7 +160,6 @@ void walkDir(const char *dir, const char *ext, List *out) {
       walkDir(dirs.items[i], ext, out);
     listFree(&dirs);
     listFree(&files);
-    listSort(out);
     return;
   }
   for (int i = 0; i < files.count; i++) {
@@ -149,7 +171,6 @@ void walkDir(const char *dir, const char *ext, List *out) {
     walkDir(dirs.items[i], ext, out);
   listFree(&dirs);
   listFree(&files);
-  listSort(out);
 }
 
 bool newerThan(const char *a, const char *b) {

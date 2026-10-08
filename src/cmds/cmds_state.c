@@ -66,7 +66,8 @@ void cmdsFingerprintMake(const Config *c, const List *srcs, CmdsBuildFingerprint
   for (int i = 0; i < srcs->count; i++) {
     char obj[MAX_PATH];
     fp->sources = fpString(fp->sources, srcs->items[i]);
-    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) fp->sources = fpString(fp->sources, obj);
+    if (objectPathFor(c, srcs->items[i], obj, sizeof(obj)))
+      fp->sources = fpString(fp->sources, obj);
   }
 
   fp->link = 14695981039346656037ULL;
@@ -115,7 +116,9 @@ void cmdsFingerprintSave(const CmdsBuildFingerprint *fp) {
   }
 }
 
-void cmdsFingerprintInvalidate(void) { fsRemoveFile(BUILD_FP_FILE); }
+void cmdsFingerprintInvalidate(void) {
+  fsRemoveFile(BUILD_FP_FILE);
+}
 
 /* ==================== Fast no-op snapshot ==================== */
 /* Dua file state per fase build:
@@ -171,6 +174,8 @@ static void fastCollectTree(const char *dir, List *paths) {
   if (!fsDirExists(dir)) return;
   fastStampAdd(paths, dir);
   List dirs = {0}, files = {0};
+  listReserve(&dirs, 1024);
+  listReserve(&files, 1024);
   fsListDir(dir, &dirs, &files);
   for (int i = 0; i < files.count; i++)
     fastStampAdd(paths, files.items[i]);
@@ -192,11 +197,12 @@ static bool fastStateLoad(FastState *s, bool libOnly) {
   long long bfm = 0, tm = 0;
   int libReq = 0, libSt = 0, libSh = 0, phase = 0;
   if (fscanf(f, "%31s", magic) != 1 || strcmp(magic, BUILD_STATE_MAGIC) != 0 ||
-      fscanf(f,
-             "%1023s %1023s %lld %lld %2047s %lld %lld %d %d %d %d %d %d %d %2047s %2047s %lld %lld",
-             s->cwd, s->buildfile, &bfm, &s->buildfileSize, s->target, &tm, &s->targetSize,
-             &s->compiled, &s->skipped, &s->count, &phase, &libReq, &libSt, &libSh,
-             s->libStaticPath, s->libSharedPath, &s->libStaticSize, &s->libSharedSize) != 18 ||
+      fscanf(
+          f,
+          "%1023s %1023s %lld %lld %2047s %lld %lld %d %d %d %d %d %d %d %2047s %2047s %lld %lld",
+          s->cwd, s->buildfile, &bfm, &s->buildfileSize, s->target, &tm, &s->targetSize,
+          &s->compiled, &s->skipped, &s->count, &phase, &libReq, &libSt, &libSh, s->libStaticPath,
+          s->libSharedPath, &s->libStaticSize, &s->libSharedSize) != 18 ||
       s->count < 0 || s->count > 200000) {
     fclose(f);
     return false;
@@ -248,12 +254,10 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
   int64_t buildfileMtime = -1, targetMtime = -1;
   long long buildfileSize = -1, targetSize = -1;
   bool buildfileStamp = fsStampNsSize(s.buildfile, &buildfileMtime, &buildfileSize);
-  bool targetStamp = fastTargetRecorded(s.target)
-                         ? fsStampNsSize(s.target, &targetMtime, &targetSize)
-                         : true;
-  bool targetOk =
-      !fastTargetRecorded(s.target) || (targetStamp && targetMtime == s.targetMtime &&
-                                        targetSize == s.targetSize);
+  bool targetStamp =
+      fastTargetRecorded(s.target) ? fsStampNsSize(s.target, &targetMtime, &targetSize) : true;
+  bool targetOk = !fastTargetRecorded(s.target) ||
+                  (targetStamp && targetMtime == s.targetMtime && targetSize == s.targetSize);
   bool ok =
       fsGetCwd(cwd, sizeof(cwd)) && strcmp(cwd, s.cwd) == 0 &&
       strcmp(buildfilePath && *buildfilePath ? buildfilePath : "Buildfile", s.buildfile) == 0 &&
@@ -263,6 +267,18 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
     FastStamp *st = &s.stamps[i];
     int64_t currentMtime = -1;
     long long currentSize = -1;
+    if (st->kind == 'L') {
+      /* RBOT_NO_LD sengaja memaksa jalur normal/fallback; jangan biarkan
+         fastState menelan override itu. */
+      char ldPath[MAX_PATH];
+      bool cached = false;
+      if (getenv("RBOT_NO_LD") || !ldCacheResolve("ld", ldPath, sizeof(ldPath)) ||
+          !cacheCheckLD(ldPath, &cached)) {
+        ok = false;
+        break;
+      }
+      continue;
+    }
     bool exists = fsStampNsSize(st->path, &currentMtime, &currentSize);
     if (st->kind == 'M') {
       if (exists) {
@@ -403,8 +419,10 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     char obj[MAX_PATH];
     if (objectPathFor(c, srcs->items[i], obj, sizeof(obj))) fastStampAdd(&paths, obj);
   }
+  bool hasEmbedded = false;
   for (int i = 0; i < c->embCount; i++) {
     if (!c->emb[i].enable) continue;
+    hasEmbedded = true;
     fastStampAdd(&paths, c->emb[i].objectPath);
     /* embedded.<n>.file adalah input eksternal proyek ini. Tanpa dicatat
        di fast-state, perubahan archive dapat terlewat sebelum cmdBuild()
@@ -414,6 +432,11 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
        perubahan archive tidak membatalkan fast path. */
     if (c->emb[i].archivePath[0]) fastStampAdd(&paths, c->emb[i].archivePath);
   }
+  /* Embedded bergantung pada verdict ld lintas-run. Tandai cache dengan
+     kind khusus agar fastState memvalidasi ld.cache -> ld, bukan sekadar
+     mtime file cache. Bila cache tidak valid/hilang, fast path gugur dan
+     build normal akan mem-probe lalu memperbarui cache. */
+  if (hasEmbedded) fastStampAdd(&paths, ldCacheFile());
   /* Library masuk stamp seperti file biasa ('F'): berubah -> fast path
      batal dan jalur normal meng-rebuild varian yang perlu (per-varian). */
   if (staticLib[0]) fastStampAdd(&paths, staticLib);
@@ -439,7 +462,9 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
       mt = -1;
       sz = 0;
     }
-    stamps[count].kind = mt < 0 ? 'M' : (fsDirExists(path) ? 'D' : 'F');
+    stamps[count].kind = strcmp(path, ldCacheFile()) == 0 && hasEmbedded
+                             ? 'L'
+                             : (mt < 0 ? 'M' : (fsDirExists(path) ? 'D' : 'F'));
     snprintf(stamps[count].path, sizeof(stamps[count].path), "%s", path);
     stamps[count].mtime = mt;
     stamps[count].size = stamps[count].kind == 'F' ? sz : 0;

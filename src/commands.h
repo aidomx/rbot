@@ -58,4 +58,13 @@ int cmdBuild(int jobs, const char *buildfilePath);
 int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly);
 int cmdClean(const char *buildfilePath);
 
+/*
+ * cmdCompdbGenerate — `rbot -g compdb`: hasilkan/
+ * refresh compile_commands.json TANPA membangun apa pun. Jalur query-only:
+ * loadConfig -> gather source -> fingerprint compdb -> cache hit / restore
+ * blob / render. Tidak ada decide, kompilasi, link, fast-state — aman
+ * dipanggil kapan pun (mis. sebelum build pertama, untuk editor/clangd).
+ */
+int cmdCompdbGenerate(const char *buildfilePath);
+
 #endif /* RBOT_V0_1_0_COMMANDS_H */

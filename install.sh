@@ -1,5 +1,8 @@
 #!/bin/sh
-# install.sh — pasang rbot.
+# rbot installation script
+#
+# This is a standard, safe build/install script for the rbot C project.
+# It compiles the source code and places the binary in the bin/ directory.
 #
 # Pemakaian:
 #   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh

@@ -84,11 +84,12 @@ int rbotRun(int argc, const char *argv[]) {
   int jobs = 0; /* 0 = otomatis: jumlah core CPU (di bawah); -j1 = serial */
   const char *cmd = NULL;
   const char *buildfile = "Buildfile"; /* -f <file> untuk memakai yang lain */
-  bool haveF = false;        /* true bila -f diberikan secara eksplisit */
-  bool wantWorkspace = false; /* -w: paksa mode workspace */
-  bool interactive = false;   /* init -p: scaffold interaktif */
-  const char *wsOnly = NULL;  /* -w <nama>: hanya proyek itu */
-  const char *wsRelSel = NULL; /* -w release -- key=value: selektor release */
+  bool haveF = false;                  /* true bila -f diberikan secara eksplisit */
+  bool wantWorkspace = false;          /* -w: paksa mode workspace */
+  bool generate = false;               /* -g compdb: generate compile_commands.json tanpa build */
+  bool interactive = false;            /* init -p: scaffold interaktif */
+  const char *wsOnly = NULL;           /* -w <nama>: hanya proyek itu */
+  const char *wsRelSel = NULL;         /* -w release -- key=value: selektor release */
 
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
@@ -112,6 +113,23 @@ int rbotRun(int argc, const char *argv[]) {
 
     if (strcmp(a, "-p") == 0) { /* rbot init -p: mode interaktif */
       interactive = true;
+      continue;
+    }
+
+    /* -g compdb: hasilkan compile_commands.json tanpa build (query-only).
+       Belakangan setelah build selesai pun aman — jalur ini tidak menyentuh
+       state build, hanya membaca config + source lalu menulis compdb. */
+    if (strcmp(a, "-g") == 0) {
+      if (i + 1 >= argc || !argv[i + 1][0] || argv[i + 1][0] == '-') {
+        fprintf(stderr, "rbot: -g requires a target (mis. 'rbot -g compdb')\n");
+        return 2;
+      }
+      const char *gt = argv[++i];
+      if (strcmp(gt, "compdb") != 0) {
+        fprintf(stderr, "rbot: unknown -g target '%s' (yang tersedia: compdb)\n", gt);
+        return 2;
+      }
+      generate = true;
       continue;
     }
 
@@ -270,7 +288,8 @@ int rbotRun(int argc, const char *argv[]) {
       return cmdInitWorkspace(haveF ? buildfile : WORKSPACE_FILENAME);
     if (cmd && *cmd && strcmp(cmd, "build") != 0 && strcmp(cmd, "clean") != 0 &&
         strcmp(cmd, "release") != 0) {
-      fprintf(stderr, "rbot: command '%s' tidak berlaku di mode workspace (pakai build/clean/release)\n",
+      fprintf(stderr,
+              "rbot: command '%s' tidak berlaku di mode workspace (pakai build/clean/release)\n",
               cmd);
       return 2;
     }
@@ -278,7 +297,9 @@ int rbotRun(int argc, const char *argv[]) {
        Selektor tanpa command release juga sah (default build + release
        selektif). */
     if (wsRelSel && cmd && *cmd && strcmp(cmd, "release") != 0) {
-      fprintf(stderr, "rbot: -- <key=value> hanya berlaku untuk release (pakai 'rbot -w release -- ...')\n");
+      fprintf(
+          stderr,
+          "rbot: -- <key=value> hanya berlaku untuk release (pakai 'rbot -w release -- ...')\n");
       return 2;
     }
     if (cmd && *cmd && strcmp(cmd, "release") == 0 && !wsRelSel) {
@@ -287,19 +308,27 @@ int rbotRun(int argc, const char *argv[]) {
     }
     /* `release` = build selektif + kemas release yang cocok; di workspace
        command ini berjalan sebagai build dengan selektor aktif. */
-    const char *wsCmd = (cmd && *cmd && strcmp(cmd, "release") == 0) ? "build" : (cmd && *cmd ? cmd : "build");
+    if (generate) {
+      fprintf(stderr, "rbot: -g compdb saat ini hanya di mode satu-proyek "
+                      "(jalankan di folder proyek, bukan root workspace)\n");
+      return 2;
+    }
+    const char *wsCmd =
+        (cmd && *cmd && strcmp(cmd, "release") == 0) ? "build" : (cmd && *cmd ? cmd : "build");
     return workspaceRun(wsCmd, jobs, wsOnly, wsRelSel);
   }
 
   int rc;
   if (!cmd || !*cmd) {
-    rc = cmdBuild(jobs, buildfile);
+    if (generate)
+      rc = cmdCompdbGenerate(buildfile);
+    else
+      rc = cmdBuild(jobs, buildfile);
   } else if (strcmp(cmd, "init") == 0) {
     rc = interactive ? cmdInteractiveInit() : cmdInit(buildfile);
   } else if (strcmp(cmd, "clean") == 0) {
     rc = cmdClean(buildfile);
-  } else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 ||
-             strcmp(cmd, "-h") == 0) {
+  } else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0) {
     showHelp();
     rc = 0;
   } else {
@@ -314,5 +343,6 @@ int rbotRun(int argc, const char *argv[]) {
     fsRemoveFile(XF_TMP);
     printf("> Removed    : %s (sementara, dari %s)\n", XF_TMP, convAbs);
   }
+
   return rc;
 }

@@ -52,12 +52,13 @@ OUTDIR=""     # -o : direktori kerja benchmark (default sys.tmp di cwd)
 NPROC=$(nproc 2>/dev/null || echo 4)
 
 usage() { sed -n '2,/^# ====.*$/p' "$0"; exit 0; }
-while getopts "n:H:r:b:ko:s:h" opt; do
+while getopts "n:H:r:b:t:ko:s:h" opt; do
   case $opt in
     n) NSRC=$OPTARG ;;
     H) NHEAD=$OPTARG ;;
     r) NRUN=$OPTARG ;;
     b) RBOT=$OPTARG ;;
+    t) TARGETS=$OPTARG ;;
     k) KEEP=1 ;;
     o) OUTDIR=$OPTARG ;;
     s) ONLY=$OPTARG ;;
@@ -89,6 +90,27 @@ TOOLS+=(rbot)
 [ "$HAVE_MESON" = 1 ] && TOOLS+=(meson)
 [ "$HAVE_XMAKE" = 1 ] && TOOLS+=(xmake)
 [ "$HAVE_TUP"   = 1 ] && TOOLS+=(tup)
+CDB_TOOLS=()   # make & tup tidak punya compdb native (make => lihat bear)
+# Filter tool benchmark jika -t diberikan.
+# Urutan TOOLS mengikuti urutan yang diminta user.
+if [ -n "$TARGETS" ]; then
+  OLD_TOOLS=("${TOOLS[@]}")
+  TOOLS=()
+  IFS=',' read -r -a REQUESTED_TOOLS <<< "$TARGETS"
+  for req in "${REQUESTED_TOOLS[@]}"; do
+    found=0
+    for k in "${OLD_TOOLS[@]}"; do
+      if [ "$k" = "$req" ]; then
+        TOOLS+=("$k")
+        found=1
+        break
+      fi
+    done
+    [ "$found" = 1 ] || { echo "target tool tidak tersedia: $req" >&2; exit 1; }
+  done
+  [ "${#TOOLS[@]}" -gt 0 ] || { echo "target tool kosong" >&2; exit 1; }
+fi
+
 CDB_TOOLS=()   # make & tup tidak punya compdb native (make => lihat bear)
 for k in "${TOOLS[@]}"; do
   case $k in make|tup) ;; *) CDB_TOOLS+=("$k") ;; esac
@@ -591,7 +613,7 @@ compdb_run() {
   case $1 in
     ninja) ninja -t compdb cc >compile_commands.json ;;
     bear)  bear -- make -j"$NPROC" ;;
-    rbot)  "$RBOT" ;;
+    rbot)  "$RBOT" -g compdb ;;
     cmake) cmake -G Ninja -B build-cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ;;
     meson) meson setup --reconfigure build-meson --buildtype=release ;;
     xmake) xmake project -k compile_commands ;;

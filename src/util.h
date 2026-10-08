@@ -22,8 +22,15 @@ typedef struct {
 
 bool listAdd(List *l, const char *s);
 void listFree(List *l);
-/* Urutkan isi List leksikografis (strcmp) — dipakai walkDir agar hasil
-   scan tidak bergantung urutan readdir filesystem. */
+/* Pesan kapasitas SEKALI di awal agar listAdd tidak realloc bolak-balik
+   saat jumlah item sudah diketahui kira-kira (mis. 1024 source). Gagal
+   alokasi dibiarkan diam-diam: listAdd tetap tumbuh doubling seperti biasa. */
+void listReserve(List *l, int want);
+/* Urutkan isi List leksikografis (strcmp). TIDAK dipanggil walkDir lagi —
+   sortir sekali pada data lengkap di pemanggil lebih murah daripada qsort
+   per level rekursi. Wajib dipanggil pemakai walkDir yang urutannya
+   menentukan output (daftar link, listfile tar, staging pack) agar hasil
+   tidak bergantung urutan readdir filesystem. */
 void listSort(List *l);
 void copyStr(char *dst, size_t n, const char *src);
 
@@ -39,6 +46,11 @@ void pcloseRB(FILE *fp);
 
 void mkdirs(const char *path);
 void mkparent(const char *path);
+/* Rekursif kumpulkan path di bawah `dir` berakhiran `ext` (ext == "": semua
+   file; ext == "/": hanya direktori). Hasil TIDAK DIURUTKAN — sortir sekali
+   pada data lengkap di pemanggil lebih murah daripada qsort per level.
+   Pemanggil yang urutannya menentukan output (link, listfile tar, staging
+   pack) memanggil listSort(out) SETELAH walkDir selesai. */
 void walkDir(const char *dir, const char *ext, List *out);
 bool newerThan(const char *a, const char *b);
 bool safeRelative(const char *path);

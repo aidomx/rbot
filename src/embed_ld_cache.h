@@ -28,6 +28,12 @@ bool ldCacheResolve(const char *exe, char *out, size_t n);
    fisik sendiri lalu menyimpannya via cacheWriteLD. */
 bool cacheReadLD(const char *ldPath, bool *out);
 
+/* Fast cache check: validate .rbot/ld.cache for an already-resolved ld; never probes. */
+bool cacheCheckLD(const char *ldPath, bool *out);
+
+/* Update cache for an already-resolved ld using an already-probed verdict. */
+void cacheUpdateLD(const char *ldPath, bool gnu);
+
 /* Simpan verdict probe (gnu=true berarti GNU ld) terkait binary ldPath.
    Diam bila stat path gagal; tulis atomik (file .tmp lalu rename). */
 void cacheWriteLD(const char *ldPath, bool gnu);
