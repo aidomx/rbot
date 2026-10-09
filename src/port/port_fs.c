@@ -41,9 +41,9 @@ typedef unsigned short mode_t;
 
 #else
 #include <dirent.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
 #include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 #ifdef _WIN32
@@ -251,7 +251,7 @@ bool fsMapRead(const char *path, void **outData, size_t *outSize) {
 
 void fsMapClose(void *data, size_t size) {
   if (!data) return;
-  if (size > 0) UnMapViewOfFile(data);
+  if (size > 0) UnmapViewOfFile(data);
   /* marker file kosong (1) tidak perlu dibebaskan */
 }
 
