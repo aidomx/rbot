@@ -377,7 +377,11 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       return;
     }
     if (strcmp(key, "with") == 0) {
-      /* with = tar, gz */
+      /* with = tar | tar, gz | tar, xz | with.tar = true + with.ext = <e>
+       * `tar` polos (tanpa koma) = tar TANPA kompresi: ext default "gz"
+       * harus dikosongkan, otherwise buildEmbeddedArchiveEntry memilih
+       * flag `z` (tar czf) dan nama arsip tetap <name>.tar.gz (bug).
+       */
       char buf[128];
       copyStr(buf, sizeof(buf), value);
       char *comma = strchr(buf, ',');
@@ -387,8 +391,12 @@ static void configApply(Config *c, const char *section, const char *sub, const c
         char *ext = trim(comma + 1);
         e->tar = strcmp(format, "tar") == 0;
         copyStr(e->ext, sizeof(e->ext), ext);
+      } else if (strcmp(trim(buf), "tar") == 0) {
+        e->tar = true;
+        e->ext[0] = '\0'; /* tanpa .tar.<ext> — tar murni */
       } else {
-        e->tar = strcmp(trim(buf), "tar") == 0;
+        e->tar = false;
+        copyStr(e->ext, sizeof(e->ext), trim(buf));
       }
       return;
     }
