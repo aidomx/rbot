@@ -37,10 +37,12 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs);
 /* Build penuh (fase normal binary): library lintas-proyek disertakan. */
 bool cmdsBuildLibrary(const Config *c, const List *srcs);
 
-/* Kompilasi paralel (-jN). Return false bila ada yang gagal/interrupt. */
+/* Kompilasi paralel (-jN). Return false bila ada yang gagal/interrupt.
+   quiet=true menekan baris status per job (dipakai `rbot profile`, yang
+   outputnya harus bersih agar laporan tidak tercampur log kompilasi). */
 bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const List *srcs,
                          char *objPath, size_t objCap, int jobs, int *outCompiled,
-                         int *outFailed, int *outInterrupted);
+                         int *outFailed, int *outInterrupted, bool quiet);
 
 /* Terbitkan build/version.h dari .rbot-version (root project). */
 bool cmdsEmitVersionHeader(const Config *c, bool *changed);

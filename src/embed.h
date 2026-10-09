@@ -37,6 +37,13 @@ bool embedResourceCompile(const EmbeddedEntry *e, const Config *c);
 bool buildEmbeddedArchives(const Config *c);
 bool buildEmbedded(const Config *c);
 
+/*
+ * embedProbeGnuLd — cek GNU ld dengan probe fisik sekali panggil, TANPA
+ * membaca/menulis cache .rbot/ld.cache. Dipakai jalur non-mutating
+ * (`rbot profile embed=`) yang tidak boleh menyentuh state build normal.
+ */
+bool embedProbeGnuLd(void);
+
 /* Finalisasi satu entri embedded: turunkan archivePath & objectPath dari
    setting arsip (archiveDir/name/tar/ext atau file prebuilt). Dipanggil
    configFinalize() di config.c; didefinisikan di embed.c agar pengetahuan

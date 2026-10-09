@@ -180,4 +180,21 @@ typedef struct {
 Config configDefaults(void);
 bool loadConfig(Config *c, const char *path);
 
+/*
+ * loadConfigEx — varian loadConfig dengan kontrol penulisan cache.
+ * cacheWrite=false: parse Buildfile TANPA menulis .rbot (cache config) —
+ * untuk jalur non-mutating (`rbot profile`) yang tidak boleh memperbarui
+ * cache build normal. Membaca cache yang valid tetap diizinkan (read-only).
+ */
+bool loadConfigEx(Config *c, const char *path, bool cacheWrite);
+
+/*
+ * configFinalize — terapkan konvensi proyek standar pada Config yang sudah
+ * di-parse (sources->src, headers->include bila folder ada, nama binary
+ * dari cwd, deteksi C++, resolusi path embedded). Dipanggil loadConfig
+ * setelah parse; juga publik untuk jalur tanpa Buildfile (rbot profile).
+ * MURNI derivasi in-memory — tidak menulis file apa pun.
+ */
+void configFinalize(Config *c);
+
 #endif /* RBOT_V0_1_0_CONFIG_H */

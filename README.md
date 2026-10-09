@@ -9,7 +9,7 @@
 
 Cross-platform: Linux, macOS, and Windows (MSVC + MinGW).
 
-Full documentation lives in [docs/](./docs/README.md): guides ([getting started](./docs/guide/getting-started.md), [Buildfile](./docs/guide/buildfile.md), [workspace](./docs/guide/workspace.md), [releases](./docs/guide/releases.md), [packaging](./docs/guide/packaging.md)) and references ([CLI](./docs/reference/cli.md), [Buildfile fields](./docs/reference/buildfile-fields.md)).
+Full documentation lives in [docs/](./docs/README.md): guides ([getting started](./docs/guide/getting-started.md), [Buildfile](./docs/guide/buildfile.md), [workspace](./docs/guide/workspace.md), [releases](./docs/guide/releases.md), [packaging](./docs/guide/packaging.md), [profiling](./docs/guide/profile.md)) and references ([CLI](./docs/reference/cli.md), [Buildfile fields](./docs/reference/buildfile-fields.md)).
 
 ## Installation
 
@@ -42,6 +42,9 @@ rbot -w         # build all projects in the workspace
 rbot -w NAME    # build project NAME and its dependencies
 rbot -w release -- name=NAME    # release a single project via CLI
 rbot clean      # clean build artifacts
+rbot profile archive=DIR [with=tar,gz|tar,xz|tar,bz2]  # measure operations
+rbot profile library=DIR [with=static|shared|static,shared]
+rbot profile binary=DIR [jobs=N] [--report FILE]
 rbot version    # display rbot version
 rbot help       # display help
 ```
@@ -116,6 +119,7 @@ Releases can be fully triggered from the CLI without declaration in `Buildfile.w
 - **Library output** — static + shared from the same objects (`output.libraryName`, `output.libraryShared`).
 - **build.ninja conversion** — `rbot -xf build.ninja` (temporary) or `-xcf` (kept); see [docs/reference/rbot-ninja-import.md](./docs/reference/rbot-ninja-import.md).
 - **Interrupt (Ctrl+C)** — SIGINT is forwarded to compiler jobs; a canceled build does not record a success snapshot. Details in [docs/reference/errors-and-interrupts.md](./docs/reference/errors-and-interrupts.md).
+- **Profiling** — `rbot profile` measures archive/library/binary costs without touching build state; see [docs/guide/profile.md](./docs/guide/profile.md).
 
 ## License
 MIT — see [LICENSE](./LICENSE).

@@ -24,7 +24,7 @@ static CompilerKind compilerKind(const char *cc) {
   if (strcmp(basebuf, "cl") == 0) return CC_MSVC;
   if (bl >= 2 && basebuf[bl - 2] == '+' && basebuf[bl - 1] == '+') return CC_GXX;
   if (strncmp(basebuf, "clang", 5) == 0) return CC_CLANG; /* clang, clang-*, dst. */
-  return CC_GCC; /* gcc, cc, mingw32-gcc, dst. */
+  return CC_GCC;                                          /* gcc, cc, mingw32-gcc, dst. */
 }
 
 bool compilerIsMSVC(const Config *c) {
@@ -285,7 +285,7 @@ static char *translateFlagsToMsvc(const char *flags) {
     if (len >= 2 && start[0] == '-' && start[1] == 'I') {
       strncat(out, "/I", n - strlen(out) - 1);
       strncat(out, start + 2, n - strlen(out) - 1);
-    } else    if (len >= 2 && start[0] == '-' && start[1] == 'W') {
+    } else if (len >= 2 && start[0] == '-' && start[1] == 'W') {
       /* -Wall/-Wextra -> /W4; warning lain dinormalisasi ke /W3 */
       strcat(out, (len == 5 && strncmp(start, "-Wall", 5) == 0) ||
                           (len == 7 && strncmp(start, "-Wextra", 7) == 0)

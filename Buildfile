@@ -34,10 +34,10 @@ o.buildDir = build
 o.compileCommands = auto 
 
 pack.name = rbot
-pack.version = 0.2.2
+pack.version = 0.2.3
 pack.output = dist/{name}-v{version}.tar.gz
 
-pack.files = bin/rbot:bin/rbot, README.md:share/rbot/README.md, LICENSE:share/rbot/LICENSE
+pack.files = bin/rbot:bin/rbot, README.md:share/rbot/README.md, LICENSE:share/rbot/LICENSE, src/cmd.txt:share/rbot/cmd.txt
 
 pack.format = deb
 pack.checksum = sha256

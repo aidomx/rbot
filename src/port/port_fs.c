@@ -42,7 +42,8 @@ typedef unsigned short mode_t;
 #else
 #include <dirent.h>
 #include <sys/stat.h>
-#include <sys/types.h>
+#include <sys/mman.h>
+#include <fcntl.h>
 #include <unistd.h>
 #endif
 #ifdef _WIN32
@@ -213,6 +214,47 @@ bool fsSetCwd(const char *path) {
   return SetCurrentDirectoryA(tmp) != 0;
 }
 
+/* MapViewOfFile read-only (Windows). Deallocasi: UnMapViiewOfFile. */
+bool fsMapRead(const char *path, void **outData, size_t *outSize) {
+  *outData = NULL;
+  *outSize = 0;
+  char tmp[MAX_PATH * 2];
+  toBackslash(tmp, sizeof(tmp), path);
+  HANDLE hFile = CreateFileA(tmp, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                             FILE_ATTRIBUTE_NORMAL, NULL);
+  if (hFile == INVALID_HANDLE_VALUE) return false;
+  LARGE_INTEGER sz;
+  if (!GetFileSizeEx(hFile, &sz)) {
+    CloseHandle(hFile);
+    return false;
+  }
+  HANDLE hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+  if (!hMap) {
+    CloseHandle(hFile);
+    return false;
+  }
+  if (sz.QuadPart <= 0) { /* file kosong: marker valid, size 0 */
+    CloseHandle(hMap);
+    CloseHandle(hFile);
+    *outData = (void *)(intptr_t)1;
+    *outSize = 0;
+    return true;
+  }
+  void *view = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+  CloseHandle(hMap);
+  CloseHandle(hFile);
+  if (!view) return false;
+  *outData = view;
+  *outSize = (size_t)sz.QuadPart;
+  return true;
+}
+
+void fsMapClose(void *data, size_t size) {
+  if (!data) return;
+  if (size > 0) UnMapViewOfFile(data);
+  /* marker file kosong (1) tidak perlu dibebaskan */
+}
+
 #else /* !_WIN32 */
 
 /* ========== POSIX: Filesystem ========== */
@@ -287,10 +329,11 @@ unsigned fsGetMode(const char *path) {
 }
 
 bool fsRemoveTree(const char *path) {
-  if (!fsDirExists(path)) {
-    /* bukan direktori: hapus sebagai file biasa */
-    return fsFileExists(path) ? fsRemoveFile(path) : true;
-  }
+  /* lstat prevents following symlinks while removing package archives or
+     ~/.rbot; otherwise a symlink to a directory could delete external data. */
+  struct stat rootStat;
+  if (lstat(path, &rootStat) != 0) return true;
+  if (S_ISLNK(rootStat.st_mode) || !S_ISDIR(rootStat.st_mode)) return unlink(path) == 0;
   List dirs = {0}, files = {0};
   fsListDir(path, &dirs, &files);
   bool ok = true;
@@ -347,6 +390,37 @@ bool fsGetCwd(char *out, size_t n) {
 
 bool fsSetCwd(const char *path) {
   return chdir(path) == 0;
+}
+
+/* mmap read-only (POSIX). */
+bool fsMapRead(const char *path, void **outData, size_t *outSize) {
+  *outData = NULL;
+  *outSize = 0;
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return false;
+  struct stat st;
+  if (fstat(fd, &st) != 0) {
+    close(fd);
+    return false;
+  }
+  if (st.st_size <= 0) { /* kosong: map tak diperlukan — dibaca dgn read */
+    close(fd);
+    *outData = (void *)(intptr_t)1; /* marker valid, size 0, aman free */
+    *outSize = 0;
+    return true;
+  }
+  void *map = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+  close(fd);
+  if (map == MAP_FAILED) return false;
+  *outData = map;
+  *outSize = (size_t)st.st_size;
+  return true;
+}
+
+void fsMapClose(void *data, size_t size) {
+  if (!data) return;
+  if (size > 0) munmap(data, size);
+  /* data marker file kosong (1) tidak perlu dibebaskan */
 }
 
 #endif /* !_WIN32 */

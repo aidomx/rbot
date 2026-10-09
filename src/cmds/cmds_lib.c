@@ -102,7 +102,7 @@ typedef struct {
 
 bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const List *srcs,
                          char *objPath, size_t objCap, int jobs, int *outCompiled,
-                         int *outFailed, int *outInterrupted) {
+                         int *outFailed, int *outInterrupted, bool quiet) {
   JobSlot *slots = calloc((size_t)jobs, sizeof(JobSlot));
   ProcHandle *handles = calloc((size_t)jobs, sizeof(ProcHandle));
   if (!slots || !handles) {
@@ -155,8 +155,10 @@ bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const
     double dt = nowSeconds() - slots[w].start;
     compiled++;
     const char *tag = fin->interrupted ? "INT" : (fin->ok ? "OK" : "FAIL");
-    printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, tag, dt, slots[w].src);
-    fflush(stdout);
+    if (!quiet) {
+      printf("[%3d/%3d] %-4s %5.2fs  %s\n", compiled, total, tag, dt, slots[w].src);
+      fflush(stdout);
+    }
     if (!fin->ok) {
       if (fin->interrupted)
         interrupted++;

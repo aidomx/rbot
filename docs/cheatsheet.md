@@ -76,6 +76,21 @@ rbot -h
 
 sebagai sumber kebenaran untuk binary yang terpasang.
 
+### Profile
+
+```bash
+rbot profile archive=rupamod
+rbot profile archive=rupamod with=tar,gz      # atau tar,xz / tar,bz2 / tar / none
+rbot profile embed=rupamod                    # dir atau file
+rbot profile library=rupamod with=static,shared
+rbot profile binary=. jobs=4 --report profile.md
+```
+
+- Mengukur biaya operasi tanpa build normal; tidak menyentuh build state.
+- `with=` spesifik per context; opsi tak dikenal ditolak dengan pesan jelas.
+- TTY: ringkasan singkat. Pipe (`> profile.md`): laporan rinci.
+- `--report FILE`: laporan rinci ke file, ringkasan tetap di terminal.
+
 ---
 
 # 2. Project Buildfile

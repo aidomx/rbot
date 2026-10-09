@@ -1,5 +1,6 @@
 #include "prof.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,4 +85,45 @@ void profReport(void) {
     if (g_n > PROF_MAX) fprintf(stderr, "  (%d penanda terpotong)\n", g_n - PROF_MAX);
   }
   g_n = 0; /* consume: blok berikutnya mulai dari nol */
+}
+
+/* ==================== sesi profile ==================== */
+
+/*
+ * Implementasi sesi (lihat prof.h). Tidak memakai g_on: command profile
+ * selalu mengukur, terlepas dari RBOT_PROFILE. PROF_MAX fase cukup untuk
+ * context saat ini (<= 5 fase per context); fase melebihi kapasitas
+ * dibuang senyap — jumlah context kecil dan tertib.
+ */
+static ProfPhase g_phases[PROF_MAX];
+static int g_np = 0;
+static double g_phaseT0 = 0.0;
+static const char *g_phaseLabel = NULL;
+
+void profSessionReset(void) {
+  g_np = 0;
+  g_phaseLabel = NULL;
+}
+
+void profPhaseBegin(const char *label) {
+  if (!label) return;
+  g_phaseLabel = label;
+  g_phaseT0 = profNow();
+}
+
+void profPhaseEnd(uint64_t inBytes, uint64_t outBytes) {
+  if (!g_phaseLabel) return;
+  if (g_np < PROF_MAX) {
+    g_phases[g_np].label = g_phaseLabel;
+    g_phases[g_np].ms = (profNow() - g_phaseT0) * 1000.0;
+    g_phases[g_np].inBytes = inBytes;
+    g_phases[g_np].outBytes = outBytes;
+    g_np++;
+  }
+  g_phaseLabel = NULL;
+}
+
+const ProfPhase *profPhases(int *count) {
+  if (count) *count = g_np < PROF_MAX ? g_np : PROF_MAX;
+  return g_phases;
 }

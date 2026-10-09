@@ -7,17 +7,7 @@
  * src/main.c — dispatcher & loader.
  *
  * File ini TIDAK berisi operasi rbot itu sendiri. Tugasnya hanya:
- * mendelegasikan seluruh argumen ke rbotRun(), yang diimplementasikan oleh
- * folder versi aktif (lihat include/rbot.h). Nama folder itu sendiri
- * (mis. src/v0.1.0/) adalah versinya, dan versi itu dikompilasi tetap ke
- * binary lewat rbotVersion() — bukan dibaca ulang dari file .version saat
- * runtime, supaya `rbot version` selalu benar di mana pun rbot dijalankan
- * (tidak tergantung direktori kerja).
- *
- * Menaikkan versi berarti: tambah folder src/vX.Y.Z/ baru dengan rbotRun()
- * dan rbotVersion() sendiri, lalu arahkan Buildfile: sources ke folder itu.
- * .version di root tetap dipakai sebagai penanda dokumentasi folder mana
- * yang sedang aktif dibangun.
+ * mendelegasikan seluruh argumen ke rbotRun(), yang diimplementasikan oleh src/rbot.c
  */
 
 int main(int argc, const char *argv[]) {

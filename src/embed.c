@@ -69,6 +69,12 @@ static bool ldAvailable(void) {
   return false;
 }
 
+/* Probe tanpa cache untuk jalur non-mutating — lihat embed.h. */
+bool embedProbeGnuLd(void) {
+  if (!probeAvailable("ld")) return false;
+  return isGnuLd();
+}
+
 static uint64_t embArchiveConfigHash(const EmbeddedEntry *e) {
   uint64_t h = UINT64_C(1469598103934665603);
 #define HASH_BYTES(p, n)                                                                           \

@@ -2,6 +2,7 @@
 #define RBOT_PROF_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /*
  * prof — profil fase ringan (RBOT_PROFILE=1).
@@ -21,5 +22,29 @@ void profInit(void);              /* baca env RBOT_PROFILE sekali + reset */
 bool profOn(void);
 void profMark(const char *label); /* catat waktu penanda fase */
 void profReport(void);            /* cetak total + delta ke stderr, reset */
+
+/* ---------- sesi profil: `rbot profile <context>` (design/profile.md) ---------- */
+
+/*
+ * Sesi fase bernama untuk command profile. Berbeda dari profMark (aktif
+ * lewat env RBOT_PROFILE), sesi ini SELALU aktif dan hanya dipakai oleh
+ * `rbot profile` — command yang tugasnya memang mengukur. Mesin timing
+ * tetap prof (profNow) — bukan subsistem timing kedua.
+ *
+ * Label = string literal pemanggil (tidak disalin, pola profMark).
+ * Byte in/out opsional; 0 berarti tidak dicetak di laporan rinci.
+ */
+typedef struct {
+  const char *label;
+  double ms;
+  uint64_t inBytes;
+  uint64_t outBytes;
+} ProfPhase;
+
+void profSessionReset(void);            /* kosongkan fase sesi */
+void profPhaseBegin(const char *label); /* mulai fase (tandai waktu) */
+void profPhaseEnd(uint64_t inBytes, uint64_t outBytes); /* akhiri + rekam */
+/* Fase sesi terakhir (buffer statis; count boleh NULL). */
+const ProfPhase *profPhases(int *count);
 
 #endif /* RBOT_PROF_H */

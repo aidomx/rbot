@@ -41,8 +41,6 @@
  */
 
 #define WS_NAME_LEN 64
-#define WS_MAX_PROJECTS 16
-#define WS_MAX_RELEASES 8
 #define WS_LINE_LEN 1024
 
 typedef struct {
@@ -1534,3 +1532,60 @@ const char *workspaceFileName(void) {
 }
 
 bool workspaceFileExists(void) { return workspaceFileName() != NULL; }
+
+/*
+ * workspaceEnumerate — parse & validasi model workspace untuk enumerasi
+ * (dipakai `rbot profile workspace=`): semua validasi model yang sama
+ * dengan workspaceRun, TANPA sintesis/build apa pun. nama proyek hasil
+ * topo sort diisi ke projectNames[]. Buffer internal model statis —
+ * pointer hasil valid sampai panggilan berikutnya.
+ */
+int workspaceEnumerate(const char *wsDir, int *count, const char **projectNames,
+                       int maxProjects) {
+  static WsModel mM;
+  WsModel *m = &mM;
+  *count = 0;
+
+  const char *wsName = workspaceFileName();
+  if (!wsName) {
+    fprintf(stderr, "rbot: %s not found\n", WORKSPACE_FILENAME);
+    return 1;
+  }
+  char wsFile[MAX_PATH * 2];
+  snprintf(wsFile, sizeof(wsFile), "%s/%s", wsDir, wsName);
+  if (!wsParse(m, wsFile)) {
+    wsModelFree(m);
+    return 1;
+  }
+  if (m->projectCount == 0) {
+    fprintf(stderr, "rbot: workspace: no projects declared\n");
+    wsModelFree(m);
+    return 1;
+  }
+  if (!wsValidatePackMerges(m)) {
+    wsModelFree(m);
+    return 1;
+  }
+  if (!wsValidateReleases(m)) {
+    wsModelFree(m);
+    return 1;
+  }
+  if (!wsTopoSort(m)) {
+    wsModelFree(m);
+    return 1;
+  }
+
+  /* Salin nama ke buffer statis agar valid setelah wsModelFree. */
+  static WsProject namesStorage[WS_MAX_PROJECTS];
+  (void)namesStorage;
+  static char nameBufs[WS_MAX_PROJECTS][WS_NAME_LEN];
+  for (int i = 0; i < m->order.count && *count < maxProjects; i++) {
+    /* Indeks dibaca SEKALI: `a[(*count)++] = b[*count]` tidak berurutan
+       (UB) dan bisa menunjuk slot berikutnya yang belum terisi. */
+    int idx = (*count)++;
+    copyStr(nameBufs[idx], WS_NAME_LEN, m->order.items[i]);
+    projectNames[idx] = nameBufs[idx];
+  }
+  wsModelFree(m);
+  return 0;
+}

@@ -189,51 +189,106 @@ static const char *stateFileFor(bool libOnly) {
   return libOnly ? BUILD_STATE_FILE_LIB : BUILD_STATE_FILE;
 }
 
-static bool fastStateLoad(FastState *s, bool libOnly) {
+/*
+ * Pemindai state berbasis buffer (dipakai baik oleh jalur mmap maupun
+ * fallback fopen): fscanf-file -> scanf-buffer. Format persis sama dengan
+ * fastStateLoad lama; hanya sumbernya yang berbeda.
+ *
+ * Return true bila seluruh field valid. *endOut = pointer MISALNYA ke
+ * karakter setelah last token yang dikonsumsi (dipakai utk sanity check).
+ */
+static bool fastStateScan(const char *buf, size_t size, FastState *s) {
   memset(s, 0, sizeof(*s));
-  FILE *f = fopen(stateFileFor(libOnly), "r");
-  if (!f) return false;
+  /* scanf buffer: buat buffer NUL-terminated. State txt kecil (<~16MB). */
+  char *tmp = malloc(size + 1);
+  if (!tmp) return false;
+  memcpy(tmp, buf, size);
+  tmp[size] = '\0';
+
   char magic[32];
   long long bfm = 0, tm = 0;
   int libReq = 0, libSt = 0, libSh = 0, phase = 0;
-  if (fscanf(f, "%31s", magic) != 1 || strcmp(magic, BUILD_STATE_MAGIC) != 0 ||
-      fscanf(
-          f,
-          "%1023s %1023s %lld %lld %2047s %lld %lld %d %d %d %d %d %d %d %2047s %2047s %lld %lld",
-          s->cwd, s->buildfile, &bfm, &s->buildfileSize, s->target, &tm, &s->targetSize,
-          &s->compiled, &s->skipped, &s->count, &phase, &libReq, &libSt, &libSh, s->libStaticPath,
-          s->libSharedPath, &s->libStaticSize, &s->libSharedSize) != 18 ||
-      s->count < 0 || s->count > 200000) {
-    fclose(f);
-    return false;
+  const char *cur = tmp;
+  int consumed = 0;
+  bool ok =
+      sscanf(cur, "%31s", magic) == 1 && strcmp(magic, BUILD_STATE_MAGIC) == 0;
+  consumed += magic[0] ? (int)strlen(magic) : 0;
+  if (ok) {
+    consumed += 1;
+    cur += consumed;
+    ok = sscanf(
+            cur,
+            "%1023s %1023s %lld %lld %2047s %lld %lld %d %d %d %d %d %d %d %2047s %2047s %lld %lld%n",
+            s->cwd, s->buildfile, &bfm, &s->buildfileSize, s->target, &tm, &s->targetSize,
+            &s->compiled, &s->skipped, &s->count, &phase, &libReq, &libSt, &libSh,
+            s->libStaticPath, s->libSharedPath, &s->libStaticSize, &s->libSharedSize,
+            &consumed) == 18 &&
+        s->count >= 0 && s->count <= 200000;
   }
-  s->buildfileMtime = (int64_t)bfm;
-  s->targetMtime = (int64_t)tm;
-  s->phase = phase;
-  s->libRequested = libReq != 0;
-  s->libStaticUp = libSt != 0;
-  s->libSharedUp = libSh != 0;
-  /* placeholder "-" = varian library tidak aktif (path kosong tidak bisa
-     dibaca %s) */
-  if (strcmp(s->libStaticPath, "-") == 0) s->libStaticPath[0] = '\0';
-  if (strcmp(s->libSharedPath, "-") == 0) s->libSharedPath[0] = '\0';
-  s->stamps = calloc((size_t)s->count, sizeof(FastStamp));
-  if (s->count && !s->stamps) {
-    fclose(f);
-    return false;
+  if (ok) {
+    cur += consumed;
+    s->buildfileMtime = (int64_t)bfm;
+    s->targetMtime = (int64_t)tm;
+    s->phase = phase;
+    s->libRequested = libReq != 0;
+    s->libStaticUp = libSt != 0;
+    s->libSharedUp = libSh != 0;
+    /* placeholder "-" = varian library tidak aktif (path kosong tidak bisa
+       dibaca %s) */
+    if (strcmp(s->libStaticPath, "-") == 0) s->libStaticPath[0] = '\0';
+    if (strcmp(s->libSharedPath, "-") == 0) s->libSharedPath[0] = '\0';
+    s->stamps = calloc((size_t)s->count, sizeof(FastStamp));
+    if (s->count && !s->stamps) ok = false;
   }
-  for (int i = 0; i < s->count; i++) {
+  for (int i = 0; ok && i < s->count; i++) {
     long long mt = 0, sz = 0;
-    if (fscanf(f, " %c %lld %lld %4095s", &s->stamps[i].kind, &mt, &sz, s->stamps[i].path) != 4) {
-      fclose(f);
+    if (sscanf(cur, " %c %lld %lld %4095s%n", &s->stamps[i].kind, &mt, &sz,
+               s->stamps[i].path, &consumed) != 4) {
       fastStateFree(s);
-      return false;
+      ok = false;
+      break;
     }
+    cur += consumed;
     s->stamps[i].mtime = (int64_t)mt;
     s->stamps[i].size = sz;
   }
+  free(tmp);
+  return ok;
+}
+
+static bool fastStateLoad(FastState *s, bool libOnly) {
+  /* design/bootstrap.md fase 2: map state sebagai READ-ONLY lewat mmap
+     (POSIX) / CreateFileMapping (Windows) — evaluasi noop tidak menyalin
+     file lewat stdio. Fallback tradisional (aturan 4) tetap ada bila map
+     gagal (file kosong/OS terbatas): body identik dengan fastStateScan. */
+  void *map = NULL;
+  size_t mapSize = 0;
+  bool mapped = stateFileFor(libOnly) != NULL && fsMapRead(stateFileFor(libOnly), &map, &mapSize);
+  if (mapped) {
+    bool ok = fastStateScan(map, mapSize, s);
+    fsMapClose(map, mapSize);
+    return ok;
+  }
+  /* Fallback: baca file tradisional ke memori, lalu pakai scanner sama. */
+  FILE *f = fopen(stateFileFor(libOnly), "rb");
+  if (!f) return false;
+  fseek(f, 0, SEEK_END);
+  long n = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (n < 0 || n > 64 * 1024 * 1024) {
+    fclose(f);
+    return false;
+  }
+  char *buf = malloc((size_t)n + 1);
+  if (!buf) {
+    fclose(f);
+    return false;
+  }
+  size_t rd = fread(buf, 1, (size_t)n, f);
   fclose(f);
-  return true;
+  bool ok = fastStateScan(buf, rd, s);
+  free(buf);
+  return ok;
 }
 
 /* Placeholder "-" = target/varian library tidak aktif (path kosong tidak

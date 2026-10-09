@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cmdhelp.h"
 #include "cmds/cmds_internal.h"
 #include "compdb.h"
 #include "compile.h"
@@ -23,34 +24,9 @@
  *   - cmds/cmds_state.c : fingerprint build, fast no-op snapshot, clean.
  */
 
-/* ==================== help ==================== */
+/* ==================== help (dari src/cmd.txt — sumber tunggal) ==================== */
 
-void showHelp(void) {
-  printf("Rbot - A simple builder for you\n\n");
-  printf("> rbot [-f <file>] [-jN] <command>\n\n");
-  printf("%-8s%s\n", "", "- build project from Buildfile (default, no command needed)");
-  printf("%-8s%s\n", "-f <f>", "- pakai <f> sebagai Buildfile (default: Buildfile)");
-  printf("%-8s%s\n", "-xf <n>",
-         "- konversi build.ninja <n> -> Buildfile.xf.tmp (sementara; Buildfile tak disentuh)");
-  printf("%-8s%s\n", "-xcf <n>",
-         "- sama seperti -xf, tapi hasil konversi ditulis ke Buildfile (konfirmasi bila ada)");
-  printf("%-8s%s\n", "-j[N]", "- build paralel, N job (tanpa -j: jumlah core CPU; -j1 = serial)");
-  printf("%-8s%s\n", "-g compdb",
-         "- generate compile_commands.json tanpa build (untuk editor/clangd)");
-  printf("%-8s%s\n", "-w", "- mode workspace: build semua proyek (Buildfile.ws)");
-  printf("%-8s%s\n", "", "- rbot -w <nama>: hanya proyek itu (+ dependency-nya)");
-  printf("%-8s%s\n", "",
-         "- rbot -w release -- name=rupa: kemas release selektif (dist/release/<nama>)");
-  printf("%-8s%s\n", "init", "- create a default Buildfile if none exists yet");
-  printf("%-8s%s\n", "",
-         "- rbot init -p: scaffold interaktif (nama, bahasa, workspace, include, dst.)");
-  printf("%-8s%s\n", "", "- rbot init -w: buat Buildfile.ws (mode workspace) bila belum ada");
-  printf("%-8s%s\n", "clean", "- clean build artifacts (Buildfile: clean)");
-  printf("%-8s%s\n", "", "- output.libraryName/libraryShared membangun lib<name>.a + .so");
-  printf("%-8s%s\n", "", "- pack.* mengemas artefak: tar.gz + .deb + checksum sha256");
-  printf("%-8s%s\n", "help", "- show this help");
-  printf("%-8s%s\n", "version", "- show version of rbot");
-}
+void showHelp(void) { cmdHelpMain(); }
 
 /* ==================== init ==================== */
 
@@ -873,7 +849,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   /* Fase 2: kompilasi hanya yang berubah — paralel (-jN) atau serial. */
   if (jobs != 1 && total > 0) {
     cmdsRunParallelJobs(&c, inc, wf, &pending, obj, sizeof(obj), jobs, &compiled, &failed,
-                        &interrupted);
+                        &interrupted, false);
   } else {
     for (int i = 0; i < pending.count; i++) {
       const char *src = pending.items[i];

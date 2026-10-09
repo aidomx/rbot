@@ -1,0 +1,201 @@
+---help
+Rbot - A simple builder for you
+
+> usage: rbot [-f <file>] [-jN] <command>
+
+(no command)           Build project from Buildfile
+-f <file>              Use <file> as Buildfile (default: Buildfile)
+-xf <build.ninja>      Convert build.ninja -> Buildfile.xf.tmp (temporary)
+-xcf <build.ninja>     Convert and write to Buildfile (confirm if exists)
+-j[N]                  Parallel build with N jobs (default: CPU core count)
+-g compdb              Generate compile_commands.json without building
+
+rbot init              Create a minimal Buildfile (use project)
+rbot init -p           Interactive scaffold (name, language, workspace)
+rbot init -w           Create Buildfile.ws (workspace template)
+rbot clean             Remove build artifacts
+rbot profile <ctx>     Measure operation costs (see: help profile)
+rbot -w                Build all projects in workspace (Buildfile.ws)
+rbot -w <name>         Build <name> and its dependencies
+rbot -w release -- name=<p>[,key=value]  Package one release
+rbot help              Show this help
+rbot help <topic>      Show topic help
+rbot version           Show version
+rbot self-upgrade      Upgrade rbot itself
+rbot self-uninstall    Remove rbot and global state (requires confirmation)
+
+Topics: build, profile, workspace, init, clean, release, compdb, ninja, install
+---endhelp
+
+---build
+Build commands
+
+rbot                   Build project from Buildfile
+rbot build             Same as above (explicit)
+rbot -f <file>         Build using <file> as the Buildfile
+rbot -j[N]             Parallel build, N jobs (-j1 = serial; no -j = cores)
+rbot -g compdb         Generate compile_commands.json only (no build)
+
+Conventions for a standard project (src/ + optional include/):
+  a one-line Buildfile is enough: `use project`
+
+Buildfile fields that override conventions:
+  sources, headers, flags, std, compiler, exclude,
+  output.binaryName, output.binaryDir, output.buildDir,
+  output.libraryName, output.libraryShared
+
+Build is incremental: header tracking (mtime + content hash),
+dependency cache (.rbot/deps.cache), and a fast no-op snapshot
+(.rbot/build.state) skip work when nothing changed.
+---endbuild
+
+---install
+Rbot Lifecycle CLI
+
+rbot self-upgrade          Upgrade rbot through its distribution mechanism
+rbot self-uninstall [--yes] Remove global rbot state; confirmation required
+
+---endinstall
+
+---profile
+Profile commands — measure costs without a normal build.
+Profiling never touches build state (.rbot/, Buildfile, artifacts).
+
+rbot profile archive=<dir> [with=tar|none|tar,gz|tar,xz|tar,bz2]
+                       Measure tar + compression of a directory.
+rbot profile embed=<dir|file>
+                       Measure embedded-asset pipeline.
+rbot profile library=<dir> [with=static|shared|static,shared]
+                       Measure .o collection + ar rcs / cc -shared.
+rbot profile binary=<dir> [jobs=N] [--report <file>]
+                       Measure full cold compile + link in isolation.
+rbot profile project=<dir> [jobs=N]
+                       Measure the incremental project cycle:
+                       config, fingerprint, decide, compile, link.
+                       With --repeat 2 the second run shows the warm
+                       path: decide > 0, compile = 0.
+rbot profile workspace=<dir>
+                       Measure workspace model cost: parse,
+                       dependency/topo, library-declaration checks.
+                       Projects are validated but not built.
+
+Options:
+  with=<backend>       Context-specific; invalid combos are rejected:
+                       "rbot: profile option 'with' is not valid for
+                       context '<ctx>'"
+  jobs=N               (binary/project) parallel compile jobs
+                       (default: cores)
+  --report <file>      Write detailed report to file (summary stays
+                       on the terminal)
+  --repeat <N>         Repeat the run N times (1..100); the sandbox is
+                       kept, so caches live and later runs measure the
+                       warm path. Phases aggregate over all runs.
+
+Output: terminal shows a short summary; piped output shows the
+detailed report, so `rbot profile archive=<dir> > profile.md` is
+enough. Paths accept `~/...` (expanded by rbot itself).
+
+Examples:
+  rbot profile archive=rupamod with=tar,gz
+  rbot profile library=rupamod with=static,shared
+  rbot profile binary=. --report profile.md
+  rbot profile project=. --repeat 3
+---endprofile
+
+---workspace
+Workspace commands (Buildfile.ws)
+
+rbot -w                Build (and release) every declared project
+rbot -w <name>         Build <name> and its dependency closure
+rbot -w clean          Clean the entire workspace
+rbot -w release -- name=<p>[,key=value]
+                       Package one release to dist/release/<name>/
+rbot init -w           Create a workspace Buildfile (Buildfile.ws)
+
+A minimal workspace Buildfile.ws:
+  use workspace
+  projects = app, tool
+
+Members follow the standard convention (a <name>/ folder with
+src/); per-project settings like <name>.sources or
+<name>.depends_on are declared in the same file. Builds run in
+two phases — library pass (lib<name>.a/.so) first, binary pass
+after — so cross-project library references resolve correctly.
+---endworkspace
+
+---init
+Init commands
+
+rbot init              Create a minimal Buildfile (just `use project`)
+rbot init -p           Interactive scaffold: project name, language
+                       (c/cpp), std, compiler, flags, include/,
+                       workspace membership, depends_on. Enter accepts
+                       the default; the scaffold builds out of the box.
+rbot init -w           Write a workspace template (Buildfile.ws)
+
+init never overwrites existing files: any existing target aborts
+before writing. Ctrl+C or EOF cancels.
+---endinit
+
+---clean
+Clean commands
+
+rbot clean             Remove build artifacts:
+                         build directory (o.buildDir, default build/)
+                         bin directory (o.binaryDir, default bin/)
+                         lib directory (o.libDir, default lib/)
+                         compile_commands.json
+                         .rbot cache (deps.cache, build state)
+
+Clean follows the active project configuration; in workspace mode
+(`rbot -w clean`) it cleans every member project.
+---endclean
+
+---release
+Release commands (workspace)
+
+rbot -w release -- name=<project>[,key=value...]
+                       Package one project release from the CLI.
+                       name= is required; target=deb|tar overrides the
+                       packaging format for this run. Artifacts go to
+                       dist/release/<name>/ (or dist/release/ for a
+                       full `rbot -w` run).
+
+Releases can also be declared in Buildfile.ws:
+  releases = rupa, ruka
+  releases.rupa as rrupa
+  rrupa.name = rupa
+  rrupa.target = deb
+
+Packages need pack.files (source:path mapping); checksum
+sha256 is written next to the artifact when enabled.
+---endrelease
+
+---compdb
+Compile commands
+
+rbot -g compdb         Generate/refresh compile_commands.json without
+                       building. Query-only: safe to run any time
+                       (editor/clangd integration).
+
+Buildfile: output.compileCommands = auto (default) avoids
+rewriting the file when configuration is unchanged.
+---endcompdb
+
+---ninja
+Ninja conversion
+
+rbot -xf <build.ninja>
+                       Convert a Ninja build file to a Buildfile and
+                       write it to Buildfile.xf.tmp (temporary; the
+                       existing Buildfile is never touched). The temp
+                       file is used for this command and removed
+                       afterwards.
+rbot -xcf <build.ninja>
+                       Same conversion, but writes the result to
+                       Buildfile — with a confirmation prompt first if
+                       one already exists.
+
+Conversion is best-effort for common Ninja rules; the converted
+Buildfile may need edits for non-standard setups.
+---endninja

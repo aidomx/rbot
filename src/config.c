@@ -115,7 +115,13 @@ static void configFinalizeLibraries(Config *c) {
 #endif
 }
 
-static void configFinalize(Config *c) {
+/*
+ * configFinalize — terapkan konvensi proyek standar pada Config hasil parse
+ * (dipanggil loadConfig; juga dipakai jalur TANPA Buildfile — `rbot profile
+ * binary=<dir>` — sehingga konvensi sources=src dst. tetap berlaku).
+ * MURNI derivasi in-memory + stat direktori; tidak menulis file apa pun.
+ */
+void configFinalize(Config *c) {
   configFinalizeLibraries(c);
   for (int i = 0; i < c->embCount; i++)
     configFinalizeEntry(&c->emb[i], c->outBuildDir);
@@ -565,7 +571,7 @@ static void parseLine(Config *c, char *section, char *sub, char *subsub, int *su
     configApply(c, section, sub, NULL, key, value);
 }
 
-bool loadConfig(Config *c, const char *path) {
+bool loadConfigEx(Config *c, const char *path, bool cacheWrite) {
   char cachePath[MAX_PATH];
   cfgCachePathFor(path, cachePath, sizeof(cachePath));
 
@@ -613,6 +619,8 @@ bool loadConfig(Config *c, const char *path) {
   }
   fclose(fp);
   configFinalize(c);
-  cfgCacheSave(c, path, cachePath);
+  if (cacheWrite) cfgCacheSave(c, path, cachePath);
   return true;
 }
+
+bool loadConfig(Config *c, const char *path) { return loadConfigEx(c, path, true); }

@@ -116,4 +116,24 @@ void fsListDir(const char *dir, List *dirs, List *files);
 bool fsGetCwd(char *out, size_t n);
 bool fsSetCwd(const char *path);
 
+/* ==================== Memory-mapped file (read-only) ==================== */
+
+/*
+ * Map seluruh file untuk DIBACA SAJA ke memori (design/bootstrap.md fase 2:
+ * evaluasi state build tanpa membaca file secara tradisional).
+ *
+ * POSIX : mmap(PROT_READ, MAP_PRIVATE)
+ * Windows: CreateFileMapping + MapViewOfFile(FILE_MAP_READ)
+ *
+ * Return true bila berhasil: *outData mengisi pointer yang VALID sampai
+ * fsMapClose dipanggil, *outSize = ukuran file (0 untuk file kosong).
+ * File kosong tetap sah (data != NULL, size 0). Gagal (missing file,
+ * OOM, dsb.) => false tanpa efek samping.
+ *
+ * Fallback aman dijamin di level pemakai: bila fsMapRead gagal, pemakai
+ * bebas membaca file secara tradisional (design aturan 4).
+ */
+bool fsMapRead(const char *path, void **outData, size_t *outSize);
+void fsMapClose(void *data, size_t size); /* aman dipanggil dgn data=NULL */
+
 #endif /* RBOT_V0_1_0_PORTABILITY_H */
