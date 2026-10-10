@@ -250,7 +250,11 @@ bool fsMapRead(const char *path, void **outData, size_t *outSize) {
 
 void fsMapClose(void *data, size_t size) {
   if (!data) return;
-  if (size > 0) UnmapViewOfFile(data);
+  if (size > 0) {
+    if (!UnmapViewOfFile(data)) {
+      fprintf(stderr, "UnmapViewOfFile is failed\n")
+    }
+  }
   /* marker file kosong (1) tidak perlu dibebaskan */
 }
 
