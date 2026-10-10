@@ -144,21 +144,21 @@ seperti saat ini.
 
 ## 7. Prinsip Desain
 
-    7.1 Project dan release adalah dua konsep berbeda
+### 7.1 Project dan release adalah dua konsep berbeda
 
-    projects     = build units (bisa banyak)
-    release      = distribution unit (TUNGGAL)
+projects = build units (bisa banyak)
+release = distribution unit (TUNGGAL)
 
-    7.2 Release = pack dengan scope lebih luas
+### 7.2 Release = pack dengan scope lebih luas
 
-    Tidak ada engine kedua. release.* dijalankan oleh pack engine yang sama; Buildfile sintesis fase release hanyalah Buildfile project + override section release.
+Tidak ada engine kedua. release.* dijalankan oleh pack engine yang sama; Buildfile sintesis fase release hanyalah Buildfile project + override section release.
 
-    7.3 Tidak semua project menyumbang file
+### 7.3 Tidak semua project menyumbang file
 
-    Project dependency boleh menyumbang file via release.files eksplisit (mis. ../compiler/bin/cc) — tidak ada paksaan.
+Project dependency boleh menyumbang file via release.files eksplisit (mis. ../compiler/bin/cc) — tidak ada paksaan.
 
-    7.4 Back-compat
+### 7.4 Back-compat
 
-    - Tanpa section release.*: perilaku lama utuh.
-    - pack.* project: tetap berjalan dan output ke project/dist/.
-    - Sintaks revisi 1 (releases = ..., releases.<n>.name) DIHAPUS; parser workspace menolaknya dengan pesan migrasi yang jelas.
+- Tanpa section release.*: perilaku lama utuh.
+- pack.* project: tetap berjalan dan output ke project/dist/.
+- Sintaks revisi 1 (releases = ..., releases.<n>.name) DIHAPUS; parser workspace menolaknya dengan pesan migrasi yang jelas.
