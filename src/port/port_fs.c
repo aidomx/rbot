@@ -26,7 +26,7 @@
 /* windows.h WAJIB paling depan di antara header Windows.
    shellapi.h memakai DECLSPEC_IMPORT dan STDAPICALLTYPE yang
    didefinisikan di winnt.h — hanya ditarik oleh windows.h. */
-
+#include <memoryapi.h>
 #include <shellapi.h>
 
 /* MSVC tidak (selalu) menyediakan typedef mode_t — itu POSIX-only.
@@ -47,7 +47,6 @@ typedef unsigned short mode_t;
 #include <unistd.h>
 #endif
 #ifdef _WIN32
-
 /* ========== Windows: Filesystem ========== */
 
 /* Ganti '/' ke '\\' — hanya untuk API Win32 yang menolak '/'. Jangan dipakai
