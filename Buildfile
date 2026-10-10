@@ -16,7 +16,7 @@ sources = src
 
 # MMD: dep file <obj>.d; MP: phony target (GNU/Clang)
 flags = Wall, Wextra, O2, MMD, MP 
-lib.windows = shell32, kernel32
+lib.windows = shell32, kernel32, ws2_32
 std = gnu11
 
 # build: version.h & embedded.h (dihasilkan saat build)
