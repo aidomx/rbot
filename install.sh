@@ -102,6 +102,10 @@ read_version() {
 install_binary() {
   binary="$1"
   chmod +x "$binary"
+  if ! "$binary" version >/dev/null 2>&1; then
+    echo "rbot: binary tidak bisa dijalankan di sistem ini: ${binary}" >&2
+    return 1
+  fi
   echo "> Installing : ${INSTALL_PATH}"
 
   install_dir="$(dirname "${INSTALL_PATH}")"
@@ -192,6 +196,41 @@ json_field() {
 }
 
 # ---------------------------------------------------------------------------
+# Termux (Android): binary release dibangun dengan glibc dan tidak bisa
+# dijalankan di bionic. Di Termux rbot dibangun dari source tag release.
+# ---------------------------------------------------------------------------
+is_termux() {
+  case "${PREFIX:-}" in
+    *com.termux*) return 0 ;;
+  esac
+  [ "$(uname -o 2>/dev/null || true)" = "Android" ]
+}
+
+if is_termux; then
+  if [ "$DEV" -eq 0 ]; then
+    echo "> Termux    : binary release (glibc) tidak kompatibel, build dari source"
+    DEV=1
+  fi
+  if [ -z "${VERSION_TAG}" ] && [ -n "${RBOT_VERSION:-}" ]; then
+    VERSION_TAG="${RBOT_VERSION}"
+  fi
+  if [ -z "${VERSION_TAG}" ]; then
+    RELEASE_JSON_T="$(fetch_release_json "")" || {
+      echo "rbot: gagal mengambil metadata release dari GitHub API" >&2
+      exit 1
+    }
+    VERSION_TAG="$(json_field "${RELEASE_JSON_T}" '"tag_name"')"
+    if [ -z "${VERSION_TAG}" ]; then
+      echo "rbot: gagal menentukan tag release terbaru" >&2
+      exit 1
+    fi
+  fi
+  if [ -z "${CC:-}" ] && command -v clang >/dev/null 2>&1; then
+    CC=clang
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Mode --dev: bootstrap build dari source
 # ---------------------------------------------------------------------------
 if [ "$DEV" -eq 1 ]; then
@@ -215,7 +254,11 @@ if [ "$DEV" -eq 1 ]; then
       exit 1
     }
 
-    SOURCE_URL="https://github.com/${GITHUB_USER}/${REPO_NAME}/archive/refs/heads/${BRANCH}.tar.gz"
+    if [ -n "${VERSION_TAG}" ]; then
+      SOURCE_URL="https://github.com/${GITHUB_USER}/${REPO_NAME}/archive/refs/tags/${VERSION_TAG}.tar.gz"
+    else
+      SOURCE_URL="https://github.com/${GITHUB_USER}/${REPO_NAME}/archive/refs/heads/${BRANCH}.tar.gz"
+    fi
     echo "> Downloading source: ${SOURCE_URL}"
     curl -fsSL "${SOURCE_URL}" -o "${TMP_DIR}/rbot.tar.gz"
     tar -xzf "${TMP_DIR}/rbot.tar.gz" -C "${TMP_DIR}"
@@ -239,7 +282,7 @@ if [ "$DEV" -eq 1 ]; then
   fi
 
   command -v "${CC:-cc}" >/dev/null 2>&1 || {
-    echo "rbot: compiler C '${CC:-cc}' tidak ditemukan; pasang gcc/clang terlebih dahulu" >&2
+    echo "rbot: compiler C '${CC:-cc}' tidak ditemukan; pasang gcc/clang terlebih dahulu (Termux: pkg install clang)" >&2
     exit 1
   }
 
