@@ -48,8 +48,6 @@ typedef unsigned short mode_t;
 #endif
 #ifdef _WIN32
 
-int UnmapViewOfFile(ptr);
-
 /* ========== Windows: Filesystem ========== */
 
 /* Ganti '/' ke '\\' — hanya untuk API Win32 yang menolak '/'. Jangan dipakai
