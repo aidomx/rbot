@@ -222,9 +222,9 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
     } else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 ||
                strcmp(cmd, "-h") == 0) {
       bs->cmd = CMD_HELP;
-    } else if (strcmp(cmd, "release") == 0) {
-      /* release hanya bermakna di mode workspace; tanpa -w ditolak di
-         bootstrapApply (aturan sama dengan implementasi lama). */
+    } else    if (strcmp(cmd, "release") == 0) {
+      /* release di workspace = build + release; di mode satu-proyek, ini
+         dianggap command asing — ditolak di rbot.c agar jelas. */
       bs->cmd = CMD_RELEASE;
     } else if (strcmp(cmd, "version") == 0) {
       bs->cmd = CMD_VERSION;

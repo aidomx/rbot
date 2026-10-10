@@ -33,15 +33,15 @@ o.buildDir = build
 # auto generate compile_commands.json
 o.compileCommands = auto 
 
-pack.name = rbot
-pack.version = 0.2.3
-pack.output = dist/{name}-v{version}.tar.gz
+release.name = rbot
+release.version = 0.2.3
+release.output = dist/{name}-v{version}.tar.gz
 
-pack.files = bin/rbot:bin/rbot, README.md:share/rbot/README.md, LICENSE:share/rbot/LICENSE, src/cmd.txt:share/rbot/cmd.txt
+release.files = bin/rbot:bin/rbot, README.md:share/rbot/README.md, LICENSE:share/rbot/LICENSE, src/cmd.txt:share/rbot/cmd.txt
 
-pack.format = deb
-pack.checksum = sha256
+release.format = deb
+release.checksum = sha256
 
-pack.deb.install_prefix = /usr/local
-pack.deb.maintainer = "Aidomx <aidomxdev@gmail.com>"
-pack.deb.description = "A simple builder for you"
+release.deb.install_prefix = /usr/local
+release.deb.maintainer = "Aidomx <aidomxdev@gmail.com>"
+release.deb.description = "A simple builder for you"

@@ -108,30 +108,18 @@ int rbotRun(int argc, const char *argv[]) {
       rc = 2;
       goto done;
     }
-    if (bs.ws_sel_argv && bs.cmd != CMD_RELEASE) {
-    /* `-- key=value` hanya berlaku untuk release; tapi perilaku lama juga
-       menerimanya bersama build polos (default release selektif), jadi
-       hanya ditolak bila command eksplisit bukan release/build. */
-    if (bs.cmd != CMD_BUILD) {
-      fprintf(stderr,
-              "rbot: -- <key=value> hanya berlaku untuk release (pakai 'rbot -w release -- ...')\n");
-      bootstrapCleanup(&bs);
-      return 2;
-    }
-  }
-    if (bs.cmd == CMD_RELEASE && !bs.ws_sel_argv) {
-      fprintf(stderr, "rbot: release memerlukan selektor (pakai 'rbot -w release -- name=rupa')\n");
-      rc = 2;
-      goto done;
-    }
+    /* `-- key=value` = override setting release run ini (design/release.md
+       revisi 2); diterima bersama build polos maupun command release, dan
+       diteruskan ke workspaceRun sebagai releaseSel. */
     if (bs.generate_compdb) {
       fprintf(stderr,
               "rbot: -g compdb saat ini hanya di mode satu-proyek (jalankan di folder proyek, bukan root workspace)\n");
       rc = 2;
       goto done;
     }
-    /* `release` = build selektif + kemas release yang cocok; di workspace
-       command ini berjalan sebagai build dengan selektor aktif. */
+    /* `-- key=value` = override release run ini; `release` tanpa `--` =
+       build + release (releaseOnly aktif hanya bila selektor ada —
+       coretan lama "release memerlukan selektor" sudah tidak berlaku). */
     char *sel = bootstrapJoinSelector(&bs);
     if (!sel && bs.ws_sel_argv) {
       bootstrapCleanup(&bs);

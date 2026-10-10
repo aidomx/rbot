@@ -522,40 +522,33 @@ rupa.pack.merge = ruka
 Workspace memisahkan:
 
 ```text
-projects = build units
-releases = distribution units
+projects = build units (banyak)
+release  = distribution unit (TUNGGAL)
 ```
 
-Deklarasi:
+Deklarasi (key identik `pack.*` karena fase release memakai pack engine):
 
 ```text
-releases = rupa, ruka
-
-releases.rupa as rrupa
-releases.ruka as rruka
-
-rrupa.name = rupa
-rrupa.target = deb
-
-rruka.name = ruka
+release.name = rupa
+release.version = 0.2.2
+release.files = bin/rupa, ../bade/bin/bade, rupadocs
+release.exclude = .git, .rbot, build, node_modules
+release.output = dist/{name}-v{version}.tar.gz
+release.format = deb
+release.checksum = sha256
 ```
 
-Target release:
+Tanpa `release.files`: default = artefak build semua proyek
+(`bin/<binaryName>` + `lib/lib<libraryName>.a/.so` per proyek).
+`release.exclude` berlaku saat walk folder (path/basename/prefix dir).
 
-```text
-rrupa.target = deb
-```
-
-Default target release adalah `tar`.
-
-CLI tanpa deklarasi release juga boleh:
+Override run via CLI:
 
 ```bash
-rbot -w release -- name=rupa
-rbot -w release -- name=rupamod target=deb
+rbot -w release -- version=0.2.3,format=tar
 ```
 
-Project harus ada dan harus memiliki `pack.files`; untuk run CLI, release dapat dibuat implicit.
+Default format release adalah `tar`.
 
 ---
 
@@ -570,22 +563,11 @@ rbot -w
 →
 
 ```text
-dist/release/
+dist/
 ```
 
-Selective:
-
-```bash
-rbot -w release -- name=rupa
-```
-
-→
-
-```text
-dist/release/rupa/
-```
-
-Release artifact yang menghasilkan checksum mendapat `.sha256`.
+Satu paket terpusat di root workspace (`<name>-v<version>.tar.gz` /
+`.deb` + `.sha256`).
 
 ---
 
@@ -724,8 +706,8 @@ workspace
 │   ├── depends_on
 │   ├── cross-project libraries
 │   └── library → binary phases
-└── releases
-    └── distribution units
+└── release
+    └── distribution unit (satu)
 ```
 
 Secara konsep:

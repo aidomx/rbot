@@ -218,7 +218,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
     else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0 ||
              strcmp(key, "output") == 0 || strcmp(key, "compress") == 0 ||
              strcmp(key, "checksum") == 0 || strcmp(key, "format") == 0 ||
-             strcmp(key, "files") == 0)
+             strcmp(key, "files") == 0 || strcmp(key, "exclude") == 0)
       packApply(c, key, value);
     return;
   }
@@ -335,6 +335,20 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       return;
     }
     packApply(c, key, value);
+    return;
+  }
+
+  if (strcmp(section, "release") == 0) {
+    /* Section release.* — kekuatan pack penuh, scope workspace/proyek
+       (design/release.md revisi 2). Model identik dengan pack.*, jadi
+       cukup dilaporkan sebagai pack. Pencetus section ini adalah
+       pengaktif pack: sekali release.* diset, fase release berjalan. */
+    if (sub && strcmp(sub, "deb") == 0) {
+      packApplyDeb(c, key, value);
+    } else {
+      packApply(c, key, value);
+    }
+    c->pack.requested = true;
     return;
   }
 

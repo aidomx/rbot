@@ -69,6 +69,29 @@ static bool packCopyFile(const char *src, const char *dst) {
   return ok;
 }
 
+/*
+ * packExcluded — cocokkan path relatif terhadap daftar excludes
+ * (pack.exclude / release.exclude). Pencocokan konsisten dengan
+ * embExcluded (embed.c):
+ *   - path relatif sama persis ("LICENSE"), atau
+ *   - basename sama persis ("main.c" vs "src/main.c"), atau
+ *   - path di dalam direktori yang dinamai entri ("build" -> "build/x").
+ * Berlaku HANYA pada hasil walk entri bentuk folder — entri file
+ * eksplisit tidak difilter.
+ */
+static bool packExcluded(const Config *c, const char *rel) {
+  for (int i = 0; i < c->pack.excludes.count; i++) {
+    const char *ex = c->pack.excludes.items[i];
+    if (!ex || !*ex) continue;
+    if (strcmp(rel, ex) == 0) return true;
+    const char *base = strrchr(rel, '/');
+    if (base && strcmp(base + 1, ex) == 0) return true;
+    size_t el = strlen(ex);
+    if (strncmp(rel, ex, el) == 0 && rel[el] == '/') return true;
+  }
+  return false;
+}
+
 bool packStageEntries(const Config *c, const char *root) {
   fsRemoveTree(root);
   mkdirs(root);
@@ -100,6 +123,9 @@ bool packStageEntries(const Config *c, const char *root) {
       const char *file = files.items[j];
       const char *suffix = file + srcLen;
       if (*suffix == '/') suffix++;
+      /* exclude hanya berlaku pada isi folder yang di-walk (suffix relatif
+         terhadap folder sumber), bukan pada entri file eksplisit. */
+      if (*suffix && packExcluded(c, suffix)) continue;
       char dst[MAX_PATH * 3];
       if (*suffix)
         snprintf(dst, sizeof(dst), "%s/%s/%s", root, dstRoot, suffix);

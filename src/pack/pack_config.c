@@ -9,6 +9,21 @@
 #include "../util.h"
 #include "pack_internal.h"
 
+/* pack.exclude/release.exclude = a, b, c — daftar dipisah koma
+   (duplikat lokal statis addCommaList milik config.c). */
+static void packAddCommaList(List *dst, const char *value) {
+  char buf[2048];
+  copyStr(buf, sizeof(buf), value);
+  for (char *save = buf;;) {
+    char *comma = strchr(save, ',');
+    if (comma) *comma = '\0';
+    char *item = trim(save);
+    if (*item) listAdd(dst, item);
+    if (!comma) break;
+    save = comma + 1;
+  }
+}
+
 /* Setel string pack; sepasang kutip pembuka/penutup dilepas (nilai    `pack.deb.maintainer = "Nama <email>"` di Buildfile.ws). */
 void packSetStr(char *dst, size_t n, const char *value) {
   size_t len = strlen(value);
@@ -46,8 +61,9 @@ void packApplyDeb(Config *c, const char *key, const char *value) {
     packSetStr(c->pack.debArchitecture, sizeof(c->pack.debArchitecture), value);
 }
 
-/* Key pack.* tanpa sub — dipakai section `pack` maupun key bare di
-   top-level (name, version, files, output, compress, checksum, format). */
+/* Key pack.* tanpa sub — dipakai section `pack`, section `release`, maupun
+   key bare di top-level (name, version, files, exclude, output, compress,
+   checksum, format). */
 void packApply(Config *c, const char *key, const char *value) {
   if (strcmp(key, "name") == 0)
     packSetStr(c->pack.name, sizeof(c->pack.name), value);
@@ -63,4 +79,12 @@ void packApply(Config *c, const char *key, const char *value) {
     packSetStr(c->pack.format, sizeof(c->pack.format), value);
   else if (strcmp(key, "files") == 0)
     packAddFiles(&c->pack, value);
+  else if (strcmp(key, "exclude") == 0)
+    packAddCommaList(&c->pack.excludes, value);
+}
+
+/* Bebaskan List List milik PackConfig (files, excludes). */
+void packFreeConfig(PackConfig *p) {
+  listFree(&p->files);
+  listFree(&p->excludes);
 }

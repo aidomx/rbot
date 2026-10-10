@@ -42,6 +42,9 @@ typedef struct {
   char version[64];          /* default "0.0.0" */
   List files;                /* file/folder yang masuk paket */
   char output[MAX_PATH * 2]; /* template: {name} {version} {os} {arch} */
+  List excludes;             /* pack.exclude/release.exclude: pola/path yang
+                              * diabaikan saat walk folder (pencocokan suffix
+                              * & segmen, lihat packStageEntries) */
   char compress[16];         /* "" = dari ekstensi; gzip|none|xz|bz2 */
   char checksum[16];         /* "" = tanpa; sha256 */
   char format[16];           /* "" = tar; deb menambah artefak .deb */

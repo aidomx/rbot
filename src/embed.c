@@ -407,7 +407,14 @@ bool embedResourceCompile(const EmbeddedEntry *e, const Config *c) {
 
 static bool buildEmbeddedArchiveEntry(const EmbeddedEntry *e) {
   if (e->usePrebuilt) {
-    return fsFileExists(e->archivePath);
+    if (fsFileExists(e->archivePath)) return true;
+    /* Embedded.<n>.file hilang HARUS gagal jelas (design: silent-swallow
+       audit) — tanpa pesan ini, build "berhenti" tanpa arahan dan fase
+       berikutnya memakai object embed lama. */
+    fprintf(stderr,
+            "rbot: %s: embedded file '%s' tidak ditemukan\n",
+            e->name, e->archivePath);
+    return false;
   }
   if (!fsDirExists(e->src)) {
     fprintf(stderr, "rbot: %s: src '%s' not found\n", e->name, e->src);

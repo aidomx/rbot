@@ -67,7 +67,11 @@ void packSetStr(char *dst, size_t n, const char *value);
 void packAddFiles(PackConfig *p, const char *value);
 /* Key deb.* (pack.deb.* dan key bare deb.*). */
 void packApplyDeb(Config *c, const char *key, const char *value);
-/* Key pack.* tanpa sub (section pack maupun key bare top-level). */
+/* Key pack.* tanpa sub (section pack, section release, maupun key bare
+   top-level). */
 void packApply(Config *c, const char *key, const char *value);
+/* List List milik PackConfig (files, excludes) — dipanggil pemakai yang
+   memakai ulang Config (mis. fase release workspace). */
+void packFreeConfig(PackConfig *p);
 
 #endif /* RBOT_V0_1_0_PACK_INTERNAL_H */

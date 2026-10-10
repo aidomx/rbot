@@ -671,10 +671,16 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
     mkdirs(c.outBuildDir);
     if (!buildEmbeddedArchives(&c)) return 1;
     printf("\n> Summary\n");
+    bool anyMissing = false;
     for (int i = 0; i < c.embCount; i++) {
       if (!c.emb[i].enable) continue;
-      printf("Archive  : %s%s\n", c.emb[i].archivePath,
-             fsFileExists(c.emb[i].archivePath) ? "" : " (missing)");
+      bool have = fsFileExists(c.emb[i].archivePath);
+      printf("Archive  : %s%s\n", c.emb[i].archivePath, have ? "" : " (missing)");
+      if (!have) anyMissing = true; /* entri hilang = build gagal, bukan sukses sunyi*/
+    }
+    if (anyMissing) {
+      fprintf(stderr, "rbot: build failed: entri embedded hilang (lihat '(missing)' di atas)\n");
+      return 1;
     }
     printf("Status   : Success\n");
     return 0;

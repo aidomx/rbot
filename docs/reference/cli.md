@@ -83,14 +83,15 @@ Build all projects or one named project and its dependencies.
 ## Workspace release
 
 ```bash
-rbot -w release -- name=PROJECT[,key=value...]
+rbot -w
+rbot -w release -- key=value[,key=value...]
 ```
 
-Package a release from the CLI. `name=<project>` is required and the project
-must exist; `target=deb|tar` overrides the packaging format for this run.
-Artifacts go to `dist/release/` (or `dist/release/<name>/` for a selective
-release). Without `--`, `rbot -w` also builds and releases every declared
-release. See [Releases](../guide/releases.md).
+Build the workspace and package ONE release artifact into the workspace
+`dist/` (when a `release.*` section exists in `Buildfile.ws`). With `--`,
+each `key=value` pair overrides a release setting for this run (`name`,
+`version`, `format`, `target` — accepted as a legacy alias of `format`).
+See [Releases](../guide/releases.md).
 
 ## Clean
 

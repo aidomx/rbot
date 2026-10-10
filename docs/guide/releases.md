@@ -1,71 +1,91 @@
 # Releases
 
-> Scope: implemented on the main branch after the v0.2.0 documentation
-> baseline. See `docs/README.md` for the versioning convention.
+> Scope: revision 2 of `design/release.md` (October 2026). See
+> `docs/README.md` for the versioning convention.
 
 A workspace separates two concepts:
 
 ```text
 workspace
-├── projects   = build units
-└── releases   = distribution units
+├── projects   = build units (can be many)
+└── release    = distribution unit (one)
 ```
 
-Not every project has to be released. A project that exists only as a build
-dependency can stay private while other projects produce the distributable
-artifacts.
+Revision 1 modeled releases as a list of distribution units, each bound to
+a project (`releases = a, b` + `releases.<n>.name = <project>`). That
+syntax is REMOVED: release is now a single workspace-level package whose
+content you choose freely.
 
-## Declaring releases
+## Declaring release
 
-Releases refer to projects already defined by the workspace:
+The release configuration lives in one `release.*` section of
+`Buildfile.ws` (workspace mode) — and equally in a project's `Buildfile`
+(single-project mode). Keys are the same as `pack.*` because the release
+phase runs the pack engine:
 
 ```text
-releases = rupa, ruka
-
-releases.rupa as rrupa
-releases.ruka as rruka
-
-rrupa.name = rupa
-rrupa.target = deb
-
-rruka.name = ruka
+release.name = rupa
+release.version = 0.2.2
+release.files = bin/rupa, ../bade/bin/bade, share/rupa/cmd.txt
+release.exclude = .git, .rbot, build, node_modules
+release.output = dist/{name}-v{version}.tar.gz
+release.format = deb
+release.compress = gzip
+release.checksum = sha256
+release.deb.install_prefix = /usr/local
 ```
 
-- `releases = ...` — list of releases (project names; the alias defaults to the name).
-- `releases.<n> as <alias>` — optional; lets release configuration live separately from project configuration.
-- `<alias>.name` — source project of the artifact.
-- `<alias>.target` — optional packaging format for the release: `deb` or `tar` (default: tarball).
+- `release.name` / `release.version` / `release.output` — template output
+  (tokens: `{name}`, `{version}`, `{os}`, `{arch}`); default
+  `dist/{name}-v{version}.tar.gz`, computed from the workspace root (or
+  project root in single-project mode).
+- `release.files` — file/folder entries with optional mapping `src:dst`.
+  Plain paths are relative to the workspace root; `../<project>/...`
+  points at another project's output (the leading `../` is stripped).
+  Folders are walked recursively.
+- `release.exclude` — entries applied while walking folder entries:
+  exact relative path, basename, or directory prefix. Never applied to
+  explicit file entries.
+- `release.format` — `tar` (default) or `deb`; `release.compress`,
+  `release.checksum` (sha256), `release.deb.*` work exactly like `pack.*`.
+- All keys mirror the `pack` engine (see packaging guide for `deb.*`
+  metadata).
 
-## Release from the CLI
+**Default content** — without `release.files`, the package contains the
+build artifacts of every project in the workspace: each binary project
+contributes `<project>/bin/<binaryName>` and each library project
+contributes `<project>/lib/lib<libraryName>.a` and `.so`. Archive/pack-only
+projects contribute nothing.
 
-Releases can also be triggered entirely from the CLI, without declaring them
-in `Buildfile.ws`:
+## CLI
 
 ```bash
-rbot -w release -- name=rupa
-rbot -w release -- name=rupamod target=deb
+rbot -w                                   # build + release (when release.* exists)
+rbot -w clean                             # clean, no release
+rbot -w <project>                         # build closure; release stays full-workspace
+rbot -w release                           # same as rbot -w (release name), kept for clarity
+rbot -w release -- version=0.2.3          # override release settings for this run
+rbot -w release -- format=tar,version=1.0 # multiple overrides, comma separated
 ```
 
-- `name=<project>` — required. The project must exist; when it exists but has
-  no declared release, an implicit release is created for this run.
-- `target=<tar|deb>` — optional packaging-format override for this run.
-
-Errors are reserved for real problems: the project does not exist, or the
-project has no `pack.files` and therefore nothing to package.
+`-- key=value` pairs override release settings for the run (`name`,
+`version`, `format`, `target` — accepted as a legacy alias of `format` —
+plus any other pack key). The revision-1 selector semantics
+(`name=<project>` picks a release) are gone; errors are reserved for
+unknown keys and invalid names.
 
 ## Output
 
-Release artifacts go to the workspace-level `dist/release/`, not to each
-project's `dist/`:
+One centralized folder: `dist/` at the workspace root (or project root in
+single-project mode). Per-project `pack.*` output still goes to each
+project's own `dist/` and is untouched by release.
 
 ```text
-rbot -w                        -> dist/release/
-rbot -w release -- name=rupa   -> dist/release/rupa/
+dist/
+├── rupa-v0.2.2.tar.gz
+├── rupa-v0.2.2.tar.gz.sha256
+└── (or .deb when release.format = deb)
 ```
-
-The selective form writes to a per-name folder so its artifacts never mix
-with full-workspace release output. Each artifact gets a `.sha256` checksum
-when the release produces one.
 
 ## Pipeline
 
@@ -74,21 +94,16 @@ Building a workspace runs three phases:
 ```text
 1. library pass   — compile sources, package lib<name>.a/.so (no binary link)
 2. binary pass    — link binaries once all libraries exist
-3. release pass   — package each release into dist/release
+3. release pass   — package ONE artifact from the workspace into workspace dist/
 ```
 
-`rbot -w` builds and releases everything. `rbot -w NAME` builds the project
-closure but only releases the releases owned by NAME — projects pulled in as
-dependencies are not released on their own.
+If no `release.*` section exists at all, the release phase is skipped and
+the workspace behaves exactly as before.
 
 ## Relationship with pack
 
-`pack.*` stays the packaging engine; release only orchestrates it at the
-workspace level. Project-level `pack.*` output keeps going to the project's
-own `dist/`. The release phase repackages the same inputs with release
-configuration (`pack.name`, `pack.output`, `pack.format`), so archive, Debian
-packaging, merge, and checksums all work for releases without a second
-packaging implementation.
-
-Projects without `pack.*` cannot be released; declare `pack.files` on the
-project first or pick a project that already packages.
+`pack.*` stays the project-level packaging engine; release only
+orchestrates it at the workspace (or project) level with a wider file
+scope. No second packaging implementation exists — deb metadata, tar
+compression, staging, and checksums are the pack engine's own machinery,
+reused wholesale.

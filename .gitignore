@@ -4,8 +4,6 @@ build
 compile_commands.json
 .rbot
 shared
-design/*
-!.gitkeep
 
 problems/*
 !.gitkeep
