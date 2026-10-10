@@ -4,7 +4,7 @@ Tanggal: 5 Oktober 2026
 Revisi 2 (10 Oktober 2026): release = SATU paket workspace, bukan daftar
 terikat proyek.
 
-1. Tujuan
+## 1. Tujuan
 
 Menambahkan mekanisme "release" pada rbot untuk menghasilkan artefak
 distribusi siap pakai.
@@ -13,11 +13,13 @@ distribusi siap pakai.
 tetapi bekerja pada scope yang lebih luas: seluruh workspace (mode -w)
 atau seluruh proyek (mode satu-proyek).
 
-Workspace memiliki dua child utama:
+### Workspace memiliki dua child utama:
 
+```
 workspace
 ├── projects
 └── release        (tunggal — satu produk distribusi)
+```
 
 "projects" merepresentasikan project yang dapat dibangun.
 
@@ -27,7 +29,7 @@ workspace, dikemas menjadi SATU paket di dist/.
 
 ---
 
-2. Model
+## 2. Model
 
 Revisi 1 memodelkan release sebagai daftar unit distribusi yang masing-
 masing terikat satu project (releases = a, b; releases.a.name = a).
@@ -52,11 +54,12 @@ Revisi 2 membalik modelnya:
 
 ---
 
-3. Konfigurasi
+## 3. Konfigurasi
 
 Section release.* di Buildfile.ws (workspace) maupun Buildfile (proyek
 tunggal) — key-nya sama dengan pack.*:
 
+```yaml
 release.name = rupa                    # nama produk (default: folder cwd)
 release.version = 0.2.2                # default 0.0.0
 release.files = bin/rupa, bade/bin/bade, share/rupa/cmd.txt
@@ -69,6 +72,7 @@ release.deb.maintainer = "Nama <email>"
 release.deb.description = ...
 release.deb.install_prefix = /usr/local
 release.deb.architecture = amd64
+```
 
 Aturan penting:
 
@@ -87,32 +91,43 @@ Aturan penting:
 - release tanpa release.* sama sekali TIDAK dijalankan (back-compat:
   workspace tanpa section release berperilaku seperti sebelumnya).
 
-4. CLI
+---
 
+## 4. CLI
+
+```bash
 rbot -w                       # build + release (bila release.* ada)
 rbot -w clean                 # bersih, tidak ada release
 rbot -w <proyek>              # build closure; release tetap workspace penuh
 rbot --release                # paksa release meski build selektif
 rbot release                  # mode tunggal: build + release proyek
 rbot release -- name=x        # OVERRIDDEN name untuk run ini
+```
 
 Selektor `name=<project>` revisi 1 DIHAPUS — tidak ada lagi daftar
 release. `--` di mode workspace hanya menerima key=value yang menimpa
 setting release (name, version, target->format, ...).
 
-5. Output
+---
 
+## 5. Output
+
+```
 dist/
 ├── rupa-v0.2.2.tar.gz
 ├── rupa-v0.2.2.tar.gz.sha256
 └── (atau .deb bila release.format = deb)
+```
 
 Satu folder output terpusat: dist/ di root workspace (mode -w) atau
 root proyek (mode tunggal). project/dist/ (pack per-proyek) tidak
 disentuh release.
 
-6. Pipeline
+---
 
+## 6. Pipeline
+
+```
 workspace
     ↓
 projects (build dua fase: library pass -> binary pass)
@@ -120,31 +135,30 @@ projects (build dua fase: library pass -> binary pass)
 release (pack sekali pada root, isi semua project)
     ↓
 dist/
+```
 
 pack per-proyek tetap iont di fase binary masing-masing project,
 seperti saat ini.
 
-7. Prinsip Desain
+---
 
-7.1 Project dan release adalah dua konsep berbeda
+## 7. Prinsip Desain
 
-projects     = build units (bisa banyak)
-release      = distribution unit (TUNGGAL)
+    7.1 Project dan release adalah dua konsep berbeda
 
-7.2 Release = pack dengan scope lebih luas
+    projects     = build units (bisa banyak)
+    release      = distribution unit (TUNGGAL)
 
-Tidak ada engine kedua. release.* dijalankan oleh pack engine yang
-sama; Buildfile sintesis fase release hanyalah Buildfile project +
-override section release.
+    7.2 Release = pack dengan scope lebih luas
 
-7.3 Tidak semua project menyumbang file
+    Tidak ada engine kedua. release.* dijalankan oleh pack engine yang sama; Buildfile sintesis fase release hanyalah Buildfile project + override section release.
 
-Project dependency boleh menyumbang file via release.files eksplisit
-(mis. ../compiler/bin/cc) — tidak ada paksaan.
+    7.3 Tidak semua project menyumbang file
 
-7.4 Back-compat
+    Project dependency boleh menyumbang file via release.files eksplisit (mis. ../compiler/bin/cc) — tidak ada paksaan.
 
-- Tanpa section release.*: perilaku lama utuh.
-- pack.* project: tetap berjalan dan output ke project/dist/.
-- Sintaks revisi 1 (releases = ..., releases.<n>.name) DIHAPUS; parser
-  workspace menolaknya dengan pesan migrasi yang jelas.
+    7.4 Back-compat
+
+    - Tanpa section release.*: perilaku lama utuh.
+    - pack.* project: tetap berjalan dan output ke project/dist/.
+    - Sintaks revisi 1 (releases = ..., releases.<n>.name) DIHAPUS; parser workspace menolaknya dengan pesan migrasi yang jelas.
