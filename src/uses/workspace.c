@@ -1,3 +1,7 @@
+#ifdef _WIN32
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include "workspace.h"
 
 #include <stdio.h>
@@ -57,8 +61,8 @@ typedef struct {
  * pada root workspace. Isi paket bebas: file/folder proyek mana pun.
  */
 typedef struct {
-  bool present;              /* section release.* disebut di Buildfile.ws */
-  List lines;                /* baris "release.<key> = <value>" apa adanya */
+  bool present; /* section release.* disebut di Buildfile.ws */
+  List lines;   /* baris "release.<key> = <value>" apa adanya */
 } WsReleaseCfg;
 
 typedef struct {
@@ -102,11 +106,10 @@ static WsProject *wsEnsureProject(WsModel *m, const char *name);
    satu nama ini adalah default bersama, bukan nama proyek. Nama proyek
    tidak boleh memakai nama-nama ini. */
 static bool wsIsEngineSection(const char *seg) {
-  static const char *names[] = {"root",   "std",      "foreground", "target",
-                                "clean",  "progress", "output",     "embedded",
-                                "archive", "sources",  "flags",      "compiler",
-                                "exclude", "headers",  "library",    "depends_on",
-                                "release", NULL};
+  static const char *names[] = {"root",       "std",      "foreground", "target",  "clean",
+                                "progress",   "output",   "embedded",   "archive", "sources",
+                                "flags",      "compiler", "exclude",    "headers", "library",
+                                "depends_on", "release",  NULL};
   for (int i = 0; names[i]; i++)
     if (strcmp(seg, names[i]) == 0) return true;
   return false;
@@ -150,10 +153,9 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
      di sini supaya Buildfile.ws lama gagal JELAS, bukan diam-diam
      salah kemas. */
   if (strcmp(key, "releases") == 0 || strncmp(key, "releases.", 9) == 0) {
-    fprintf(stderr,
-            "rbot: workspace: sintaks 'releases' tidak lagi didukung\n"
-            "        gunakan section release.* — SATU paket workspace\n"
-            "        (release.name/files/exclude/format; lihat design/release.md)\n");
+    fprintf(stderr, "rbot: workspace: sintaks 'releases' tidak lagi didukung\n"
+                    "        gunakan section release.* — SATU paket workspace\n"
+                    "        (release.name/files/exclude/format; lihat design/release.md)\n");
     return;
   }
 
@@ -185,10 +187,9 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
          per proyek — nilai workspace-level tidak mengagregasi output
          ke root workspace. Agregasi lewat path per proyek (../bin). */
       if (strcmp(key, "root") == 0) {
-        fprintf(stderr,
-                "rbot: workspace: 'root' diabaikan (root berlaku per proyek — "
-                "cwd build = folder proyek; agregasi output ke root workspace "
-                "pakai output.binaryDir = ../bin dsb.)\n");
+        fprintf(stderr, "rbot: workspace: 'root' diabaikan (root berlaku per proyek — "
+                        "cwd build = folder proyek; agregasi output ke root workspace "
+                        "pakai output.binaryDir = ../bin dsb.)\n");
         return;
       }
       if (wsIsEngineSection(key)) wsAddCommon(m, key, value);
@@ -304,8 +305,7 @@ static bool wsProjectPackFiles(const WsProject *p, List *out) {
   return found;
 }
 
-static bool wsPackMergeInfo(const WsModel *m, const WsProject *owner,
-                            char *out, size_t n) {
+static bool wsPackMergeInfo(const WsModel *m, const WsProject *owner, char *out, size_t n) {
   out[0] = '\0';
   for (int i = 0; i < owner->lines.count; i++) {
     const char *ln = owner->lines.items[i];
@@ -321,8 +321,8 @@ static bool wsPackMergeInfo(const WsModel *m, const WsProject *owner,
       if (*item) {
         int dep = wsFindProject(m, item);
         if (dep < 0) {
-          fprintf(stderr, "rbot: workspace: '%s' pack.merge unknown project '%s'\n",
-                  owner->name, item);
+          fprintf(stderr, "rbot: workspace: '%s' pack.merge unknown project '%s'\n", owner->name,
+                  item);
           return false;
         }
         List files = {0};
@@ -338,8 +338,12 @@ static bool wsPackMergeInfo(const WsModel *m, const WsProject *owner,
           char src[WS_LINE_LEN], dst[WS_LINE_LEN], dstBuf[WS_LINE_LEN];
           if (colon) {
             size_t sl = (size_t)(colon - entry);
-            if (sl == 0 || sl >= sizeof(src)) { listFree(&files); return false; }
-            memcpy(src, entry, sl); src[sl] = '\0';
+            if (sl == 0 || sl >= sizeof(src)) {
+              listFree(&files);
+              return false;
+            }
+            memcpy(src, entry, sl);
+            src[sl] = '\0';
             copyStr(dstBuf, sizeof(dstBuf), colon + 1);
             copyStr(dst, sizeof(dst), trim(dstBuf));
           } else {
@@ -347,15 +351,21 @@ static bool wsPackMergeInfo(const WsModel *m, const WsProject *owner,
             copyStr(dst, sizeof(dst), entry);
           }
           char mapped[WS_LINE_LEN * 2];
-          int written = snprintf(mapped, sizeof(mapped), "../%s/%s:%s",
-                                 m->projects[dep].root, src, dst);
+          int written =
+              snprintf(mapped, sizeof(mapped), "../%s/%s:%s", m->projects[dep].root, src, dst);
           if (written < 0 || (size_t)written >= sizeof(mapped)) {
             listFree(&files);
             return false;
           }
-          if (out[0] && strlen(out) + 2 >= n) { listFree(&files); return false; }
+          if (out[0] && strlen(out) + 2 >= n) {
+            listFree(&files);
+            return false;
+          }
           if (out[0]) strcat(out, ", ");
-          if (strlen(out) + strlen(mapped) + 1 >= n) { listFree(&files); return false; }
+          if (strlen(out) + strlen(mapped) + 1 >= n) {
+            listFree(&files);
+            return false;
+          }
           strcat(out, mapped);
         }
         listFree(&files);
@@ -384,8 +394,8 @@ static bool wsValidatePackMerges(WsModel *m) {
         if (*item) {
           int dep = wsFindProject(m, item);
           if (dep < 0) {
-            fprintf(stderr, "rbot: workspace: '%s' pack.merge unknown project '%s'\n",
-                    owner->name, item);
+            fprintf(stderr, "rbot: workspace: '%s' pack.merge unknown project '%s'\n", owner->name,
+                    item);
             return false;
           }
           List files = {0};
@@ -421,8 +431,7 @@ static bool wsValidateRelease(WsModel *m) {
     const char *ln = m->release.lines.items[i];
     if (strncmp(ln, "format = ", 9) != 0) continue;
     const char *fmt = ln + 9;
-    if (*fmt && strcmp(fmt, "tar") != 0 && strcmp(fmt, "deb") != 0 &&
-        strcmp(fmt, "none") != 0) {
+    if (*fmt && strcmp(fmt, "tar") != 0 && strcmp(fmt, "deb") != 0 && strcmp(fmt, "none") != 0) {
       fprintf(stderr, "rbot: workspace: release.format '%s' tidak dikenal (tar, deb)\n", fmt);
       return false;
     }
@@ -591,8 +600,8 @@ static bool wsTopoSort(WsModel *m) {
    artifact project (`../ruka/lib/libruka.a`). Nilai project tidak boleh
    diterjemahkan menjadi `-lruka`, karena linker berada di root project
    consumer dan tidak otomatis mengetahui libDir project lain. */
-static bool wsLibraryValue(const WsModel *m, const WsProject *owner,
-                           const char *value, char *out, size_t n) {
+static bool wsLibraryValue(const WsModel *m, const WsProject *owner, const char *value, char *out,
+                           size_t n) {
   (void)owner;
   out[0] = '\0';
   const char *p = value;
@@ -600,14 +609,22 @@ static bool wsLibraryValue(const WsModel *m, const WsProject *owner,
   while (*p) {
     const char *comma = strchr(p, ',');
     size_t len = comma ? (size_t)(comma - p) : strlen(p);
-    while (len && (p[0] == ' ' || p[0] == '\t')) { p++; len--; }
-    while (len && (p[len - 1] == ' ' || p[len - 1] == '\t')) len--;
+    while (len && (p[0] == ' ' || p[0] == '\t')) {
+      p++;
+      len--;
+    }
+    while (len && (p[len - 1] == ' ' || p[len - 1] == '\t'))
+      len--;
     char item[WS_LINE_LEN];
     if (len >= sizeof(item)) return false;
-    memcpy(item, p, len); item[len] = '\0';
+    memcpy(item, p, len);
+    item[len] = '\0';
     const WsProject *dep = NULL;
     for (int i = 0; i < m->projectCount; i++) {
-      if (strcmp(m->projects[i].name, item) == 0) { dep = &m->projects[i]; break; }
+      if (strcmp(m->projects[i].name, item) == 0) {
+        dep = &m->projects[i];
+        break;
+      }
     }
     char mapped[WS_LINE_LEN];
     if (dep) {
@@ -630,13 +647,11 @@ static bool wsLibraryValue(const WsModel *m, const WsProject *owner,
         const char *middle = "/";
         const char *libPrefix = "/lib";
         const char *suffix = ".a";
-        size_t need = strlen(prefix) + strlen(dep->root) +
-                      strlen(middle) + strlen(libDir) +
+        size_t need = strlen(prefix) + strlen(dep->root) + strlen(middle) + strlen(libDir) +
                       strlen(libPrefix) + strlen(libName) + strlen(suffix) + 1;
         if (need > sizeof(mapped)) return false;
         char *dst = mapped;
-        const char *parts[] = { prefix, dep->root, middle, libDir,
-                                libPrefix, libName, suffix };
+        const char *parts[] = {prefix, dep->root, middle, libDir, libPrefix, libName, suffix};
         for (size_t k = 0; k < sizeof(parts) / sizeof(parts[0]); k++) {
           size_t partLen = strlen(parts[k]);
           memcpy(dst, parts[k], partLen);
@@ -691,11 +706,14 @@ static void wsProjectHeaderDirs(const WsProject *dep, List *out) {
         size_t need = 3 + strlen(dep->root) + 1 + strlen(item) + 1;
         if (need > sizeof(joined)) continue;
         char *dst = joined;
-        memcpy(dst, "../", 3); dst += 3;
+        memcpy(dst, "../", 3);
+        dst += 3;
         size_t rl = strlen(dep->root);
-        memcpy(dst, dep->root, rl); dst += rl;
+        memcpy(dst, dep->root, rl);
+        dst += rl;
         *dst++ = '/';
-        memcpy(dst, item, strlen(item)); dst += strlen(item);
+        memcpy(dst, item, strlen(item));
+        dst += strlen(item);
         *dst = '\0';
         listAdd(out, joined);
         any = true;
@@ -709,10 +727,13 @@ static void wsProjectHeaderDirs(const WsProject *dep, List *out) {
     size_t need = 3 + strlen(dep->root) + strlen("/include") + 1;
     if (need <= sizeof(joined)) {
       char *dst = joined;
-      memcpy(dst, "../", 3); dst += 3;
+      memcpy(dst, "../", 3);
+      dst += 3;
       size_t rl = strlen(dep->root);
-      memcpy(dst, dep->root, rl); dst += rl;
-      memcpy(dst, "/include", 8); dst += 8;
+      memcpy(dst, dep->root, rl);
+      dst += rl;
+      memcpy(dst, "/include", 8);
+      dst += 8;
       *dst = '\0';
       listAdd(out, joined);
     }
@@ -791,7 +812,9 @@ static bool wsEmitCdeps(const WsModel *m, const WsProject *p, char *body, size_t
     int written = snprintf(line, sizeof(line), "library = %s", mapped);
     if (written < 0 || (size_t)written >= sizeof(line)) continue;
     if (strlen(body) + strlen(line) + 2 > cap) {
-      listFree(&deps); listFree(&hdirs); listFree(&ownHeaders);
+      listFree(&deps);
+      listFree(&hdirs);
+      listFree(&ownHeaders);
       return false;
     }
     strcat(body, line);
@@ -817,7 +840,9 @@ static bool wsEmitCdeps(const WsModel *m, const WsProject *p, char *body, size_t
       if (off >= sizeof(line) - 2) break;
     }
     if (strlen(body) + off + 2 > cap) {
-      listFree(&deps); listFree(&hdirs); listFree(&ownHeaders);
+      listFree(&deps);
+      listFree(&hdirs);
+      listFree(&ownHeaders);
       return false;
     }
     strcat(body, line);
@@ -859,16 +884,17 @@ static bool wsSynthesize(const WsModel *m, const char *outDir, const char *wsNam
     /* Bandingkan isi lama vs baru: hanya tulis ulang bila berubah agar
        mtime stabil (cache config & fast path tidak miss sia-sia). */
     size_t n = 4096;
-    for (int j = 0; j < m->commonLines.count; j++) n += strlen(m->commonLines.items[j]) + 1;
-    for (int j = 0; j < p->lines.count; j++) n += strlen(p->lines.items[j]) + 1;
+    for (int j = 0; j < m->commonLines.count; j++)
+      n += strlen(m->commonLines.items[j]) + 1;
+    for (int j = 0; j < p->lines.count; j++)
+      n += strlen(p->lines.items[j]) + 1;
     n += (size_t)WS_MAX_PROJECTS * WS_LINE_LEN * 2;
     char *body = malloc(n);
     if (!body) return false;
     body[0] = '\0';
 
     char hdr[192];
-    snprintf(hdr, sizeof(hdr),
-             "/* Generated by rbot from %s — project '%s'. Do not edit. */\n",
+    snprintf(hdr, sizeof(hdr), "/* Generated by rbot from %s — project '%s'. Do not edit. */\n",
              wsName, p->name);
     strcat(body, hdr);
     strcat(body, "use project\n\noutput as o\nclean as c\n\n");
@@ -906,13 +932,16 @@ static bool wsSynthesize(const WsModel *m, const char *outDir, const char *wsNam
           char key[WS_LINE_LEN], value[WS_LINE_LEN], mapped[WS_LINE_LEN * 2];
           size_t kl = (size_t)(eq - ln);
           if (kl < sizeof(key)) {
-            memcpy(key, ln, kl); key[kl] = '\0';
+            memcpy(key, ln, kl);
+            key[kl] = '\0';
             snprintf(value, sizeof(value), "%s", eq + 1);
-            char *k = trim(key); char *v = trim(value);
+            char *k = trim(key);
+            char *v = trim(value);
             if (wsLibraryValue(m, p, v, mapped, sizeof(mapped))) {
               char rewritten[WS_LINE_LEN * 3];
               snprintf(rewritten, sizeof(rewritten), "%s = %s", k, mapped);
-              strcat(body, rewritten); strcat(body, "\n");
+              strcat(body, rewritten);
+              strcat(body, "\n");
               continue;
             }
           }
@@ -959,8 +988,7 @@ static bool wsMarkNeeded(const WsModel *m, int idx, unsigned char *needed,
   if (idx < 0 || idx >= m->projectCount) return false;
   if (needed[idx]) return true;
   if (visiting[idx]) {
-    fprintf(stderr, "rbot: workspace: dependency cycle involving '%s'\n",
-            m->projects[idx].name);
+    fprintf(stderr, "rbot: workspace: dependency cycle involving '%s'\n", m->projects[idx].name);
     return false;
   }
   visiting[idx] = 1;
@@ -1041,7 +1069,8 @@ static void wsModelFree(WsModel *m) {
     listFree(&m->libDeps[i]);
   }
   listFree(&m->order);
-  for (int i = 0; i < m->projectCount; i++) listFree(&m->projects[i].lines);
+  for (int i = 0; i < m->projectCount; i++)
+    listFree(&m->projects[i].lines);
   listFree(&m->commonLines);
   listFree(&m->release.lines);
 }
@@ -1120,14 +1149,22 @@ static int wsRelease(WsModel *m, int jobs, const char *wsDir) {
         save = comma + 1;
       }
     } else {
-      if (strcmp(k, "name") == 0) packApply(&c, "name", v);
-      else if (strcmp(k, "version") == 0) packApply(&c, "version", v);
-      else if (strcmp(k, "output") == 0) packApply(&c, "output", v);
-      else if (strcmp(k, "compress") == 0) packApply(&c, "compress", v);
-      else if (strcmp(k, "checksum") == 0) packApply(&c, "checksum", v);
-      else if (strcmp(k, "format") == 0) packApply(&c, "format", v);
-      else if (strcmp(k, "exclude") == 0) packApply(&c, "exclude", v);
-      else if (strncmp(k, "deb.", 4) == 0) packApplyDeb(&c, k + 4, v);
+      if (strcmp(k, "name") == 0)
+        packApply(&c, "name", v);
+      else if (strcmp(k, "version") == 0)
+        packApply(&c, "version", v);
+      else if (strcmp(k, "output") == 0)
+        packApply(&c, "output", v);
+      else if (strcmp(k, "compress") == 0)
+        packApply(&c, "compress", v);
+      else if (strcmp(k, "checksum") == 0)
+        packApply(&c, "checksum", v);
+      else if (strcmp(k, "format") == 0)
+        packApply(&c, "format", v);
+      else if (strcmp(k, "exclude") == 0)
+        packApply(&c, "exclude", v);
+      else if (strncmp(k, "deb.", 4) == 0)
+        packApplyDeb(&c, k + 4, v);
       else
         fprintf(stderr, "rbot: release: key '%s' tidak dikenal (padanan pack.*)\n", k);
     }
@@ -1140,18 +1177,19 @@ static int wsRelease(WsModel *m, int jobs, const char *wsDir) {
       bool isArchive = false;
       for (int l = 0; l < pp->lines.count; l++) {
         const char *ln = pp->lines.items[l];
-        if (strcmp(ln, "output.binary = false") == 0) { isArchive = true; break; }
-        if (strncmp(ln, "output.libraryName = ", 21) == 0 &&
-            !isArchive) {
-          char libEntry[WS_LINE_LEN * 2 ];
+        if (strcmp(ln, "output.binary = false") == 0) {
+          isArchive = true;
+          break;
+        }
+        if (strncmp(ln, "output.libraryName = ", 21) == 0 && !isArchive) {
+          char libEntry[WS_LINE_LEN * 2];
           const char *libName = ln + 21;
           int w1 = snprintf(libEntry, sizeof(libEntry), "%s/lib/lib%s.a", pp->root, libName);
           if (w1 > 0 && (size_t)w1 < sizeof(libEntry) && !listAdd(&c.pack.files, libEntry))
             goto oom;
           char shEntry[WS_LINE_LEN * 4];
           int w2 = snprintf(shEntry, sizeof(shEntry), "%s/lib/lib%s.so", pp->root, libName);
-          if (w2 > 0 && (size_t)w2 < sizeof(shEntry) && !listAdd(&c.pack.files, shEntry))
-            goto oom;
+          if (w2 > 0 && (size_t)w2 < sizeof(shEntry) && !listAdd(&c.pack.files, shEntry)) goto oom;
         }
       }
       if (!isArchive) {
@@ -1185,8 +1223,8 @@ static int wsRelease(WsModel *m, int jobs, const char *wsDir) {
   if (!c.pack.debInstallPrefix[0])
     copyStr(c.pack.debInstallPrefix, sizeof(c.pack.debInstallPrefix), "/usr/local");
 
-  printf("\n> Release    : %s (workspace%s%s)\n", c.pack.name,
-         c.pack.format[0] ? ", format " : "", c.pack.format[0] ? c.pack.format : "");
+  printf("\n> Release    : %s (workspace%s%s)\n", c.pack.name, c.pack.format[0] ? ", format " : "",
+         c.pack.format[0] ? c.pack.format : "");
 
   /* packRunAt berjalan di CWD sekarang — pastikan itu root workspace. */
   if (!fsSetCwd(wsDir)) {
@@ -1274,8 +1312,8 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
       char *k = trim(pair);
       char *v = trim(eq + 1);
       const char *key = strcmp(k, "target") == 0 ? "format" : k;
-      if (strcmp(key, "format") == 0 && *v &&
-          strcmp(v, "tar") != 0 && strcmp(v, "deb") != 0 && strcmp(v, "none") != 0) {
+      if (strcmp(key, "format") == 0 && *v && strcmp(v, "tar") != 0 && strcmp(v, "deb") != 0 &&
+          strcmp(v, "none") != 0) {
         fprintf(stderr, "rbot: workspace: format '%s' tidak dikenal (tar, deb)\n", v);
         wsModelFree(&m);
         return 1;
@@ -1324,14 +1362,16 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
         return 1;
       }
     } else {
-      for (int i = 0; i < m.projectCount; i++) needed[i] = 1;
+      for (int i = 0; i < m.projectCount; i++)
+        needed[i] = 1;
     }
     /* Build selektif juga menarik proyek yang dirujuk lewat library
        (library.<os> = <nama proyek>) — transitif; siklus library sah dan
        tidak membuat loop ini macet (fixpoint sederhana). */
     wsExpandLibDeps(&m, needed);
   } else {
-    for (int i = 0; i < m.projectCount; i++) needed[i] = 1;
+    for (int i = 0; i < m.projectCount; i++)
+      needed[i] = 1;
   }
 
   int rc = 0;
@@ -1392,7 +1432,8 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
     profMark("release-post");
   }
 
-  if (profOn()) profReport(); /* delta antar fase workspace (build no-op:
+  if (profOn())
+    profReport(); /* delta antar fase workspace (build no-op:
                                  seluruh fase berada antara dua penanda) */
   wsModelFree(&m);
   return rc;
@@ -1404,7 +1445,9 @@ const char *workspaceFileName(void) {
   return NULL;
 }
 
-bool workspaceFileExists(void) { return workspaceFileName() != NULL; }
+bool workspaceFileExists(void) {
+  return workspaceFileName() != NULL;
+}
 
 /*
  * workspaceEnumerate — parse & validasi model workspace untuk enumerasi
@@ -1413,8 +1456,7 @@ bool workspaceFileExists(void) { return workspaceFileName() != NULL; }
  * topo sort diisi ke projectNames[]. Buffer internal model statis —
  * pointer hasil valid sampai panggilan berikutnya.
  */
-int workspaceEnumerate(const char *wsDir, int *count, const char **projectNames,
-                       int maxProjects) {
+int workspaceEnumerate(const char *wsDir, int *count, const char **projectNames, int maxProjects) {
   static WsModel mM;
   WsModel *m = &mM;
   *count = 0;
