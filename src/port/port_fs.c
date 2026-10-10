@@ -48,7 +48,7 @@ typedef unsigned short mode_t;
 #endif
 #ifdef _WIN32
 
-UnmapViewOfFile(ptr);
+int UnmapViewOfFile(ptr);
 
 /* ========== Windows: Filesystem ========== */
 
