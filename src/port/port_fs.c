@@ -48,6 +48,8 @@ typedef unsigned short mode_t;
 #endif
 #ifdef _WIN32
 
+UnmapViewOfFile(ptr);
+
 /* ========== Windows: Filesystem ========== */
 
 /* Ganti '/' ke '\\' — hanya untuk API Win32 yang menolak '/'. Jangan dipakai
@@ -214,7 +216,7 @@ bool fsSetCwd(const char *path) {
   return SetCurrentDirectoryA(tmp) != 0;
 }
 
-/* MapViewOfFile read-only (Windows). Deallocasi: UnMapViiewOfFile. */
+/* MapViewOfFile read-only (Windows). Deallocasi: UnmapViewOfFile. */
 bool fsMapRead(const char *path, void **outData, size_t *outSize) {
   *outData = NULL;
   *outSize = 0;
