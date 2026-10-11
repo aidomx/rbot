@@ -6,6 +6,16 @@
 
 #include "config.h"
 
+/*
+ * Keluarga toolchain (design/flags.md: suffix Buildfile .gcc/.clang/.cl;
+ * juga menentukan flag MSVC). CC_GXX = driver C++ (berakhiran "++":
+ * g++, clang++, c++, g++-13, dst.) — runtime C++ sudah di-link-nya.
+ */
+typedef enum { CC_GCC, CC_GXX, CC_CLANG, CC_MSVC, CC_UNKNOWN } CompilerKind;
+
+/* Klasifikasi driver dari nama basis (tanpa path/ekstensi). */
+CompilerKind compilerKind(const char *cc);
+
 bool resolveCompiler(Config *c);
 
 /* true bila compiler aktif adalah MSVC (cl.exe) — flag & linker beda. */
@@ -20,6 +30,14 @@ char *includeFlags(const Config *c);
 /* Direktori -I dari headers (tanpa flag non-I) — dipakai pelacak header. */
 void includeDirs(const Config *c, List *out);
 char *warningFlags(const Config *c);
+
+/*
+ * defines (design/flags.md §2.1): makro dari Buildfile TANPA prefix ->
+ * "-DFOO -DBAR " (GNU/Clang) atau "/DFOO /DBAR " (MSVC). Toleran nilai
+ * yang sudah berprefix (-DFOO / /DFOO dinormalisasi; flag penuh non-D
+ * diteruskan). NULL bila kosong — pemanggil boleh memakai NULL apa adanya.
+ */
+char *definesFlags(const Config *c);
 
 /* warningFlags + "-fPIC " — untuk library shared & jalur paralel. */
 char *picWarningFlags(const Config *c);

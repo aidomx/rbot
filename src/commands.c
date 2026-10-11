@@ -496,11 +496,11 @@ int cmdCompdbGenerate(const char *buildfilePath) {
   /* Kemasan murni (output.binary = false) tidak punya compile step —
      tidak ada yang bisa direkam ke compile_commands.json. */
   if (!c.binary) {
-    printf("> CompDB    : skipped (output.binary = false)\n");
+    printf("%s CompDB  : skipped (output.binary = false)\n", repPrefix());
     return 0;
   }
   if (!compdbEnabled(&c)) {
-    printf("> CompDB    : disabled (output.compileCommands = false)\n");
+    printf("%s CompDB  : disabled (output.compileCommands = false)\n", repPrefix());
     return 0;
   }
 
@@ -669,20 +669,23 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
       return 1;
     }
     mkdirs(c.outBuildDir);
-    if (!buildEmbeddedArchives(&c)) return 1;
-    printf("\n> Summary\n");
+    bool anyRebuilt = false;
+    if (!buildEmbeddedArchivesEx(&c, &anyRebuilt)) return 1;
+    printf("\n%s Summary :\n", repPrefix());
     bool anyMissing = false;
     for (int i = 0; i < c.embCount; i++) {
       if (!c.emb[i].enable) continue;
       bool have = fsFileExists(c.emb[i].archivePath);
-      printf("Archive  : %s%s\n", c.emb[i].archivePath, have ? "" : " (missing)");
+      printf("    Archive  : %s%s\n", c.emb[i].archivePath, have ? "" : " (missing)");
       if (!have) anyMissing = true; /* entri hilang = build gagal, bukan sukses sunyi*/
     }
     if (anyMissing) {
       fprintf(stderr, "rbot: build failed: entri embedded hilang (lihat '(missing)' di atas)\n");
       return 1;
     }
-    printf("Status   : Success\n");
+    /* No-op: tidak ada arsip yang dibangun ulang (design/build_report.md). */
+    if (!anyRebuilt) printf("    Skipped  : true\n");
+    printf("    Status   : Success\n");
     return 0;
   }
 
@@ -734,11 +737,11 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   profMark("fingerprint");
 
   if (haveBuildFp && compileConfigChanged)
-    printf("> Fingerprint: compile configuration changed; rebuilding objects\n");
+    printf("%s Fingerprint: compile configuration changed; rebuilding objects\n", repPrefix());
   if (haveBuildFp && sourceSetChanged)
-    printf("> Fingerprint: source set changed; refreshing link inputs\n");
+    printf("%s Fingerprint: source set changed; refreshing link inputs\n", repPrefix());
   if (haveBuildFp && linkConfigChanged)
-    printf("> Fingerprint: link configuration changed; relinking\n");
+    printf("%s Fingerprint: link configuration changed; relinking\n", repPrefix());
 
   mkdirs(c.outBuildDir);
   mkdirs(c.outBinaryDir);
@@ -771,9 +774,9 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   }
   if (embHeaderChanged || verHeaderChanged) {
     if (verHeaderChanged)
-      printf("> Version   : .rbot-version changed, recompiling all sources\n");
+      printf("%s Version : .rbot-version changed, recompiling all sources\n", repPrefix());
     else
-      printf("> Embedded  : config changed, recompiling all sources\n");
+      printf("%s Embedded: config changed, recompiling all sources\n", repPrefix());
     for (int i = 0; i < srcs.count; i++) {
       if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
       fsRemoveFile(obj);
@@ -784,7 +787,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
     }
   }
 
-  printf("> Build with %s %s-std=%s\n", c.cc, wf, c.std);
+  printf("%s Build with %s %s-std=%s\n", repPrefix(), c.cc, wf, c.std);
 
   int total = 0, compiled = 0, skipped = 0, failed = 0, interrupted = 0;
 
@@ -847,9 +850,10 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   }
   profMark("decide");
   if (headerTouched > 0)
-    printf("> Headers   : %d source(s) skipped (touched, content unchanged)\n", headerTouched);
+    printf("%s Headers : %d source(s) skipped (touched, content unchanged)\n", repPrefix(),
+           headerTouched);
   if (headerStale > 0)
-    printf("> Headers   : %d source(s) stale due to header change\n", headerStale);
+    printf("%s Headers : %d source(s) stale due to header change\n", repPrefix(), headerStale);
   total = pending.count;
 
   /* Fase 2: kompilasi hanya yang berubah — paralel (-jN) atau serial. */
@@ -935,21 +939,21 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
     /* State fase library (miniws): no-op pass 1 berikutnya dilewati total.
        target "" = proyek tanpa library — direkam sebagai "-". */
     cmdsFastStateSave(&c, &srcs, "", buildfilePath, true);
-    printf("\n> Summary\n");
+    printf("\n%s Summary :\n", repPrefix());
     if (c.libRequested) {
       char libp[MAX_PATH * 2];
       if (c.libStatic) {
         cmdsLibStaticPath(&c, libp, sizeof(libp));
-        printf("Library  : %s\n", libp);
+        printf("    Library  : %s\n", libp);
       }
       if (c.libShared) {
         cmdsLibSharedPath(&c, libp, sizeof(libp));
-        printf("Library  : %s\n", libp);
+        printf("    Library  : %s\n", libp);
       }
     }
-    printf("Compiled : %d\n", compiled);
-    printf("Skipped  : %d\n", skipped);
-    printf("Status   : Success\n");
+    printf("    Compiled : %d\n", compiled);
+    printf("    Skipped  : %d\n", skipped);
+    printf("    Status   : Success\n");
     free(inc);
     free(wf);
     profReport();
@@ -1002,7 +1006,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   }
 
   if (!linkNeeded) {
-    printf("> Linking   : %s (up-to-date)\n", target);
+    printf("%s Linking : %s (up-to-date)\n", repPrefix(), target);
     /* Library bisa jadi masih perlu dibangun (baru diaktifkan di
        Buildfile / terhapus manual) meski binary sudah up-to-date. */
     if (c.libRequested && !cmdsBuildLibraryEx(&c, &srcs, true)) {
@@ -1037,14 +1041,14 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
       statPlanFree(&plan);
       return 1;
     }
-    printf("\n> Summary\n");
+    printf("\n%s Summary :\n", repPrefix());
     long long sizeBytes = fsFileSize(target);
     double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
-    printf("Target   : %s\n", target);
-    printf("Size     : %.1fKB\n", sizeKb);
-    printf("Compiled : %d\n", compiled);
-    printf("Skipped  : %d\n", skipped);
-    printf("Status   : Success\n");
+    printf("    Target   : %s\n", target);
+    printf("    Size     : %.1fKB\n", sizeKb);
+    printf("    Compiled : %d\n", compiled);
+    printf("    Skipped  : %d\n", skipped);
+    printf("    Status   : Success\n");
     if (!fastSaved) cmdsFastStateSave(&c, &srcs, target, buildfilePath, false);
     return 0;
   }
@@ -1116,7 +1120,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
     }
   }
 
-  printf("> Linking   : %s/%s\n", c.outBinaryDir, c.outBinaryName);
+  printf("%s Linking : %s/%s\n", repPrefix(), c.outBinaryDir, c.outBinaryName);
   bool linked = runCmd(cmd);
   profMark("link");
   free(cmd);
@@ -1156,12 +1160,12 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   long long sizeBytes = fsFileSize(target);
   double sizeKb = sizeBytes > 0 ? (double)sizeBytes / 1024.0 : 0;
 
-  printf("\n> Summary\n");
-  printf("Target   : %s\n", target);
-  printf("Size     : %.1fKB\n", sizeKb);
-  printf("Compiled : %d\n", compiled);
-  printf("Skipped  : %d\n", skipped);
-  printf("Status   : Success\n");
+  printf("\n%s Summary :\n", repPrefix());
+  printf("    Target   : %s\n", target);
+  printf("    Size     : %.1fKB\n", sizeKb);
+  printf("    Compiled : %d\n", compiled);
+  printf("    Skipped  : %d\n", skipped);
+  printf("    Status   : Success\n");
   if (!fastSaved) cmdsFastStateSave(&c, &srcs, target, buildfilePath, false);
   statPlanFree(&plan);
   return 0;

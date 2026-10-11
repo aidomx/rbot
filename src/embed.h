@@ -35,6 +35,11 @@ bool emitEmbeddedHeader(const Config *c, bool *changed);
 bool embedResourceCompile(const EmbeddedEntry *e, const Config *c);
 
 bool buildEmbeddedArchives(const Config *c);
+
+/* buildEmbeddedArchivesEx — sama, dengan *anyRebuilt diisi true bila
+   minimal satu arsip DIBANGUN ULANG (bukan no-op). Dipakai laporan
+   archive pass (design/build_report.md): no-op cetak "Skipped : true". */
+bool buildEmbeddedArchivesEx(const Config *c, bool *anyRebuilt);
 bool buildEmbedded(const Config *c);
 
 /*

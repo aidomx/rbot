@@ -48,6 +48,12 @@
 #define WS_NAME_LEN 64
 #define WS_LINE_LEN 1024
 
+/* File state workspace di root — padanan build.state per-proyek untuk mode
+   workspace, sehingga bootstrap bisa evaluasi no-op tanpa parse topologi
+   (design/workspace.md). Definisi di bawah (setelah workspaceFileExists). */
+#define WS_STATE_FILE ".rbot/workspace.state"
+static void wsStateSave(const char *wsDir);
+
 typedef struct {
   char name[WS_NAME_LEN];
   char root[MAX_PATH];
@@ -1043,7 +1049,7 @@ static int wsExecOne(const WsModel *m, const char *name, const char *cmd, int jo
   }
   /* Label fase: proyek kemasan (output.binary = false) fase 1-nya adalah
      ARSIP (buildEmbedded), bukan library — label harus mencerminkan itu. */
-  const char *passLabel = "";
+  const char *passLabel = "binary";
   if (libOnly) {
     bool isArchive = false;
     const WsProject *p = &m->projects[idx];
@@ -1053,9 +1059,10 @@ static int wsExecOne(const WsModel *m, const char *name, const char *cmd, int jo
         break;
       }
     }
-    passLabel = isArchive ? "  (archive pass)" : "  (library pass)";
+    passLabel = isArchive ? "archive" : "library";
   }
-  printf("\n> Project   : %s%s\n", name, passLabel);
+  printf("\n%s Project : %s\n", repPrefix(), name);
+  printf("%s Fase    : %s\n", repPrefix(), passLabel);
   int rc = cmdBuildEx(jobs, bf, libOnly);
   fsSetCwd(wsDir);
   return rc;
@@ -1223,8 +1230,8 @@ static int wsRelease(WsModel *m, int jobs, const char *wsDir) {
   if (!c.pack.debInstallPrefix[0])
     copyStr(c.pack.debInstallPrefix, sizeof(c.pack.debInstallPrefix), "/usr/local");
 
-  printf("\n> Release    : %s (workspace%s%s)\n", c.pack.name, c.pack.format[0] ? ", format " : "",
-         c.pack.format[0] ? c.pack.format : "");
+  printf("\n%s Release : %s (workspace%s%s)\n", repPrefix(), c.pack.name,
+         c.pack.format[0] ? ", format " : "", c.pack.format[0] ? c.pack.format : "");
 
   /* packRunAt berjalan di CWD sekarang — pastikan itu root workspace. */
   if (!fsSetCwd(wsDir)) {
@@ -1399,15 +1406,13 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
       if (idx < 0 || !needed[idx]) continue;
       /* Proyek kemasan (output.binary = false) tuntas di fase library
          (archive/pack pass) — fase binary tidak punya link binary.
-         Lewati dengan status jelas, jangan jalankan ulang dua kali. */
+         Lewati SENYAP: laporan hanya menampilkan proyek yang benar-benar
+         dikerjakan fase ini (design/build_report.md). */
       const WsProject *ap = &m.projects[idx];
       bool archiveOnly = false;
       for (int l = 0; l < ap->lines.count; l++)
         if (strcmp(ap->lines.items[l], "output.binary = false") == 0) archiveOnly = true;
-      if (archiveOnly) {
-        printf("\n> Project   : %s  (skip: selesai di fase library)\n", ap->name);
-        continue;
-      }
+      if (archiveOnly) continue;
       profMark("ws-binpass-pre");
       rc = wsExecOne(&m, m.order.items[i], cmd, jobs, wsDir, false);
       profMark("ws-binpass-post");
@@ -1435,6 +1440,17 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
   if (profOn())
     profReport(); /* delta antar fase workspace (build no-op:
                                  seluruh fase berada antara dua penanda) */
+
+  /* Rekam/buang workspace state (design/workspace.md): build sukses ->
+     tulis .rbot/workspace.state; clean -> buang agar build berikutnya cold. */
+  if (strcmp(cmd, "build") == 0 && rc == 0) {
+    wsStateSave(wsDir);
+  } else if (strcmp(cmd, "clean") == 0) {
+    char sp[MAX_PATH * 2];
+    snprintf(sp, sizeof(sp), "%s/%s", wsDir, WS_STATE_FILE);
+    fsRemoveFile(sp);
+  }
+
   wsModelFree(&m);
   return rc;
 }
@@ -1447,6 +1463,62 @@ const char *workspaceFileName(void) {
 
 bool workspaceFileExists(void) {
   return workspaceFileName() != NULL;
+}
+
+/* ==================== workspace state (design/workspace.md) ==================== */
+
+/*
+ * wsStateSave — rekam state setelah build workspace SUKSES: cwd (root
+   workspace) + stamp Buildfile.ws (mtime ns + size). Format whitespace-
+   delimited (seperti build.state); disable bila path berspasi.
+ */
+static void wsStateSave(const char *wsDir) {
+  const char *wsName = workspaceFileName();
+  if (!wsName) return;
+  char wsFile[MAX_PATH * 2];
+  snprintf(wsFile, sizeof(wsFile), "%s/%s", wsDir, wsName);
+  int64_t m = fsMTimeNs(wsFile);
+  long long s = fsFileSize(wsFile);
+  if (m < 0 || s < 0) return; /* Buildfile.ws hilang: jangan rekam */
+  if (strpbrk(wsDir, " \t\r\n")) return; /* whitespace: format tak aman */
+
+  char dir[MAX_PATH * 2], path[MAX_PATH * 2];
+  snprintf(dir, sizeof(dir), "%s/.rbot", wsDir);
+  mkdirs(dir);
+  snprintf(path, sizeof(path), "%s/%s", wsDir, WS_STATE_FILE);
+  FILE *f = fopen(path, "wb");
+  if (!f) return;
+  fprintf(f, "%s\n%lld %lld\n", wsDir, (long long)m, s);
+  fclose(f);
+}
+
+/*
+ * wsStateValid — true bila .rbot/workspace.state ada dan masih berlaku:
+   cwd sama dengan saat rekam DAN Buildfile.ws tidak berubah (mtime ns +
+   size cocok). Berubah/hilang/pindah cwd -> invalid -> dianggap cold.
+   Dipakai bootstrap.c untuk evaluasi no-op mode workspace.
+ */
+bool wsStateValid(const char *wsDir) {
+  const char *wsName = workspaceFileName();
+  if (!wsName) return false;
+  char wsFile[MAX_PATH * 2];
+  snprintf(wsFile, sizeof(wsFile), "%s/%s", wsDir, wsName);
+  int64_t m = fsMTimeNs(wsFile);
+  long long s = fsFileSize(wsFile);
+  if (m < 0 || s < 0) return false;
+
+  char path[MAX_PATH * 2];
+  snprintf(path, sizeof(path), "%s/%s", wsDir, WS_STATE_FILE);
+  FILE *f = fopen(path, "rb");
+  if (!f) return false;
+  char scwd[MAX_PATH] = {0};
+  long long sm = 0, ss = 0;
+  bool ok = fscanf(f, "%1023s %lld %lld", scwd, &sm, &ss) == 3;
+  fclose(f);
+  if (!ok) return false;
+  char cwd[MAX_PATH];
+  if (!fsGetCwd(cwd, sizeof(cwd))) return false;
+  return strcmp(cwd, scwd) == 0 && (long long)m == sm && s == ss;
 }
 
 /*

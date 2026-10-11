@@ -56,6 +56,16 @@ int workspaceEnumerate(const char *wsDir, int *count, const char **projectNames,
 /* true bila Buildfile.ws (atau nama lama Buildfile.workspace) ada di cwd. */
 bool workspaceFileExists(void);
 
+/*
+ * wsStateValid — true bila .rbot/workspace.state di root workspace `wsDir`
+ * ada dan masih berlaku (Buildfile.ws tidak berubah sejak direkam; lihat
+ * wsStateSave di workspace.c). Dipakai bootstrap.c untuk evaluasi no-op
+ * mode workspace (design/workspace.md): root workspace tidak punya
+ * .rbot/build.state (itu file per-proyek), jadi tanpa state ini bootstrap
+ * selalu menganggap cold pada tiap run `rbot -w`.
+ */
+bool wsStateValid(const char *wsDir);
+
 /* Nama file workspace yang terdeteksi di cwd — WORKSPACE_FILENAME dulu,
    lalu WORKSPACE_FILENAME_LEGACY; NULL bila tak ada keduanya. Dipakai
    supaya pesan error & sintesis menyebut nama file yang benar-benar

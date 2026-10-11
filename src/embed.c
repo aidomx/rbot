@@ -405,7 +405,8 @@ bool embedResourceCompile(const EmbeddedEntry *e, const Config *c) {
   return ok;
 }
 
-static bool buildEmbeddedArchiveEntry(const EmbeddedEntry *e) {
+static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
+  if (rebuilt) *rebuilt = false;
   if (e->usePrebuilt) {
     if (fsFileExists(e->archivePath)) return true;
     /* Embedded.<n>.file hilang HARUS gagal jelas (design: silent-swallow
@@ -489,16 +490,21 @@ static bool buildEmbeddedArchiveEntry(const EmbeddedEntry *e) {
     return false;
   }
   embArchiveStateSave(e);
+  if (rebuilt) *rebuilt = true;
   return true;
+}
+
+static bool buildEmbeddedArchiveEntry(const EmbeddedEntry *e) {
+  return buildEmbeddedArchiveEntryEx(e, NULL);
 }
 
 static bool buildEmbeddedEntry(const Config *c, const EmbeddedEntry *e) {
   if (!buildEmbeddedArchiveEntry(e)) return false;
 
   if (e->usePrebuilt) {
-    printf("> Embedded  : %s (file: %s)\n", e->name, e->archivePath);
+    printf("%s Embedded: %s (file: %s)\n", repPrefix(), e->name, e->archivePath);
   } else if (ldAvailable() || fsFileExists(e->archivePath)) {
-    printf("> Embedded  : %s (archive: %s)\n", e->name, e->archivePath);
+    printf("%s Embedded: %s (archive: %s)\n", repPrefix(), e->name, e->archivePath);
   }
 
   if (!fsNewerThan(e->archivePath, e->objectPath)) return true;
@@ -516,12 +522,20 @@ static bool buildEmbeddedEntry(const Config *c, const EmbeddedEntry *e) {
   return embedResourceCompile(e, c);
 }
 
-bool buildEmbeddedArchives(const Config *c) {
+bool buildEmbeddedArchivesEx(const Config *c, bool *anyRebuilt) {
+  bool any = false;
   for (int i = 0; i < c->embCount; i++) {
     if (!c->emb[i].enable) continue;
-    if (!buildEmbeddedArchiveEntry(&c->emb[i])) return false;
+    bool rebuilt = false;
+    if (!buildEmbeddedArchiveEntryEx(&c->emb[i], &rebuilt)) return false;
+    if (rebuilt) any = true;
   }
+  if (anyRebuilt) *anyRebuilt = any;
   return true;
+}
+
+bool buildEmbeddedArchives(const Config *c) {
+  return buildEmbeddedArchivesEx(c, NULL);
 }
 
 bool buildEmbedded(const Config *c) {

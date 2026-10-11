@@ -62,9 +62,10 @@ typedef struct {
   int profile_argc;
   const char **profile_argv;
 
-  // Konversi Ninja (-xf / -xcf)
+  // Konversi Ninja/Make (-xf / -xcf)
   const char *conv_file;
   bool conv_keep;       // true jika -xcf, false jika -xf
+  bool conv_make;       // true bila argumen "make" (cari Makefile/makefile/GNUmakefile)
   const char *conv_abs; // path absolut conv_file (buffer statis apply)
   bool conv_canceled;   // -xcf dabatalkan overwrite oleh pengguna
 

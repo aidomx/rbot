@@ -20,6 +20,11 @@
  */
 bool packRun(const Config *c);
 
+/* packLastRebuilt — true bila packRun terakhir MEMBANGUN ULANG minimal satu
+   artefak (bukan no-op). Untuk laporan archive/pack pass (design/build_report.md):
+   no-op cetak "Skipped : true" di Summary. */
+bool packLastRebuilt(void);
+
 /*
  * packRunAt — fase release workspace: packRun dengan CWD PEMANGGIL
  * (root workspace), bukan root proyek. Semua path dihitung relatif root

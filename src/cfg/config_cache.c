@@ -18,7 +18,7 @@
 #include "../util.h"
 
 #define CONFIG_CACHE_MAGIC "RBOTCFG1"
-#define CONFIG_CACHE_VERSION 9u /* 9: bahasa turunan langCpp (konvensi C++) */
+#define CONFIG_CACHE_VERSION 10u /* 10: defines + suffix flags/library/headers/std (design/flags.md) */
 #define CONFIG_CACHE_DIR ".rbot"
 #define CONFIG_CACHE_FILE "buildfile.cache"
 
@@ -108,6 +108,25 @@ static bool cacheReadEmbedded(FILE *fp, EmbeddedEntry *e) {
   return true;
 }
 
+/* Suffix spesifik (design/flags.md): 4 properti array + std per target. */
+static bool cacheWriteSfx(FILE *fp, const Config *c) {
+  for (int i = 0; i < SFX_COUNT; i++)
+    if (!cacheWriteList(fp, &c->sfxFlags[i]) || !cacheWriteList(fp, &c->sfxLibrary[i]) ||
+        !cacheWriteList(fp, &c->sfxHeaders[i]) || !cacheWriteList(fp, &c->sfxDefines[i]) ||
+        !cacheWriteString(fp, c->sfxStd[i]))
+      return false;
+  return true;
+}
+
+static bool cacheReadSfx(FILE *fp, Config *c) {
+  for (int i = 0; i < SFX_COUNT; i++)
+    if (!cacheReadList(fp, &c->sfxFlags[i]) || !cacheReadList(fp, &c->sfxLibrary[i]) ||
+        !cacheReadList(fp, &c->sfxHeaders[i]) || !cacheReadList(fp, &c->sfxDefines[i]) ||
+        !cacheReadString(fp, c->sfxStd[i], sizeof(c->sfxStd[i])))
+      return false;
+  return true;
+}
+
 static bool cacheWriteConfig(FILE *fp, const Config *c) {
   uint8_t cleanBuild = c->cleanBuildDir ? 1 : 0;
   uint8_t cleanCompdb = c->cleanCompileCommands ? 1 : 0;
@@ -119,8 +138,7 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
   if (!cacheWriteString(fp, c->root) || !cacheWriteList(fp, &c->sources) ||
       !cacheWriteList(fp, &c->flags) || !cacheWriteList(fp, &c->headerInternal) ||
       !cacheWriteList(fp, &c->headerPublic) || !cacheWriteList(fp, &c->libraries) ||
-      !cacheWriteList(fp, &c->librariesLinux) || !cacheWriteList(fp, &c->librariesMacOS) ||
-      !cacheWriteList(fp, &c->librariesWindows) || !cacheWriteList(fp, &c->compilers) ||
+      !cacheWriteList(fp, &c->compilers) || !cacheWriteList(fp, &c->defines) ||
       !cacheWriteString(fp, c->std) || !cacheWriteString(fp, c->cc) ||
       !cacheWriteString(fp, c->target) || !cacheWriteU8(fp, cleanBuild) ||
       !cacheWriteU8(fp, cleanCompdb) || !cacheWriteU8(fp, progress) ||
@@ -139,7 +157,7 @@ static bool cacheWriteConfig(FILE *fp, const Config *c) {
       !cacheWriteString(fp, c->pack.debInstallPrefix) ||
       !cacheWriteString(fp, c->pack.debArchitecture) ||
       !cacheWriteU8(fp, c->pack.requested ? 1 : 0) || !cacheWriteU8(fp, c->langCpp ? 1 : 0) ||
-      !cacheWriteU32(fp, (uint32_t)c->embCount))
+      !cacheWriteSfx(fp, c) || !cacheWriteU32(fp, (uint32_t)c->embCount))
     return false;
 
   for (int i = 0; i < c->embCount; i++)
@@ -155,9 +173,8 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
 
   if (!cacheReadString(fp, c->root, sizeof(c->root)) || !cacheReadList(fp, &c->sources) ||
       !cacheReadList(fp, &c->flags) || !cacheReadList(fp, &c->headerInternal) ||
-      !cacheReadList(fp, &c->headerPublic) || !cacheReadList(fp, &c->libraries) ||
-      !cacheReadList(fp, &c->librariesLinux) || !cacheReadList(fp, &c->librariesMacOS) ||
-      !cacheReadList(fp, &c->librariesWindows) || !cacheReadList(fp, &c->compilers) ||
+      !cacheReadList(fp, &c->headerPublic) ||      !cacheReadList(fp, &c->libraries) ||
+      !cacheReadList(fp, &c->compilers) || !cacheReadList(fp, &c->defines) ||
       !cacheReadString(fp, c->std, sizeof(c->std)) || !cacheReadString(fp, c->cc, sizeof(c->cc)) ||
       !cacheReadString(fp, c->target, sizeof(c->target)) || !cacheReadU8(fp, &cleanBuild) ||
       !cacheReadU8(fp, &cleanCompdb) || !cacheReadU8(fp, &progress) ||
@@ -182,7 +199,7 @@ static bool cacheReadConfig(FILE *fp, Config *c) {
       !cacheReadString(fp, c->pack.debDescription, sizeof(c->pack.debDescription)) ||
       !cacheReadString(fp, c->pack.debInstallPrefix, sizeof(c->pack.debInstallPrefix)) ||
       !cacheReadString(fp, c->pack.debArchitecture, sizeof(c->pack.debArchitecture)) ||
-      !cacheReadU8(fp, &packRequested) || !cacheReadU8(fp, &langCpp) ||
+      !cacheReadU8(fp, &packRequested) || !cacheReadU8(fp, &langCpp) || !cacheReadSfx(fp, c) ||
       !cacheReadU32(fp, &embCount) || embCount > MAX_EMBEDDED)
     return false;
   c->pack.requested = packRequested != 0;

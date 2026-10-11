@@ -83,6 +83,25 @@ typedef struct {
   char objectPath[MAX_PATH + 64];   /* <buildDir>/<n>.o */
 } EmbeddedEntry;
 
+/*
+ * Target sufiks properti Buildfile (design/flags.md): platform OS + compiler.
+ * Nama alternative map ke entri yang sama (lihat sfxTarget() di config.c):
+ *   darwin -> macos; win32/mingw -> windows; posix -> unix;
+ *   g++ -> gcc; clang++ -> clang; msvc -> cl.
+ */
+typedef enum {
+  SFX_LINUX = 0,
+  SFX_ANDROID,
+  SFX_MACOS,
+  SFX_WINDOWS,
+  SFX_FREEBSD,
+  SFX_UNIX, /* fallback POSIX bila tak ada suffix platform spesifik */
+  SFX_GCC,
+  SFX_CLANG,
+  SFX_CL,
+  SFX_COUNT
+} SfxTarget;
+
 typedef struct {
   char root[MAX_PATH];
 
@@ -91,10 +110,32 @@ typedef struct {
   List headerInternal; /* metadata saja, tidak dilewatkan ke compiler */
   List headerPublic;   /* tiap entri jadi -I<entry> */
   List libraries;      /* library aktif: flat + platform yang dipilih */
-  List librariesLinux;
-  List librariesMacOS;
-  List librariesWindows;
   List compilers; /* yang pertama tersedia menang */
+
+  /*
+   * defines (design/flags.md §2.1): makro preprocessor TANPA prefix -D;
+   * translasi ke -D (GNU/Clang) atau /D (MSVC) terjadi saat command dibangun
+   * (definesFlags di compile.c).
+   */
+  List defines;
+
+  /*
+   * Suffix spesifik per properti (design/flags.md): <properti>.<target>
+   * untuk flags, library, headers, defines, dan std. `library.linux` lama
+   * (dan alias darwin/win32/mingw) memakai bucket yang sama — perilaku
+   * lama tidak berubah. Merge:
+   *   - platform (linux/android/macos/windows/freebsd/unix) di configFinalize,
+   *     deteksi host compile-time (#ifdef) — global dulu, suffix di-append
+   *     dengan dedup;
+   *   - compiler (gcc/clang/cl) di resolveCompiler setelah cc terpilih
+   *     (ccSuffixDone menandai sudah digabung — idempotent).
+   */
+  List sfxFlags[SFX_COUNT];
+  List sfxLibrary[SFX_COUNT];
+  List sfxHeaders[SFX_COUNT];
+  List sfxDefines[SFX_COUNT];
+  char sfxStd[SFX_COUNT][32];
+  bool ccSuffixDone;
 
   char std[32];
   char cc[128];
@@ -199,5 +240,20 @@ bool loadConfigEx(Config *c, const char *path, bool cacheWrite);
  * MURNI derivasi in-memory — tidak menulis file apa pun.
  */
 void configFinalize(Config *c);
+
+/*
+ * configMergeUnique — append src ke dst tanpa duplikat (perbandingan
+ * mengabaikan '-' di depan, jadi "Wall" == "-Wall"). Dipakai merge suffix
+ * flags/library/headers/defines (design/flags.md §3: dedup otomatis);
+ * publik agar merge suffix compiler di compile.c bisa memakainya.
+ */
+void configMergeUnique(List *dst, const List *src);
+
+/*
+ * configApplyCompilerSuffix — gabungkan <properti>.gcc/.clang/.cl ke nilai
+ * final setelah cc terpilih (design/flags.md). Idempotent (ccSuffixDone).
+ * Dipanggil resolveCompiler(); publik agar dipanggil dari compile.c.
+ */
+void configApplyCompilerSuffix(Config *c);
 
 #endif /* RBOT_V0_1_0_CONFIG_H */

@@ -7,11 +7,10 @@
 #include "portability.h"
 #include "util.h"
 
-/* Keluarga toolchain yang didukung. CC_GXX = driver C++ (berakhiran "++":
-   g++, clang++, c++, g++-13, dst.) — runtime C++ sudah di-link-nya. */
-typedef enum { CC_GCC, CC_GXX, CC_CLANG, CC_MSVC, CC_UNKNOWN } CompilerKind;
+/* Keluarga toolchain (CompilerKind) didefinisikan di compile.h — dipakai
+   config.c untuk suffix compiler (design/flags.md). */
 
-static CompilerKind compilerKind(const char *cc) {
+CompilerKind compilerKind(const char *cc) {
   const char *base = strrchr(cc, '/');
   base = base ? base + 1 : cc;
   const char *dot = strrchr(base, '.');
@@ -91,6 +90,7 @@ bool resolveCompiler(Config *c) {
   for (int i = 0; i < c->compilers.count; i++) {
     if (probeAvailable(c->compilers.items[i])) {
       copyStr(c->cc, sizeof(c->cc), c->compilers.items[i]);
+      configApplyCompilerSuffix(c); /* suffix .gcc/.clang/.cl (design/flags.md) */
       return true;
     }
   }
@@ -177,6 +177,38 @@ char *picWarningFlags(const Config *c) {
   strcat(picwf, "-fPIC ");
   free(wf);
   return picwf;
+}
+
+/*
+ * defines (design/flags.md §2.1): "FOO" -> "-DFOO " (GNU/Clang) atau
+ * "/DFOO " (MSVC, tanpa lewat translateFlagsToMsvc — kanoniknya memang /D).
+ * Nilai yang sudah berprefix (-DFOO, /DFOO) dinormalisasi; token lain yang
+ * diawali '-'/'/' adalah flag penuh — diteruskan apa adanya.
+ * NULL bila kosong (malloc gagal juga mengembalikan NULL; pemanggil
+ * memakai NULL sebagai "tanpa defines", aman).
+ */
+char *definesFlags(const Config *c) {
+  if (c == NULL || c->defines.count == 0) return NULL;
+  const char *pfx = compilerKind(c->cc) == CC_MSVC ? "/D" : "-D";
+  size_t n = 1;
+  for (int i = 0; i < c->defines.count; i++) n += strlen(c->defines.items[i]) + 4;
+  char *s = malloc(n);
+  if (!s) return NULL;
+  s[0] = '\0';
+  for (int i = 0; i < c->defines.count; i++) {
+    const char *it = c->defines.items[i];
+    if ((it[0] == '-' || it[0] == '/') && it[1] == 'D') {
+      it += 2; /* sudah berprefix -D / /D: strip, ganti dengan kanonik */
+    } else if (it[0] == '-' || it[0] == '/') {
+      strcat(s, it); /* flag penuh non-D (langka): teruskan */
+      strcat(s, " ");
+      continue;
+    }
+    strcat(s, pfx);
+    strcat(s, it);
+    strcat(s, " ");
+  }
+  return s;
 }
 
 bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
@@ -335,21 +367,27 @@ char *compileCmd(const Config *c, const char *inc, const char *wf, const char *s
     char *minc = translateFlagsToMsvc(inc);
     char *mwf = translateFlagsToMsvc(wf);
     char *mtf = tf ? translateFlagsToMsvc(tf) : NULL;
-    size_t n =
-        strlen(minc) + strlen(mwf) + (mtf ? strlen(mtf) : 0) + 2 * strlen(src) + strlen(obj) + 128;
+    char *mdf = definesFlags(c); /* sudah sintaks /D untuk MSVC */
+    size_t n = strlen(minc) + strlen(mwf) + (mtf ? strlen(mtf) : 0) +
+               (mdf ? strlen(mdf) : 0) + 2 * strlen(src) + strlen(obj) + 128;
     char *cmd = malloc(n);
-    snprintf(cmd, n, "cl /nologo %s %s %s/std:%s /c %s /Fo%s", mtf ? mtf : "", minc, mwf, msvcstd,
-             src, obj);
+    snprintf(cmd, n, "cl /nologo %s %s %s %s/std:%s /c %s /Fo%s", mtf ? mtf : "", minc, mwf,
+             mdf ? mdf : "", msvcstd, src, obj);
     free(minc);
     free(mwf);
     free(mtf);
+    free(mdf);
     free(tf);
     return cmd;
   }
 
-  char *cmd = malloc(strlen(c->cc) + strlen(inc) + strlen(wf) + tflen + strlen(c->std) +
-                     2 * strlen(src) + strlen(obj) + 64);
-  sprintf(cmd, "%s %s %s %s-std=%s -c %s -o %s", c->cc, tf ? tf : "", inc, wf, c->std, src, obj);
+  char *df = definesFlags(c); /* -D... utk GNU/Clang (design/flags.md §2.1) */
+  size_t dflen = df ? strlen(df) : 0;
+  char *cmd = malloc(strlen(c->cc) + strlen(inc) + strlen(wf) + tflen + dflen +
+                     strlen(c->std) + 2 * strlen(src) + strlen(obj) + 64);
+  sprintf(cmd, "%s %s %s %s%s-std=%s -c %s -o %s", c->cc, tf ? tf : "", inc, wf, df ? df : "",
+          c->std, src, obj);
+  free(df);
   free(tf);
   return cmd;
 }

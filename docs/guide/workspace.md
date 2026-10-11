@@ -55,9 +55,9 @@ mod.archive.dir = ../modules
 ```
 
 Packaging (archive) projects such as `mod` above run once during the
-library phase and are skipped in the binary phase
-(`skip: selesai di fase library`) — their artifacts (archives, packages)
-are produced there and are not rebuilt.
+library phase (as `Fase : archive`) and are skipped silently in the
+binary phase — their artifacts (archives, packages) are produced there
+and are not rebuilt.
 
 ## Build commands
 

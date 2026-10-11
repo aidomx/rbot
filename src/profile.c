@@ -915,8 +915,9 @@ static int parseArchiveWith(ProfCtx *p, const char *val) {
   copyStr(vbuf, sizeof(vbuf), val);
   p->doTar = false;
   p->comp = COMP_NONE;
-  char *tok = strtok(vbuf, ",");
-  for (; tok; tok = strtok(NULL, ",")) {
+  char *savePtr = NULL;
+  char *tok = strtok_r(vbuf, ",", &savePtr);
+  for (; tok; tok = strtok_r(NULL, ",", &savePtr)) {
     tok = trim(tok);
     if (strcmp(tok, "tar") == 0 || strcmp(tok, "none") == 0) {
       p->doTar = true;
@@ -947,8 +948,9 @@ static int parseLibraryWith(ProfCtx *p, const char *val) {
   copyStr(vbuf, sizeof(vbuf), val);
   p->libStatic = false;
   p->libShared = false;
-  char *tok = strtok(vbuf, ",");
-  for (; tok; tok = strtok(NULL, ",")) {
+  char *savePtr = NULL;
+  char *tok = strtok_r(vbuf, ",", &savePtr);
+  for (; tok; tok = strtok_r(NULL, ",", &savePtr)) {
     tok = trim(tok);
     if (strcmp(tok, "static") == 0) {
       p->libStatic = true;

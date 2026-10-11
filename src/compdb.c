@@ -6,6 +6,7 @@
 
 #include "compile.h"
 #include "portability.h"
+#include "util.h"
 
 #ifdef _WIN32
 #define strtok_r strtok_s
@@ -83,6 +84,8 @@ static uint64_t compdbFingerprint(const Config *c, List *srcs, const char *cwd) 
     h = hashString(h, c->headerPublic.items[i]);
   for (int i = 0; i < c->flags.count; i++)
     h = hashString(h, c->flags.items[i]);
+  for (int i = 0; i < c->defines.count; i++)
+    h = hashString(h, c->defines.items[i]);
 
   /* compile_commands.json hanya bergantung pada daftar source dan konfigurasi
      compiler. Timestamp source tidak ikut fingerprint: mengubah isi source
@@ -203,12 +206,12 @@ void writeCompdb(const Config *c, List *srcs) {
 
   uint64_t fingerprint = compdbFingerprint(c, srcs, cwd);
   if (compdbCacheHit(fingerprint)) {
-    printf("> CompDB    : compile_commands.json unchanged (cache hit)\n");
+    printf("%s CompDB  : compile_commands.json unchanged (cache hit)\n", repPrefix());
     return;
   }
   /* Json hilang tapi blob + fingerprint masih cocok: restore tanpa render. */
   if (!fsFileExists("compile_commands.json") && compdbRestoreFromBlob(fingerprint)) {
-    printf("> CompDB    : compile_commands.json restored (blob)\n");
+    printf("%s CompDB  : compile_commands.json restored (blob)\n", repPrefix());
     return;
   }
 
@@ -271,6 +274,19 @@ void writeCompdb(const Config *c, List *srcs) {
       APPEND(buf, bufLen, bufCap, ",\n      ");
     }
 
+    // Defines (design/flags.md §2.1) — prefix mengikuti compiler aktif
+    char *df = definesFlags(c);
+    if (df) {
+      char *defSave = NULL;
+      char *defTok = strtok_r(df, " ", &defSave);
+      while (defTok) {
+        jsonQuoteAppend(buf, &bufLen, bufCap, defTok);
+        APPEND(buf, bufLen, bufCap, ",\n      ");
+        defTok = strtok_r(NULL, " ", &defSave);
+      }
+      free(df);
+    }
+
     // Std, -c, -o, obj, src
     APPEND(buf, bufLen, bufCap, "\"-std=%s\",\n      \"-c\",\n      \"-o\",\n      ", c->std);
     jsonQuoteAppend(buf, &bufLen, bufCap, obj);
@@ -307,5 +323,5 @@ void writeCompdb(const Config *c, List *srcs) {
   saveCompdbBlob(buf, bufLen); /* konten json untuk restore tanpa render */
   free(buf);
   saveCompdbCache(fingerprint);
-  printf("> CompDB    : compile_commands.json refreshed\n");
+  printf("%s CompDB  : compile_commands.json refreshed\n", repPrefix());
 }

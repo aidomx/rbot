@@ -21,3 +21,4 @@ RELEASE_*.md
 *.bak
 *.plist
 *.tmp
+*.log

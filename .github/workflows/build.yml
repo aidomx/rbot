@@ -47,6 +47,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Setup Node.js 24 untuk environment
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       # cl.exe tidak ada di PATH bash default runner — impor env vcvars
       # (PATH/INCLUDE/LIB) agar install.ps1 bisa memanggil cl langsung.
       - name: Setup MSVC environment

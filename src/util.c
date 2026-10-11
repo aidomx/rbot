@@ -6,6 +6,36 @@
 
 #include "portability.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+/* ==================== Laporan build ==================== */
+
+/*
+ * repPrefix — lihat util.h. Deteksi UTF-8 dari locale environment;
+ * Windows menambah codepage konsol aktif (chcp / CP_UTF8). Hasil di-cache
+ * per proses: keputusan tidak berubah selama run build berlangsung.
+ */
+const char *repPrefix(void) {
+  static int utf8 = -1;
+  if (utf8 < 0) {
+    const char *e = getenv("LC_ALL");
+    if (!e || !*e) e = getenv("LC_CTYPE");
+    if (!e || !*e) e = getenv("LANG");
+    if (e && (strstr(e, "UTF-8") || strstr(e, "utf8") || strstr(e, "UTF8") ||
+              strstr(e, "utf-8")))
+      utf8 = 1;
+#ifdef _WIN32
+    else if (GetConsoleOutputCP() == 65001) /* CP_UTF8 */
+      utf8 = 1;
+#endif
+    else
+      utf8 = 0;
+  }
+  return utf8 ? "|" : ">";
+}
+
 /* ==================== List & string helpers ==================== */
 
 bool listAdd(List *l, const char *s) {

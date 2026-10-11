@@ -47,18 +47,22 @@ bool cmdsPackAfterBinary(const Config *c, bool *fastStateSaved, const List *srcs
 /* Proyek kemasan murni (output.binary = false): embedded dulu (arsip
    untuk proyek lain), lalu packaging, lalu summary ringkas. */
 int cmdsPackOnlyProject(const Config *c) {
+  bool anyRebuilt = false;
   if (c->embCount > 0) {
     mkdirs(c->outBuildDir);
-    if (!buildEmbeddedArchives(c)) return 1;
+    if (!buildEmbeddedArchivesEx(c, &anyRebuilt)) return 1;
   }
   if (!packRun(c)) return 1;
-  printf("\n> Summary\n");
+  if (packLastRebuilt()) anyRebuilt = true;
+  printf("\n%s Summary :\n", repPrefix());
   for (int i = 0; i < c->embCount; i++) {
     if (!c->emb[i].enable) continue;
-    printf("Archive  : %s%s\n", c->emb[i].archivePath,
+    printf("    Archive  : %s%s\n", c->emb[i].archivePath,
            fsFileExists(c->emb[i].archivePath) ? "" : " (missing)");
   }
-  printf("Status   : Success\n");
+  /* No-op: tidak ada arsip/paket yang dibangun ulang (design/build_report.md). */
+  if (!anyRebuilt) printf("    Skipped  : true\n");
+  printf("    Status   : Success\n");
   return 0;
 }
 
@@ -206,11 +210,11 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
     char target[MAX_PATH * 2];
     if (c->libStatic) {
       cmdsLibStaticPath(c, target, sizeof(target));
-      printf("> Library   : %s (up-to-date)\n", target);
+      printf("%s Library : %s (up-to-date)\n", repPrefix(), target);
     }
     if (c->libShared) {
       cmdsLibSharedPath(c, target, sizeof(target));
-      printf("> Library   : %s (up-to-date)\n", target);
+      printf("%s Library : %s (up-to-date)\n", repPrefix(), target);
     }
     return true;
   }
@@ -241,7 +245,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
   if (c->libStatic) {
     cmdsLibStaticPath(c, target, sizeof(target));
     if (staticUpToDate) {
-      printf("> Library   : %s (up-to-date)\n", target);
+      printf("%s Library : %s (up-to-date)\n", repPrefix(), target);
     } else {
       size_t n = 64;
       for (int i = 0; i < objs.count; i++)
@@ -255,7 +259,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
         strcat(cmd, " ");
         strcat(cmd, objs.items[i]);
       }
-      printf("> Library   : %s\n", target);
+      printf("%s Library : %s\n", repPrefix(), target);
       staticDone = runCmd(cmd);
       free(cmd);
       if (!staticDone) fprintf(stderr, "rbot: static library build failed\n");
@@ -265,7 +269,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
   if (c->libShared) {
     cmdsLibSharedPath(c, target, sizeof(target));
     if (sharedUpToDate) {
-      printf("> Library   : %s (up-to-date)\n", target);
+      printf("%s Library : %s (up-to-date)\n", repPrefix(), target);
       listFree(&objs);
       return staticDone; /* .so dilewati; hasil .a tetap dihormati */
     }
@@ -324,7 +328,7 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs) {
         }
       }
     }
-    printf("> Library   : %s\n", target);
+    printf("%s Library : %s\n", repPrefix(), target);
     sharedDone = runCmd(cmd);
     free(cmd);
     if (!sharedDone) fprintf(stderr, "rbot: shared library build failed\n");

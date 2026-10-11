@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "cfg/config_cache.h"
+#include "compile.h"
 #include "embed.h"
 #include "pack/pack_internal.h"
 #include "uses/alias.h"
@@ -81,11 +82,6 @@ Config configDefaults(void) {
   return c;
 }
 
-static void appendLibraries(List *dst, const List *src) {
-  for (int i = 0; i < src->count; i++)
-    listAdd(dst, src->items[i]);
-}
-
 static void addCommaList(List *dst, const char *value) {
   char buf[2048];
   copyStr(buf, sizeof(buf), value);
@@ -104,15 +100,140 @@ static void addCommaList(List *dst, const char *value) {
 /* Helper parsing pack.* (packSetStr/packAddFiles/packApplyDeb/packApply)
    ada di pack/pack_config.c — dipakai lewat pack/pack_internal.h. */
 
-/* Pilih library nested berdasarkan target host. Library flat tetap selalu dipakai. */
-static void configFinalizeLibraries(Config *c) {
-#if defined(__linux__)
-  appendLibraries(&c->libraries, &c->librariesLinux);
+/* ==================== Suffix platform/compiler (design/flags.md) ==================== */
+
+/*
+ * Nama suffix -> target enum; -1 = tak dikenal. Pemanggil merutekan item
+ * ke jalur flat (perilaku lama untuk nama tak dikenal: `flags.foo`,
+ * `library.default`, dst. tetap diterapkan tanpa syarat). Alias lama
+ * libraryListForPlatform ikut didukung: darwin, win32, mingw.
+ */
+static int sfxTarget(const char *name) {
+  if (!name || !*name) return -1;
+  if (strcmp(name, "linux") == 0) return SFX_LINUX;
+  if (strcmp(name, "android") == 0) return SFX_ANDROID;
+  if (strcmp(name, "macos") == 0 || strcmp(name, "macOS") == 0 ||
+      strcmp(name, "darwin") == 0)
+    return SFX_MACOS;
+  if (strcmp(name, "windows") == 0 || strcmp(name, "win32") == 0 ||
+      strcmp(name, "mingw") == 0)
+    return SFX_WINDOWS;
+  if (strcmp(name, "freebsd") == 0) return SFX_FREEBSD;
+  if (strcmp(name, "unix") == 0 || strcmp(name, "posix") == 0) return SFX_UNIX;
+  if (strcmp(name, "gcc") == 0 || strcmp(name, "g++") == 0) return SFX_GCC;
+  if (strcmp(name, "clang") == 0 || strcmp(name, "clang++") == 0) return SFX_CLANG;
+  if (strcmp(name, "cl") == 0 || strcmp(name, "msvc") == 0) return SFX_CL;
+  return -1;
+}
+
+/* Target platform host — deteksi compile-time di awal parse (design §6). */
+static int hostSfxPlatform(void) {
+#if defined(__ANDROID__)
+  return SFX_ANDROID;
 #elif defined(__APPLE__)
-  appendLibraries(&c->libraries, &c->librariesMacOS);
+  return SFX_MACOS;
 #elif defined(_WIN32)
-  appendLibraries(&c->libraries, &c->librariesWindows);
+  return SFX_WINDOWS;
+#elif defined(__FreeBSD__)
+  return SFX_FREEBSD;
+#elif defined(__linux__)
+  return SFX_LINUX;
+#else
+  return -1; /* OS tak dikenal: hanya suffix unix (fallback POSIX) */
 #endif
+}
+
+/* Dedup mengabaikan '-' di depan: "Wall" dan "-Wall" dianggap sama. */
+static bool sfxSameItem(const char *a, const char *b) {
+  while (*a == '-')
+    a++;
+  while (*b == '-')
+    b++;
+  return strcmp(a, b) == 0;
+}
+
+void configMergeUnique(List *dst, const List *src) {
+  for (int i = 0; i < src->count; i++) {
+    bool dup = false;
+    for (int j = 0; j < dst->count && !dup; j++)
+      if (sfxSameItem(dst->items[j], src->items[i])) dup = true;
+    if (!dup) listAdd(dst, src->items[i]);
+  }
+}
+
+/* true bila bucket[idx] ada isinya dan sudah di-append (dedup) ke dst. */
+static bool mergeSfxBucket(List *dst, List bucket[SFX_COUNT], int idx) {
+  if (idx < 0 || idx >= SFX_COUNT || bucket[idx].count == 0) return false;
+  configMergeUnique(dst, &bucket[idx]);
+  return true;
+}
+
+/*
+ * Merge suffix PLATFORM ke nilai final (design/flags.md §3: global dulu,
+ * suffix di-append, dedup otomatis). Urutan: bucket spesifik host → unix
+ * (fallback POSIX bila tak ada yang cocok; Windows bukan POSIX). Android
+ * match bucket android DAN linux (linux mencakup Android/Termux).
+ * std skalar: suffix platform meng-override nilai global/konvensi.
+ */
+static void configFinalizeSuffix(Config *c) {
+  int plat = hostSfxPlatform();
+#ifdef _WIN32
+  bool posix = false;
+#else
+  bool posix = true; /* termasuk OS tak dikenal (kebanyakan POSIX) */
+#endif
+
+  List *props[] = {&c->flags, &c->libraries, &c->headerPublic, &c->defines};
+  List *buckets[] = {c->sfxFlags, c->sfxLibrary, c->sfxHeaders, c->sfxDefines};
+  for (int p = 0; p < 4; p++) {
+    bool any = false;
+    if (plat == SFX_ANDROID) any = mergeSfxBucket(props[p], buckets[p], SFX_ANDROID) || any;
+    if (plat >= 0) any = mergeSfxBucket(props[p], buckets[p], plat) || any;
+    if (plat == SFX_ANDROID) any = mergeSfxBucket(props[p], buckets[p], SFX_LINUX) || any;
+    if (!any && posix) mergeSfxBucket(props[p], buckets[p], SFX_UNIX);
+  }
+
+  const char *s = NULL;
+  if (plat == SFX_ANDROID) {
+    if (c->sfxStd[SFX_ANDROID][0]) s = c->sfxStd[SFX_ANDROID];
+    else if (c->sfxStd[SFX_LINUX][0])
+      s = c->sfxStd[SFX_LINUX];
+  } else if (plat >= 0 && c->sfxStd[plat][0]) {
+    s = c->sfxStd[plat];
+  }
+  if (!s && posix && c->sfxStd[SFX_UNIX][0]) s = c->sfxStd[SFX_UNIX];
+  if (s) copyStr(c->std, sizeof(c->std), s);
+}
+
+/*
+ * Merge suffix COMPILER <prop>.gcc/.clang/.cl — dipanggil resolveCompiler
+ * setelah cc terpilih (design/flags.md §3: paling spesifik, berlaku
+ * terakhir). Idempotent via ccSuffixDone.
+ */
+void configApplyCompilerSuffix(Config *c) {
+  if (!c || c->ccSuffixDone || !c->cc[0]) return;
+  c->ccSuffixDone = true; /* idempotent: resolveCompiler bisa dipanggil ulang */
+
+  int t;
+  switch (compilerKind(c->cc)) {
+    case CC_MSVC:
+      t = SFX_CL;
+      break;
+    case CC_CLANG:
+      t = SFX_CLANG;
+      break;
+    case CC_GCC:
+    case CC_GXX: /* g++ memakai bucket .gcc (design hanya punya gcc/clang/cl) */
+      t = SFX_GCC;
+      break;
+    default:
+      return; /* driver tak dikenal: tanpa suffix compiler */
+  }
+
+  List *props[] = {&c->flags, &c->libraries, &c->headerPublic, &c->defines};
+  List *buckets[] = {c->sfxFlags, c->sfxLibrary, c->sfxHeaders, c->sfxDefines};
+  for (int p = 0; p < 4; p++) configMergeUnique(props[p], &buckets[p][t]);
+  if (c->sfxStd[t][0]) copyStr(c->std, sizeof(c->std), c->sfxStd[t]);
 }
 
 /*
@@ -122,7 +243,6 @@ static void configFinalizeLibraries(Config *c) {
  * MURNI derivasi in-memory + stat direktori; tidak menulis file apa pun.
  */
 void configFinalize(Config *c) {
-  configFinalizeLibraries(c);
   for (int i = 0; i < c->embCount; i++)
     configFinalizeEntry(&c->emb[i], c->outBuildDir);
 
@@ -188,6 +308,13 @@ void configFinalize(Config *c) {
        sama seperti archive.*, jalur !binary di cmdBuild yang menangani. */
     if (c->sources.count == 0) c->binary = false;
   }
+
+  /*
+   * Merge suffix platform TERAKHIR (design/flags.md): setelah defaults
+   * konvensi — headers.<target> di-append setelah fallback include/, dan
+   * std.<target> meng-override default bahasa (gnu11/c++17).
+   */
+  configFinalizeSuffix(c);
 }
 
 /* ==================== Penerapan konfigurasi ==================== */
@@ -231,6 +358,14 @@ static void configApply(Config *c, const char *section, const char *sub, const c
     else if ((strcmp(key, "compdb") == 0 || strcmp(key, "compileCommands") == 0) &&
              parseBool(value, &b))
       c->cleanCompileCommands = b;
+    return;
+  }
+
+  if (strcmp(section, "std") == 0) {
+    /* std.<target> (design/flags.md) — suffix, bukan key std biasa;
+       skalar, jadi di-merge sebagai override saat finalize. */
+    int t = sfxTarget(key);
+    if (t >= 0) copyStr(c->sfxStd[t], sizeof(c->sfxStd[t]), value);
     return;
   }
 
@@ -433,26 +568,25 @@ static void configApply(Config *c, const char *section, const char *sub, const c
   }
 }
 
-static List *libraryListForPlatform(Config *c, const char *platform) {
-  if (!platform) return NULL;
-  if (strcmp(platform, "linux") == 0) return &c->librariesLinux;
-  if (strcmp(platform, "macos") == 0 || strcmp(platform, "macOS") == 0 ||
-      strcmp(platform, "darwin") == 0)
-    return &c->librariesMacOS;
-  if (strcmp(platform, "windows") == 0 || strcmp(platform, "win32") == 0 ||
-      strcmp(platform, "mingw") == 0)
-    return &c->librariesWindows;
-  return NULL;
-}
-
 static void listForSection(Config *c, const char *section, const char *sub, const char *item) {
+  int sfx = sfxTarget(sub);
   if (strcmp(section, "sources") == 0)
     listAdd(&c->sources, item);
-  else if (strcmp(section, "flags") == 0)
-    listAdd(&c->flags, item);
-  else if (strcmp(section, "library") == 0) {
-    List *platform = libraryListForPlatform(c, sub);
-    listAdd(platform ? platform : &c->libraries, item);
+  else if (strcmp(section, "flags") == 0) {
+    if (sfx >= 0)
+      listAdd(&c->sfxFlags[sfx], item);
+    else
+      listAdd(&c->flags, item);
+  } else if (strcmp(section, "defines") == 0) {
+    if (sfx >= 0)
+      listAdd(&c->sfxDefines[sfx], item);
+    else
+      listAdd(&c->defines, item);
+  } else if (strcmp(section, "library") == 0) {
+    if (sfx >= 0)
+      listAdd(&c->sfxLibrary[sfx], item);
+    else
+      listAdd(&c->libraries, item); /* flat + nama tak dikenal (default, ...) */
   } else if (strcmp(section, "compiler") == 0)
     listAdd(&c->compilers, item);
   else if (strcmp(section, "exclude") == 0)
@@ -460,6 +594,8 @@ static void listForSection(Config *c, const char *section, const char *sub, cons
   else if (strcmp(section, "headers") == 0) {
     if (sub && strcmp(sub, "internal") == 0)
       listAdd(&c->headerInternal, item);
+    else if (sfx >= 0)
+      listAdd(&c->sfxHeaders[sfx], item);
     else
       listAdd(&c->headerPublic, item);
   } else if (strcmp(section, "pack") == 0) {
@@ -526,7 +662,8 @@ static void parseLine(Config *c, char *section, char *sub, char *subsub, int *su
 
       bool isListSection = strcmp(parts[0], "sources") == 0 || strcmp(parts[0], "flags") == 0 ||
                            strcmp(parts[0], "compiler") == 0 || strcmp(parts[0], "exclude") == 0 ||
-                           strcmp(parts[0], "headers") == 0 || strcmp(parts[0], "library") == 0;
+                           strcmp(parts[0], "headers") == 0 || strcmp(parts[0], "library") == 0 ||
+                           strcmp(parts[0], "defines") == 0;
       if (isListSection) {
         if (!*v) return;
         for (char *save = v;;) {

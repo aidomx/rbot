@@ -166,18 +166,23 @@ static bool packChecksumApply(const Config *c, const char *artifactPath) {
   snprintf(sumPath, sizeof(sumPath), "%s.sha256", artifactPath);
   int64_t artM = fsMTimeNs(artifactPath), sumM = fsMTimeNs(sumPath);
   if (artM >= 0 && sumM >= artM) {
-    printf("> Checksum  : %s (up-to-date)\n", sumPath);
+    printf("%s Checksum: %s (up-to-date)\n", repPrefix(), sumPath);
     return true;
   }
   if (!packWriteSha256(artifactPath)) {
     fprintf(stderr, "rbot: pack: gagal menulis %s\n", sumPath);
     return false;
   }
-  printf("> Checksum  : %s\n", sumPath);
+  printf("%s Checksum: %s\n", repPrefix(), sumPath);
   return true;
 }
 
 /* ---- packRun ---- */
+
+/* Status rebuild packRun terakhir — lihat packLastRebuilt() di pack.h. */
+static bool g_packRebuilt = false;
+
+bool packLastRebuilt(void) { return g_packRebuilt; }
 
 bool packRunAt(const Config *c) {
   /* Tidak ada fast state terpisah untuk fase release: freshness kemasan
@@ -186,6 +191,7 @@ bool packRunAt(const Config *c) {
 }
 
 bool packRun(const Config *c) {
+  g_packRebuilt = false;
   if (!c->pack.requested) return true;
 
   /* Validasi entri dulu: paket dengan file yang hilang harus gagal jelas,
@@ -231,12 +237,13 @@ bool packRun(const Config *c) {
 
     int64_t artM = fsMTimeNs(a.path);
     if (newest >= 0 && artM >= newest) {
-      printf("> Package   : %s (up-to-date)\n", a.path);
+      printf("%s Package : %s (up-to-date)\n", repPrefix(), a.path);
     } else if (!packBuildTar(c, &a)) {
       return false;
     } else {
       long long sz = fsFileSize(a.path);
-      printf("> Package   : %s (%.1fKB)\n", a.path, sz > 0 ? (double)sz / 1024.0 : 0);
+      printf("%s Package : %s (%.1fKB)\n", repPrefix(), a.path, sz > 0 ? (double)sz / 1024.0 : 0);
+      g_packRebuilt = true;
     }
     if (!packChecksumApply(c, a.path)) return false;
   }
@@ -252,12 +259,13 @@ bool packRun(const Config *c) {
 
     int64_t artM = fsMTimeNs(a.path);
     if (newest >= 0 && artM >= newest) {
-      printf("> Package   : %s (up-to-date)\n", a.path);
+      printf("%s Package : %s (up-to-date)\n", repPrefix(), a.path);
     } else if (!packBuildDeb(c, &a)) {
       return false;
     } else {
       long long sz = fsFileSize(a.path);
-      printf("> Package   : %s (%.1fKB)\n", a.path, sz > 0 ? (double)sz / 1024.0 : 0);
+      printf("%s Package : %s (%.1fKB)\n", repPrefix(), a.path, sz > 0 ? (double)sz / 1024.0 : 0);
+      g_packRebuilt = true;
     }
     if (!packChecksumApply(c, a.path)) return false;
   } else if (c->pack.format[0] && strcmp(c->pack.format, "tar") != 0 &&

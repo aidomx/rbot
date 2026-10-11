@@ -22,6 +22,7 @@
 
 #include "commands.h"
 #include "config.h"
+#include "makeconv.h"
 #include "ninjaconv.h"
 #include "portability.h"
 #include "uses/workspace.h"
@@ -119,10 +120,14 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
     if (strcmp(a, "-xf") == 0 || strcmp(a, "-xcf") == 0) {
       bs->conv_keep = (a[2] == 'c');
       if (i + 1 >= argc || !argv[i + 1][0]) {
-        fprintf(stderr, "rbot: %s requires a build.ninja argument\n", a);
+        fprintf(stderr, "rbot: %s requires a build.ninja or 'make' argument\n", a);
         return 2;
       }
       bs->conv_file = argv[++i];
+      /* Kata kunci "make": konversi Makefile (design/convert.md) —
+         Makefile/makefile/GNUmakefile dicari di direktori kerja saat
+         Apply (setelah chdir -f bila ada). */
+      bs->conv_make = (strcmp(bs->conv_file, "make") == 0);
       convSet = true;
       continue;
     }
@@ -249,7 +254,8 @@ int bootstrapApply(Bootstrap *bs) {
      sebelum chdir -f di bawah. */
   static char convAbs[MAX_PATH * 2];
   bs->conv_abs = NULL;
-  if (bs->conv_file) {
+  /* "make" bukan path — resolusi nama file dilakukan setelah chdir -f. */
+  if (bs->conv_file && !bs->conv_make) {
     if (bs->conv_file[0] == '/') {
       snprintf(convAbs, sizeof(convAbs), "%s", bs->conv_file);
     } else {
@@ -291,8 +297,33 @@ int bootstrapApply(Bootstrap *bs) {
   if (bs->conv_file) {
     char err[256];
     const char *dst = bs->conv_keep ? "Buildfile" : XF_TMP;
+    const char *src = bs->conv_abs;
+    if (bs->conv_make) {
+      /* design/convert.md Resolusi Argumen: "make" -> cari Makefile,
+         makefile, atau GNUmakefile di direktori kerja saat ini. */
+      static char mkAbs[MAX_PATH * 2];
+      static const char *cands[] = {"Makefile", "makefile", "GNUmakefile", NULL};
+      src = NULL;
+      for (int k = 0; cands[k]; k++) {
+        if (fsFileExists(cands[k])) {
+          char cwd0[MAX_PATH];
+          if (fsGetCwd(cwd0, sizeof(cwd0)))
+            snprintf(mkAbs, sizeof(mkAbs), "%s/%s", cwd0, cands[k]);
+          else
+            snprintf(mkAbs, sizeof(mkAbs), "%s", cands[k]);
+          src = mkAbs;
+          break;
+        }
+      }
+      if (!src) {
+        fprintf(stderr,
+                "rbot: tidak menemukan Makefile/makefile/GNUmakefile di direktori saat ini\n");
+        return 1;
+      }
+      bs->conv_abs = src; /* dipakai pesan "Removed" di rbot.c */
+    }
     if (bs->conv_keep && fsFileExists(dst)) {
-      printf("> '%s' sudah ada. Timpa dengan hasil konversi %s? [y/N] ", dst, bs->conv_abs);
+      printf("> '%s' sudah ada. Timpa dengan hasil konversi %s? [y/N] ", dst, src);
       fflush(stdout);
       char ans[16] = {0};
       if (!fgets(ans, sizeof(ans), stdin)) ans[0] = '\0';
@@ -302,7 +333,9 @@ int bootstrapApply(Bootstrap *bs) {
                      begitu jalur ini menandai "berhenti dengan sukses". */
       }
     }
-    if (!ninjaToBuildfile(bs->conv_abs, dst, err, sizeof(err))) {
+    bool ok = bs->conv_make ? makeToBuildfile(src, dst, err, sizeof(err))
+                            : ninjaToBuildfile(src, dst, err, sizeof(err));
+    if (!ok) {
       fprintf(stderr, "rbot: %s\n", err);
       return 1;
     }
@@ -311,10 +344,14 @@ int bootstrapApply(Bootstrap *bs) {
     bs->buildfile = dst;
   }
 
-  /* Evaluasi state build (design fase 2): cold bila .rbot/build.state
-     tidak ada; noop/dirty ditentukan oleh mesin build sendiri saat
-     dispatch (command lain tidak butuh implicit evaluate). */
-  bs->status.cold = !fsFileExists(".rbot/build.state");
+  /* Evaluasi state build (design fase 2 + design/workspace.md): cold bila
+     tidak ada state sebelumnya; noop/dirty ditentukan oleh mesin build
+     sendiri saat dispatch (command lain tidak butuh implicit evaluate).
+     Mode workspace memakai .rbot/workspace.state — root workspace tidak
+     punya .rbot/build.state (itu file per-proyek), jadi cek lama selalu
+     melaporkan cold pada tiap run `rbot -w`. */
+  bool wsMode = bs->want_workspace || (bs->cmd == CMD_BUILD && workspaceFileExists());
+  bs->status.cold = wsMode ? !wsStateValid(".") : !fsFileExists(".rbot/build.state");
   bs->status.has_state = !bs->status.cold;
   return 0;
 }

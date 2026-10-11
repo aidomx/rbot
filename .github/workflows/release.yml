@@ -44,6 +44,12 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      # Setup Node.js 24 untuk environment
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       # cl.exe tidak ada di PATH default runner — impor env vcvars agar
       # install.ps1 bisa memanggil cl (MSVC) untuk build release Windows.
       - name: Setup MSVC environment

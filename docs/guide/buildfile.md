@@ -167,6 +167,43 @@ library.macos = m
 library.windows = ws2_32
 ```
 
+## Platform & compiler suffixes
+
+`flags`, `library`, `headers`, `defines` and `std` accept a target suffix:
+
+```text
+<property> = <global value>
+<property>.<target> = <specific value>
+```
+
+Supported targets — platform: `linux` (includes Android/Termux), `android`,
+`macos`, `windows`, `freebsd`, `unix` (POSIX fallback when no platform
+suffix matches); compiler: `gcc`, `clang`, `cl`.
+
+The global value is applied first, matching suffix values are appended
+after it (duplicates removed). `std` is scalar, so `std.<target>`
+overrides the global `std`. Example on Linux with GCC:
+
+```text
+flags = Wall, Wextra
+flags.linux = D_REENTRANT
+flags.gcc = O2
+```
+
+resolves to `-Wall -Wextra -D_REENTRANT -O2`.
+
+## Defines
+
+Preprocessor macros are declared without any `-D`/`/D` prefix — rbot
+translates them for the active compiler (GCC/Clang: `-DDEBUG`, MSVC:
+`/DDEBUG`):
+
+```text
+defines = DEBUG, VERSION=1.0.0
+defines.linux = _POSIX_C_SOURCE=200809L
+defines.windows = UNICODE, WIN32_LEAN_AND_MEAN
+```
+
 ## Process behavior
 
 `foreground` controls process-group/SIGINT behavior. rbot can own SIGINT handling and forward interruption to child build processes.

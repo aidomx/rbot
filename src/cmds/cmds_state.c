@@ -58,6 +58,8 @@ void cmdsFingerprintMake(const Config *c, const List *srcs, CmdsBuildFingerprint
   fp->compile = fpString(fp->compile, c->target);
   fp->compile = fpString(fp->compile, c->outBuildDir);
   fp->compile = fpList(fp->compile, &c->flags);
+  /* defines mempengaruhi hasil kompilasi sama seperti flags (design/flags.md). */
+  fp->compile = fpList(fp->compile, &c->defines);
   fp->compile = fpList(fp->compile, &c->headerPublic);
   /* Shared library objects need -fPIC, so this changes compile output. */
   fp->compile = fpString(fp->compile, c->libShared ? "pic" : "no-pic");
@@ -356,45 +358,49 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
       /* Fase library: tidak ada link binary — lapor status library saja. */
       if (s.libRequested) {
         if (s.libStaticPath[0])
-          printf("> Library   : %s%s\n", s.libStaticPath, s.libStaticUp ? " (up-to-date)" : "");
+          printf("%s Library : %s%s\n", repPrefix(), s.libStaticPath,
+                 s.libStaticUp ? " (up-to-date)" : "");
         if (s.libSharedPath[0])
-          printf("> Library   : %s%s\n", s.libSharedPath, s.libSharedUp ? " (up-to-date)" : "");
+          printf("%s Library : %s%s\n", repPrefix(), s.libSharedPath,
+                 s.libSharedUp ? " (up-to-date)" : "");
       }
     } else {
-      printf("> Build with cached state (fingerprint unchanged)\n");
-      printf("> Linking   : %s (up-to-date)\n", s.target);
+      printf("%s Build with cached state (fingerprint unchanged)\n", repPrefix());
+      printf("%s Linking : %s (up-to-date)\n", repPrefix(), s.target);
       if (s.libRequested) {
         if (s.libStaticPath[0])
-          printf("> Library   : %s%s\n", s.libStaticPath, s.libStaticUp ? " (up-to-date)" : "");
+          printf("%s Library : %s%s\n", repPrefix(), s.libStaticPath,
+                 s.libStaticUp ? " (up-to-date)" : "");
         if (s.libSharedPath[0])
-          printf("> Library   : %s%s\n", s.libSharedPath, s.libSharedUp ? " (up-to-date)" : "");
+          printf("%s Library : %s%s\n", repPrefix(), s.libSharedPath,
+                 s.libSharedUp ? " (up-to-date)" : "");
       }
     }
-    printf("\n> Summary\n");
+    printf("\n%s Summary :\n", repPrefix());
     if (s.phase == 1) {
       if (s.libRequested) {
         if (s.libStaticPath[0])
-          printf("Library  : %s (%.1fKB)\n", s.libStaticPath,
+          printf("    Library  : %s (%.1fKB)\n", s.libStaticPath,
                  s.libStaticSize > 0 ? (double)s.libStaticSize / 1024.0 : 0);
         if (s.libSharedPath[0])
-          printf("Library  : %s (%.1fKB)\n", s.libSharedPath,
+          printf("    Library  : %s (%.1fKB)\n", s.libSharedPath,
                  s.libSharedSize > 0 ? (double)s.libSharedSize / 1024.0 : 0);
       }
     } else {
-      printf("Target   : %s\n", s.target);
-      printf("Size     : %.1fKB\n", s.targetSize > 0 ? (double)s.targetSize / 1024.0 : 0);
+      printf("    Target   : %s\n", s.target);
+      printf("    Size     : %.1fKB\n", s.targetSize > 0 ? (double)s.targetSize / 1024.0 : 0);
       if (s.libRequested) {
         if (s.libStaticPath[0])
-          printf("Library  : %s (%.1fKB)\n", s.libStaticPath,
+          printf("    Library  : %s (%.1fKB)\n", s.libStaticPath,
                  s.libStaticSize > 0 ? (double)s.libStaticSize / 1024.0 : 0);
         if (s.libSharedPath[0])
-          printf("Library  : %s (%.1fKB)\n", s.libSharedPath,
+          printf("    Library  : %s (%.1fKB)\n", s.libSharedPath,
                  s.libSharedSize > 0 ? (double)s.libSharedSize / 1024.0 : 0);
       }
     }
-    printf("Compiled : %d\n", s.compiled);
-    printf("Skipped  : %d\n", s.skipped);
-    printf("Status   : Success\n");
+    printf("    Compiled : %d\n", s.compiled);
+    printf("    Skipped  : %d\n", s.skipped);
+    printf("    Status   : Success\n");
   }
   fastStateFree(&s);
   return ok;

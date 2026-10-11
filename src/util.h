@@ -60,4 +60,11 @@ bool safeRelative(const char *path);
 bool runCmd(const char *cmd);
 double nowSeconds(void);
 
+/* ==================== Laporan build (design/build_report.md) ==================== */
+
+/* Prefix baris laporan build: "|" bila terminal mendukung UTF-8, ">"
+   sebagai fallback ASCII. Deteksi sekali per proses: LC_ALL -> LC_CTYPE
+   -> LANG; Windows menambah cek codepage konsol (CP_UTF8). */
+const char *repPrefix(void);
+
 #endif /* RBOT_V0_1_0_UTIL_H */

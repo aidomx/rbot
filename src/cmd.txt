@@ -5,8 +5,8 @@ Rbot - A simple builder for you
 
 (no command)           Build project from Buildfile
 -f <file>              Use <file> as Buildfile (default: Buildfile)
--xf <build.ninja>      Convert build.ninja -> Buildfile.xf.tmp (temporary)
--xcf <build.ninja>     Convert and write to Buildfile (confirm if exists)
+-xf <build.ninja|make>  Convert build.ninja or Makefile -> Buildfile.xf.tmp
+-xcf <build.ninja|make> Convert and write to Buildfile (confirm if exists)
 -j[N]                  Parallel build with N jobs (default: CPU core count)
 -g compdb              Generate compile_commands.json without building
 
@@ -40,9 +40,14 @@ Conventions for a standard project (src/ + optional include/):
   a one-line Buildfile is enough: `use project`
 
 Buildfile fields that override conventions:
-  sources, headers, flags, std, compiler, exclude,
+  sources, headers, flags, defines, std, compiler, exclude,
   output.binaryName, output.binaryDir, output.buildDir,
   output.libraryName, output.libraryShared
+
+Platform/compiler suffixes on flags, library, headers, defines and
+std (e.g. flags.linux, library.windows, defines.macos, std.gcc):
+the global value applies first, matching suffix values are appended
+with dedup; std.<target> overrides std.
 
 Build is incremental: header tracking (mtime + content hash),
 dependency cache (.rbot/deps.cache), and a fast no-op snapshot
@@ -195,6 +200,20 @@ rbot -xcf <build.ninja>
                        Same conversion, but writes the result to
                        Buildfile — with a confirmation prompt first if
                        one already exists.
+
+Makefile conversion
+
+rbot -xf make          Search Makefile/makefile/GNUmakefile in the
+                       current directory, extract declarative config
+                       (compiler, std, flags, defines, headers,
+                       library, sources, target) and write
+                       Buildfile.xf.tmp.
+rbot -xcf make         Same, but writes to Buildfile (confirmation
+                       prompt if one exists).
+
+Makefile conversion is declarative extraction: only static config is
+captured; procedural logic (ifeq, $(MAKE), $(shell)) is ignored and
+flagged with a warning comment in the output.
 
 Conversion is best-effort for common Ninja rules; the converted
 Buildfile may need edits for non-standard setups.
