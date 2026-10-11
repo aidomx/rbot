@@ -8,10 +8,6 @@
 #include "portability.h"
 #include "util.h"
 
-#ifdef _WIN32
-#define strtok_r strtok_s
-#endif
-
 bool compdbEnabled(const Config *c) {
   /* Nonaktif hanya kalau eksplisit "false"; "true" maupun "auto" (default)
      sama-sama berarti compile_commands.json dibuat/diperbarui otomatis. */

@@ -63,8 +63,8 @@ typedef struct {
 #else
   int pid; /* pid_t */
 #endif
-  bool finished; /* sudah di-reap oleh procWaitAny/procStopAll */
-  bool ok;       /* exit code 0 */
+  bool finished;    /* sudah di-reap oleh procWaitAny/procStopAll */
+  bool ok;          /* exit code 0 */
   bool interrupted; /* mati karena Ctrl+C (bukan error kompilasi) */
 } ProcHandle;
 
@@ -92,7 +92,7 @@ bool termIsTTY(void);
 void fsMakeDir(const char *path); /* mkdir satu level, diam bila sudah ada */
 bool fsFileExists(const char *path);
 bool fsDirExists(const char *path);
-time_t fsMTime(const char *path); /* (time_t)-1 bila tidak ada */
+time_t fsMTime(const char *path);    /* (time_t)-1 bila tidak ada */
 int64_t fsMTimeNs(const char *path); /* -1 bila tidak ada */
 long long fsFileSize(const char *path);
 /* mtime ns + size dalam SATU stat (dipakai fastState validasi massal). */
@@ -137,3 +137,7 @@ bool fsMapRead(const char *path, void **outData, size_t *outSize);
 void fsMapClose(void *data, size_t size); /* aman dipanggil dgn data=NULL */
 
 #endif /* RBOT_V0_1_0_PORTABILITY_H */
+
+#ifdef _WIN32
+#define strtok_r strtok_s
+#endif

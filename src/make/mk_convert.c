@@ -21,10 +21,6 @@
 #include "../portability.h"
 #include "../util.h"
 
-#ifdef _WIN32
-#define strtok_r strtok_s
-#endif
-
 #define MK_LINE 2048
 #define MK_COMPLEX_LINES 500
 
@@ -56,13 +52,12 @@ static void joinList(char *out, size_t n, const List *l) {
 
 /* Tokenisasi nilai variabel per spasi, terapkan aturan pemetaan.
    kind: 'f' = flags (CFLAGS/CXXFLAGS/CPPFLAGS), 'l' = library (LDLIBS/LDFLAGS). */
-static void consumeTokens(const char *val, char kind, List *flags, List *stds,
-                          List *headers, List *libs, List *defines) {
+static void consumeTokens(const char *val, char kind, List *flags, List *stds, List *headers,
+                          List *libs, List *defines) {
   char buf[MK_LINE];
   copyStr(buf, sizeof(buf), val);
   char *save = NULL;
-  for (char *tok = strtok_r(buf, " \t", &save); tok;
-       tok = strtok_r(NULL, " \t", &save)) {
+  for (char *tok = strtok_r(buf, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save)) {
     if (tok[0] == '-' && tok[1] == 's' && strncmp(tok, "-std=", 5) == 0) {
       addUnique(stds, tok + 5);
     } else if (tok[0] == '-' && tok[1] == 'D') {
@@ -74,8 +69,8 @@ static void consumeTokens(const char *val, char kind, List *flags, List *stds,
       addUnique(headers, p);
     } else if (kind == 'l' && tok[0] == '-' && tok[1] == 'l' && tok[2]) {
       addUnique(libs, tok + 2);
-    } else if (kind == 'f' && tok[0] == '-' && tok[1] && tok[1] != 'l' &&
-               tok[1] != 'L' && tok[1] != 'I') {
+    } else if (kind == 'f' && tok[0] == '-' && tok[1] && tok[1] != 'l' && tok[1] != 'L' &&
+               tok[1] != 'I') {
       /* -Wall -> Wall, -O2 -> O2; -l/-L/-I sudah/bukan tugas flags. */
       addUnique(flags, tok + 1);
     }
@@ -93,10 +88,9 @@ static bool dirIs(const char *t, const char *kw) {
 
 /* Target rule yang bukan phony/bawaan — kandidat fallback output.binaryName. */
 static bool isOrdinaryTarget(const char *t) {
-  static const char *phony[] = {"all",  "clean", "install", "uninstall",
-                                "test", "check", "dist",    "help",
-                                "format", "lint", "rebuild", "distclean",
-                                NULL};
+  static const char *phony[] = {"all",     "clean",     "install", "uninstall", "test",
+                                "check",   "dist",      "help",    "format",    "lint",
+                                "rebuild", "distclean", NULL};
   if (!t || !*t || t[0] == '.' || t[0] == '$' || strchr(t, '/')) return false;
   for (int i = 0; phony[i]; i++)
     if (strcmp(t, phony[i]) == 0) return false;
@@ -105,8 +99,7 @@ static bool isOrdinaryTarget(const char *t) {
 
 /* ==================== konverter utama ==================== */
 
-bool makeToBuildfile(const char *makePath, const char *outPath, char *err,
-                     size_t errCap) {
+bool makeToBuildfile(const char *makePath, const char *outPath, char *err, size_t errCap) {
   FILE *in = fopen(makePath, "r");
   if (!in) {
     snprintf(err, errCap, "cannot read %s", makePath);
@@ -116,7 +109,7 @@ bool makeToBuildfile(const char *makePath, const char *outPath, char *err,
   List flags = {0}, stds = {0}, headers = {0}, libs = {0}, srcs = {0}, defines = {0};
   char compiler[256] = {0}; /* CC lebih diprioritaskan daripada CXX */
   char cxx[256] = {0};
-  char target[256] = {0}; /* dari variabel TARGET */
+  char target[256] = {0};     /* dari variabel TARGET */
   char ruleTarget[256] = {0}; /* fallback: target rule biasa pertama */
   bool complex = false;
   int nlines = 0;
@@ -150,7 +143,8 @@ bool makeToBuildfile(const char *makePath, const char *outPath, char *err,
 
     char *t = logical;
     if (*t == '\t') continue; /* resep (recipe) = kode shell, bukan config */
-    while (*t == ' ' || *t == '\t') t++; /* spasi awal: bukan resep */
+    while (*t == ' ' || *t == '\t')
+      t++; /* spasi awal: bukan resep */
     if (!*t) continue;
 
     char *pound = strchr(t, '#');
@@ -160,20 +154,17 @@ bool makeToBuildfile(const char *makePath, const char *outPath, char *err,
 
     /* `export VAR = ...`: deklaratif — strip prefix, ekstrak biasa.
        `export`/`unexport` polos (tanpa nilai): lewati. */
-    if (strncmp(t, "export", 6) == 0 &&
-        (t[6] == '\0' || t[6] == ' ' || t[6] == '\t')) {
+    if (strncmp(t, "export", 6) == 0 && (t[6] == '\0' || t[6] == ' ' || t[6] == '\t')) {
       t = trim(t + 6);
       if (!*t) continue;
-    } else if (strncmp(t, "unexport", 8) == 0 &&
-               (t[8] == '\0' || t[8] == ' ' || t[8] == '\t')) {
+    } else if (strncmp(t, "unexport", 8) == 0 && (t[8] == '\0' || t[8] == ' ' || t[8] == '\t')) {
       continue;
     }
     /* Direktif & kompleksitas prosedural (harus kata utuh — jangan
        tangkap variabel seperti `include_dirs`). */
-    if (dirIs(t, "include") || dirIs(t, "ifeq") || dirIs(t, "ifneq") ||
-        dirIs(t, "ifdef") || dirIs(t, "ifndef") || dirIs(t, "else") ||
-        dirIs(t, "endif") || dirIs(t, "define") || dirIs(t, "endef") ||
-        dirIs(t, "vpath")) {
+    if (dirIs(t, "include") || dirIs(t, "ifeq") || dirIs(t, "ifneq") || dirIs(t, "ifdef") ||
+        dirIs(t, "ifndef") || dirIs(t, "else") || dirIs(t, "endif") || dirIs(t, "define") ||
+        dirIs(t, "endef") || dirIs(t, "vpath")) {
       if (!dirIs(t, "include")) complex = true;
       continue;
     }
@@ -206,8 +197,7 @@ bool makeToBuildfile(const char *makePath, const char *outPath, char *err,
       char *nameEnd = eq;
       while (nameEnd > t && (nameEnd[-1] == ' ' || nameEnd[-1] == '\t'))
         nameEnd--;
-      if (nameEnd > t && (nameEnd[-1] == '?' || nameEnd[-1] == '+' ||
-                          nameEnd[-1] == ':'))
+      if (nameEnd > t && (nameEnd[-1] == '?' || nameEnd[-1] == '+' || nameEnd[-1] == ':'))
         nameEnd--; /* ?= += := */
       while (nameEnd > t && (nameEnd[-1] == ' ' || nameEnd[-1] == '\t'))
         nameEnd--;
@@ -245,8 +235,7 @@ bool makeToBuildfile(const char *makePath, const char *outPath, char *err,
 
       /* `?=` (isDefault): isi hanya bila tujuan masih kosong. */
       if (strcmp(name, "CC") == 0) {
-        if (*v && (!isDefault || !compiler[0]))
-          copyStr(compiler, sizeof(compiler), v);
+        if (*v && (!isDefault || !compiler[0])) copyStr(compiler, sizeof(compiler), v);
       } else if (strcmp(name, "CXX") == 0) {
         if (*v && (!isDefault || !cxx[0])) copyStr(cxx, sizeof(cxx), v);
       } else if (strcmp(name, "CFLAGS") == 0 || strcmp(name, "CXXFLAGS") == 0 ||
@@ -263,12 +252,10 @@ bool makeToBuildfile(const char *makePath, const char *outPath, char *err,
         char buf[MK_LINE];
         copyStr(buf, sizeof(buf), v);
         char *save = NULL;
-        for (char *tok = strtok_r(buf, " \t", &save); tok;
-             tok = strtok_r(NULL, " \t", &save))
+        for (char *tok = strtok_r(buf, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save))
           addUnique(&srcs, tok);
       } else if (strcmp(name, "TARGET") == 0) {
-        if (*v && (!isDefault || !target[0]))
-          copyStr(target, sizeof(target), v);
+        if (*v && (!isDefault || !target[0])) copyStr(target, sizeof(target), v);
       }
       continue;
     }
@@ -343,14 +330,13 @@ bool makeToBuildfile(const char *makePath, const char *outPath, char *err,
   if (binName[0]) fprintf(out, "\noutput.binaryName = %s\n", binName);
 
   if (complex) {
-    fprintf(out,
-            "\n# ---------------------------------------------------------\n"
-            "# WARNING: Makefile asli memiliki target kompleks/prosedural\n"
-            "# (seperti recursive make, conditional ifeq, atau skrip shell)\n"
-            "# yang tidak dapat dikonversi secara otomatis ke Buildfile\n"
-            "# deklaratif. Silakan periksa logika build kustom Anda secara "
-            "manual.\n"
-            "# ---------------------------------------------------------\n");
+    fprintf(out, "\n# ---------------------------------------------------------\n"
+                 "# WARNING: Makefile asli memiliki target kompleks/prosedural\n"
+                 "# (seperti recursive make, conditional ifeq, atau skrip shell)\n"
+                 "# yang tidak dapat dikonversi secara otomatis ke Buildfile\n"
+                 "# deklaratif. Silakan periksa logika build kustom Anda secara "
+                 "manual.\n"
+                 "# ---------------------------------------------------------\n");
   }
   fclose(out);
 
