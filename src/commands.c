@@ -546,13 +546,18 @@ int cmdBuild(int jobs, const char *buildfilePath) {
  * mengumpulkan hasil stat SEKALI di awal (satu fsStampNsSize per file)
  * supaya fase lain tinggal memakai hasilnya tanpa men-stat ulang.
  *
- * Kontrol via env (tanpa env = perilaku lama 100%, plan hanya diisi):
- *   RBOT_STATPLAN_OBS=1      tanggal-observasi: tambahkan stat objek saat
- *                            gather (mengukur porsi stat object yang bisa
- *                            dihemat konsumen berikutnya).
- *   RBOT_DECIDE_FROM_PLAN=1  decide membaca plan.srcM (tanpa stat src ulang).
+ * Kontrol via env (default: satu stat / file — decide membaca plan):
+ *   RBOT_DECIDE_FROM_PLAN=0  decide men-stat src+objek sendiri (perilaku lama).
+ *   RBOT_STATPLAN_OBS=0      jangan stamp objek saat gather; decide men-stat
+ *                            objek sendiri (perilaku lama).
+ * Kedua env =0 bersama-sama memulihkan perilaku lama 100%.
  *
- *Konsumen aktif saat ini: decide (opsional). Konsumen masa depan:
+ * Guard jalur embedded/version header: emitEmbeddedHeader/
+ * cmdsEmitVersionHeader berjalan SEBELUM decide dan bisa menghapus objek;
+ * loop di cmdBuildEx meng-invalidasi slot plan.objM jadi -1 sehingga decide
+ * melihat objek hilang dan tetap me-recompile (lihat cmdBuildEx).
+ *
+ *Konsumen aktif saat ini: decide. Konsumen masa depan:
  * keputusan link, PSA, restore compdb.
  */
 typedef struct {
@@ -579,6 +584,12 @@ static void statPlanFree(StatPlan *p) {
   statPlanInit(p);
 }
 
+/* true bila env diset dan bernilai "0" (opt-out eksplisit ke perilaku lama). */
+static bool envOff(const char *name) {
+  const char *v = getenv(name);
+  return v && strcmp(v, "0") == 0;
+}
+
 /* Stamp semua source sekali jalan; opsional (obsObj) stamp object unik.
    Dedup object pakai linear search: objCount kecil dan objectPathFor
    deterministik, jadi O(n^2) kecil ini masih jauh lebih murah daripada
@@ -586,7 +597,7 @@ static void statPlanFree(StatPlan *p) {
 static void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
   int n = srcs->count;
   p->count = n;
-  p->obsObj = getenv("RBOT_STATPLAN_OBS") != NULL;
+  p->obsObj = !envOff("RBOT_STATPLAN_OBS");
   /* +1 menghindari malloc(0) saat n==0 */
   p->path = malloc(sizeof(char *) * (size_t)(n + 1));
   p->srcM = malloc(sizeof(int64_t) * (size_t)(n + 1));
@@ -638,7 +649,13 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   /* Fast no-op per fase (miniws): fase binary memakai build.state, fase
      library workspace memakai build.lib.state — no-op `rbot -w` tidak
      membayar loadConfig + fingerprint + decide penuh per proyek. */
-  if (cmdsFastStateValid(buildfilePath, libOnly)) return 0;
+  bool fastOk = wsModeActive() ? wsFastStateValid(buildfilePath, libOnly)
+                               : cmdsFastStateValid(buildfilePath, libOnly);
+  if (fastOk) return 0;
+  /* Build mengubah file. Mode single: memo dikosongkan total (aman, perilaku lama).
+     Mode workspace: output dibuang per entri saat state disimpan, dan memo total
+     dikosongkan bila build gagal (lihat wsExecOne), agar memo bisa dipakai lintas fase. */
+  if (!wsModeActive()) cmdsStatMemoReset();
   Config c = configDefaults();
   if (!loadConfig(&c, buildfilePath)) return 1;
   if (!resolveCompiler(&c)) return 1;
@@ -702,8 +719,8 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
       listAdd(&srcs, entry);
       continue;
     }
-    walkDir(entry, ".c", &srcs);
-    walkDir(entry, ".cpp", &srcs);
+    wsWalkDirCached(entry, ".c", &srcs);
+    wsWalkDirCached(entry, ".cpp", &srcs);
   }
   /* Urutan final source = urutan link (driver C++ tetap mendukung urutan):
      .c dan .cpp dihasilkan dua walkDir terpisah per folder root — gabungan
@@ -713,8 +730,9 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
      statis C++ tidak lagi melekat pada readdir. */
   listSort(&srcs);
 
-  /* One-pass stat plan: stamp source (selalu) + object (bila RBOT_STATPLAN_OBS)
-   * SEKALI di sini. Konsumen berikutnya memakai hasilnya tanpa stat ulang. */
+  /* One-pass stat plan: stamp source (selalu) + object (default; hilangkan
+   * dengan RBOT_STATPLAN_OBS=0) SEKALI di sini. Konsumen berikutnya memakai
+   * hasilnya tanpa stat ulang. */
   StatPlan plan;
   statPlanInit(&plan);
   statPlanBuild(&plan, &c, &srcs);
@@ -753,11 +771,13 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
      Daftar command hanya berubah jika file belum ada, konfigurasi compile
      berubah, atau set source berubah. Perubahan isi source/header tidak
      mengubah command compile. */
+  profMark("pre-compdb");
   if (compdbEnabled(&c)) {
     bool compdbMissing = !fsFileExists("compile_commands.json");
     if (compdbMissing || !haveBuildFp || compileConfigChanged || sourceSetChanged)
       writeCompdb(&c, &srcs);
   }
+  profMark("compdb");
 
   /* Terbitkan build/embedded.h & build/version.h sebelum kompilasi agar
      konsumen melihat simbol/versi yang benar; jika salah satunya berubah,
@@ -779,7 +799,12 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
       printf("%s Embedded: config changed, recompiling all sources\n", repPrefix());
     for (int i = 0; i < srcs.count; i++) {
       if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
-      fsRemoveFile(obj);
+      /* Hanya hapus bila object memang ada menurut plan stat (sudah dihitung
+         sekali di awal run): object yang tidak ada (mis. sesudah clean) tidak
+         perlu syscall unlink yang pasti gagal. Tanpa plan valid, hapus seperti
+         biasa. */
+      int oi = (plan.objIdx && plan.obsObj) ? plan.objIdx[i] : -1;
+      if (oi < 0 || plan.objM[oi] >= 0) fsRemoveFile(obj);
       /* Stamp plan objek yang baru saja dihapus: tanpa ini decide-from-plan
          akan melihat objek lama (masih ada & fresh) dan melewati kompilasi
          yang justru wajib diulang. */
@@ -812,22 +837,24 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
      sini agar keputusan link (no-op) tidak men-stat ulang semua object. */
   int64_t maxObjM = -1;
   bool anyObjMissing = false;
-  bool decideFromPlan = getenv("RBOT_DECIDE_FROM_PLAN") != NULL;
+  /* Default: decide membaca plan (satu stat / file). RBOT_DECIDE_FROM_PLAN=0
+     mengembalikan stat sendiri (perilaku lama). */
+  bool decideFromPlan = !envOff("RBOT_DECIDE_FROM_PLAN");
   for (int i = 0; i < srcs.count; i++) {
     const char *src = srcs.items[i];
     if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
-    /* Sumber mtime dari plan one-pass (RBOT_DECIDE_FROM_PLAN=1) atau stat
-       sendiri (perilaku lama). Objek: dari plan bila tersedia (observasi),
-       selain itu stat sendiri. Semantik -1 (hilang) dipertahankan. */
-    int64_t srcM = (decideFromPlan && plan.srcM) ? plan.srcM[i] : fsMTimeNs(src);
+    /* Sumber mtime dari plan one-pass; RBOT_DECIDE_FROM_PLAN=0 = stat sendiri.
+       Objek: dari plan bila objek ikut distamp (obsObj), selain itu stat
+       sendiri. Semantik -1 (hilang) dipertahankan. */
+    int64_t srcM = (decideFromPlan && plan.srcM) ? plan.srcM[i] : cmdsMTimeDecide(src);
     int64_t objM;
-    /* Object dari plan hanya saat decideFromPlan: stamp bisa basi bila
-       objek dihapus jalur embedded/version header di atas (loop di bawah
-       meng-invalidasi slot itu), dan tanpa env ini perilaku lama utuh. */
+    /* Object dari plan hanya saat objek ikut distamp: stamp bisa basi bila
+       objek dihapus jalur embedded/version header di atas — loop itu sudah
+       meng-invalidasi slot (objM = -1) sehingga decide memaksa recompile. */
     if (decideFromPlan && plan.objIdx && plan.objIdx[i] >= 0 && plan.obsObj)
       objM = plan.objM[plan.objIdx[i]];
     else
-      objM = fsMTimeNs(obj); /* -1 = object belum ada (sekali stat) */
+      objM = cmdsMTimeDecide(obj); /* -1 = object belum ada (sekali stat) */
     if (objM < 0)
       anyObjMissing = true;
     else if (objM > maxObjM)
@@ -934,11 +961,15 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
         depsRecordUpdate(deps, srcs.items[i]);
     }
     depsSave(deps);
+    if (wsModeActive()) wsFastStateSave(deps, &c, &srcs, "", buildfilePath, true);
     depsFree(deps);
-    cmdsFingerprintSave(&currentFp);
+    /* libOnly=true: commit hash compile saja — sources/link diserahkan ke
+       pass binary supaya source set/link config berubah tetap terdeteksi
+       di pass yang sama (lihat cmdsFingerprintSave). */
+    cmdsFingerprintSave(&currentFp, libOnly);
     /* State fase library (miniws): no-op pass 1 berikutnya dilewati total.
        target "" = proyek tanpa library — direkam sebagai "-". */
-    cmdsFastStateSave(&c, &srcs, "", buildfilePath, true);
+    if (!wsModeActive()) cmdsFastStateSave(&c, &srcs, "", buildfilePath, true);
     printf("\n%s Summary :\n", repPrefix());
     if (c.libRequested) {
       char libp[MAX_PATH * 2];
@@ -988,7 +1019,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
       } else {
         for (int i = 0; i < srcs.count && !linkNeeded; i++) {
           if (!objectPathFor(&c, srcs.items[i], obj, sizeof(obj))) continue;
-          int64_t objectMtime = fsMTimeNs(obj);
+          int64_t objectMtime = fsMTimeNs(obj); /* sesudah compile: langsung, bukan memo */
           if (objectMtime < 0 || objectMtime > targetMtime) linkNeeded = true;
         }
       }
@@ -999,7 +1030,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
           linkNeeded = true;
           break;
         }
-        int64_t objectMtime = fsMTimeNs(c.emb[i].objectPath);
+        int64_t objectMtime = fsMTimeNs(c.emb[i].objectPath); /* sesudah compile: langsung */
         if (objectMtime < 0 || objectMtime > targetMtime) linkNeeded = true;
       }
     }
@@ -1032,8 +1063,9 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
         depsRecordUpdate(deps, pending.items[i]);
     }
     depsSave(deps);
+    if (wsModeActive()) wsFastStateSave(deps, &c, &srcs, target, buildfilePath, libOnly);
     depsFree(deps);
-    cmdsFingerprintSave(&currentFp);
+    cmdsFingerprintSave(&currentFp, libOnly);
     /* Packaging (pack.*) sebelum summary; fast state disimpan di dalamnya
        bila pack sukses — gagal kemasan tidak merekam state. */
     bool fastSaved = false;
@@ -1049,7 +1081,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
     printf("    Compiled : %d\n", compiled);
     printf("    Skipped  : %d\n", skipped);
     printf("    Status   : Success\n");
-    if (!fastSaved) cmdsFastStateSave(&c, &srcs, target, buildfilePath, false);
+    if (!fastSaved && !wsModeActive()) cmdsFastStateSave(&c, &srcs, target, buildfilePath, false);
     return 0;
   }
 
@@ -1146,8 +1178,9 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
       depsRecordUpdate(deps, srcs.items[i]);
   }
   depsSave(deps);
+  if (wsModeActive()) wsFastStateSave(deps, &c, &srcs, target, buildfilePath, libOnly);
   depsFree(deps);
-  cmdsFingerprintSave(&currentFp);
+  cmdsFingerprintSave(&currentFp, libOnly);
 
   /* Packaging (pack.*) setelah link & state — lihat jalur up-to-date. */
   bool fastSaved = false;
@@ -1166,7 +1199,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   printf("    Compiled : %d\n", compiled);
   printf("    Skipped  : %d\n", skipped);
   printf("    Status   : Success\n");
-  if (!fastSaved) cmdsFastStateSave(&c, &srcs, target, buildfilePath, false);
+  if (!fastSaved && !wsModeActive()) cmdsFastStateSave(&c, &srcs, target, buildfilePath, false);
   statPlanFree(&plan);
   return 0;
 }
