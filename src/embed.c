@@ -1,4 +1,5 @@
 #include "embed.h"
+#include "cmds/cmds_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -174,18 +175,49 @@ static bool embArchiveFresh(const EmbeddedEntry *e) {
      sama seperti saat arsip dibangun. */
   List files = {0};
   if (e->pattern[0])
-    walkDir(e->src, e->pattern, &files);
+    wsWalkDirCached(e->src, e->pattern, &files);
   else
-    walkDir(e->src, "", &files);
+    wsWalkDirCached(e->src, "", &files);
   int64_t newest = 0;
   char rel[MAX_PATH * 2];
+  /* Mode workspace: mtime lewat memo stat (kunci memo butuh cwd proyek ini). */
+  if (wsModeActive()) cmdsStatMemoSetCwd();
   for (int i = 0; i < files.count; i++) {
     embRelPath(e, files.items[i], rel, sizeof(rel));
     if (!*rel || embExcluded(e, rel)) continue;
-    int64_t mt = fsMTimeNs(files.items[i]);
+    int64_t mt = cmdsMTimeDecide(files.items[i]);
     if (mt >= 0 && mt > newest) newest = mt;
   }
   listFree(&files);
+  /* Penambahan/penghapusan file mengubah mtime folder: stamp folder dari cache
+     walk (sudah divalidasi) ikut menentukan kesegaran. Folder exclude diabaikan. */
+  if (wsModeActive()) {
+    /* Folder tempat arsip itu sendiri ditulis ikut berubah mtime-nya setiap kali
+       arsip dibuat ulang (tmp + rename). Folder itu tidak boleh dihitung sebagai
+       input, kalau tidak arsip di dalam folder sumber basi oleh dirinya sendiri
+       dan dibangun ulang di setiap run. */
+    char adir[MAX_PATH * 2];
+    snprintf(adir, sizeof(adir), "%s", e->archivePath);
+    char *slash = strrchr(adir, '/');
+    if (slash) *slash = '\0';
+    else snprintf(adir, sizeof(adir), ".");
+    const char *ad = adir;
+    if (ad[0] == '.' && ad[1] == '/') ad += 2;
+
+    List st = {0};
+    wsWalkDirStamps(e->src, e->pattern[0] ? e->pattern : "", &st);
+    for (int i = 0; i < st.count; i++) {
+      long long mt = -1;
+      char p[WS_PATH_LEN];
+      if (sscanf(st.items[i], "D %lld %" WS_SCAN "s", &mt, p) != 2 || mt < 0) continue;
+      const char *rel = p;
+      if (rel[0] == '.' && rel[1] == '/') rel += 2;
+      if (strcmp(rel, ".") != 0 && *rel && embExcluded(e, rel)) continue;
+      if (strcmp(rel, ad) == 0 || (strcmp(rel, ".") == 0 && strcmp(ad, ".") == 0)) continue;
+      if (mt > newest) newest = mt;
+    }
+    listFree(&st);
+  }
   return newest <= at;
 }
 
@@ -423,8 +455,13 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
   }
   if (embArchiveFresh(e)) return true;
 
+  /* File sementara (tmp arsip dan list) dibuat di .rbot/, bukan di folder sumber.
+     Rename tmp keluar dari folder sumber mengubah mtime folder itu tepat setelah
+     arsip ditulis, sehingga arsip selalu tampak basi di run berikutnya. .rbot
+     tidak pernah masuk walk freshness. */
+  mkdirs(".rbot");
   char tmpArchive[MAX_PATH * 2 + 32];
-  snprintf(tmpArchive, sizeof(tmpArchive), ".rbot-embed-%s.tmp", e->name);
+  snprintf(tmpArchive, sizeof(tmpArchive), ".rbot/embed-%s.tmp", e->name);
   fsRemoveFile(tmpArchive);
   bool ok;
   if (e->tar) {
@@ -435,16 +472,16 @@ static bool buildEmbeddedArchiveEntryEx(const EmbeddedEntry *e, bool *rebuilt) {
        otherwise observes the tree changing while it is being read. */
     List files = {0};
     if (e->pattern[0])
-      walkDir(e->src, e->pattern, &files);
+      wsWalkDirCached(e->src, e->pattern, &files);
     else
-      walkDir(e->src, "", &files);
+      wsWalkDirCached(e->src, "", &files);
     /* Listfile tar menentukan urutan entri arsip: sortir sekali pada data
        lengkap agar arsip reprodusible antar mesin (urutan readdir tidak
        lagi melekat pada hasil). */
     listSort(&files);
 
     char listFile[MAX_PATH * 2 + 32];
-    snprintf(listFile, sizeof(listFile), ".rbot-embed-%s.list", e->name);
+    snprintf(listFile, sizeof(listFile), ".rbot/embed-%s.list", e->name);
     FILE *lf = fopen(listFile, "w");
     if (!lf) {
       listFree(&files);
