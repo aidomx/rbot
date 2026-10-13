@@ -14,6 +14,7 @@
 #include "../portability.h"
 #include "../util.h"
 #include "pack.h"
+#include "../cmds/cmds_internal.h"
 #include "pack_stage.h"
 
 /* ---- nilai {os}/{arch} host (host target rbot sendiri) ---- */
@@ -115,15 +116,28 @@ int64_t packNewestInput(const Config *c) {
       int64_t m = fsMTimeNs(eff);
       if (m > newest) newest = m;
     } else if (fsDirExists(eff)) {
-      /* folder: semua file di dalamnya + mtime folder itu sendiri. */
+      /* folder: semua file di dalamnya + mtime folder itu sendiri.
+         Mode workspace: daftar file dari cache walk (ws.src, divalidasi mtime
+         folder) dan mtime lewat memo, sehingga embed freshness ikut memakainya. */
       List files = {0};
-      walkDir(eff, "", &files);
+      if (wsModeActive()) {
+        cmdsStatMemoSetCwd();
+        wsWalkDirCached(eff, "", &files);
+      } else {
+        walkDir(eff, "", &files);
+      }
       for (int j = 0; j < files.count; j++) {
-        int64_t m = fsMTimeNs(files.items[j]);
+        /* Sama dengan staging: isi folder yang di-exclude (mis. build/) adalah
+           output, bukan input. Tanpa filter ini, output build yang lebih baru
+           dari arsip membuat arsip dianggap basi di setiap run. */
+        const char *suffix = files.items[j] + strlen(eff);
+        if (*suffix == '/') suffix++;
+        if (*suffix && packExcluded(c, suffix)) continue;
+        int64_t m = wsModeActive() ? cmdsMTimeDecide(files.items[j]) : fsMTimeNs(files.items[j]);
         if (m > newest) newest = m;
       }
       listFree(&files);
-      int64_t dm = fsMTimeNs(eff);
+      int64_t dm = wsModeActive() ? cmdsMTimeDecide(eff) : fsMTimeNs(eff);
       if (dm > newest) newest = dm;
     }
     /* entri yang tidak ada diabaikan di sini; packRun melaporkannya. */

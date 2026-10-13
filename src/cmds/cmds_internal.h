@@ -7,6 +7,11 @@
 
 #include "../config.h" /* Config, List */
 
+/* Ukuran buffer path untuk state workspace. WS_SCAN = WS_PATH_LEN - 1 sebagai teks
+   lebar sscanf: lebar baca selalu lebih kecil dari buffer tujuan (-Wfortify-source). */
+#define WS_PATH_LEN 3072
+#define WS_SCAN "3071"
+
 /*
  * cmds_internal — helper bersama antar-file modul cmds/.
  *
@@ -74,7 +79,11 @@ typedef struct {
 /* Hash konfigurasi compile/link + set source (FNV-1a). */
 void cmdsFingerprintMake(const Config *c, const List *srcs, CmdsBuildFingerprint *fp);
 bool cmdsFingerprintLoad(CmdsBuildFingerprint *fp);
-void cmdsFingerprintSave(const CmdsBuildFingerprint *fp);
+/* Simpan ke .rbot/build.fingerprint. libOnly = fase library workspace:
+   hanya hash compile yang dikommit; hash sources/link dipertahankan dari
+   catatan sebelumnya agar pass binary run yang sama masih mendeteksi
+   source set / link config berubah (source dihapus -> link diulang). */
+void cmdsFingerprintSave(const CmdsBuildFingerprint *fp, bool libOnly);
 
 /* Buang fingerprint tersimpan (dipanggil saat build gagal/terinterupsi
    setelah konfigurasi berubah). */
@@ -85,6 +94,32 @@ void cmdsFingerprintInvalidate(void);
    state fase library (.rbot/build.lib.state); fase binary memakai
    .rbot/build.state. */
 bool cmdsFastStateValid(const char *buildfilePath, bool libOnly);
+
+/* Jalur fast-state workspace (cmds_wsstate.c). Aktif hanya saat workspace
+   memanggil cmdBuildEx; single project tidak pernah mengaktifkannya. */
+struct DepCache; /* forward: didefinisikan di deps.h */
+void wsModeSet(bool on);
+bool wsFastStateValid(const char *buildfilePath, bool libOnly);
+bool cmdsStatCached(const char *path, int64_t *mtimeNs, long long *size);
+void cmdsStatMemoSetCwd(void);
+void cmdsStatMemoForget(const char *path);
+int64_t cmdsMTimeDecide(const char *path);
+/* Parser & validasi satu baris format state F/D/X (format bersama ws.state,
+   ws.lib.state dan workspace.state — lihat header cmds_wsstate.c):
+     F <mtime_ns> <size> <path> | D <mtime_ns> 0 <path> | X 0 0 <path>
+   path harus menampung WS_PATH_LEN karakter (lebar WS_SCAN). */
+bool cmdsParseStateEntry(const char *line, char *kind, long long *mt, long long *sz, char *path);
+/* true bila baris F/D/X masih cocok stamp disk saat ini (F: mtime+size,
+   D: mtime, X: path tidak ada); false bila parse gagal atau stamp beda. */
+bool cmdsStateEntryFresh(const char *line);
+void cmdsStatMemoForgetTree(const char *dir);
+void wsWalkDirCached(const char *dir, const char *ext, List *out);
+void wsWalkDirStamps(const char *dir, const char *ext, List *out);
+bool wsModeActive(void);
+void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, const char *target,
+                     const char *buildfilePath, bool libOnly);
+/* Kosongkan memo stat validasi fast-state; dipanggil sebelum build mengubah file. */
+void cmdsStatMemoReset(void);
 
 /* Rekam state build sukses (mtime+size seluruh input) untuk fast no-op.
    target = "" (fase library tanpa library) direkam sebagai "-" — validasi

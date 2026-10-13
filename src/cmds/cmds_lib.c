@@ -39,7 +39,7 @@ bool cmdsPackAfterBinary(const Config *c, bool *fastStateSaved, const List *srcs
     return true;
   }
   if (!packRun(c)) return false; /* gagal kemasan: state tidak direkam */
-  cmdsFastStateSave(c, srcs, target, buildfilePath, false);
+  if (!wsModeActive()) cmdsFastStateSave(c, srcs, target, buildfilePath, false);
   *fastStateSaved = true;
   return true;
 }

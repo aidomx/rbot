@@ -79,7 +79,7 @@ static bool packCopyFile(const char *src, const char *dst) {
  * Berlaku HANYA pada hasil walk entri bentuk folder — entri file
  * eksplisit tidak difilter.
  */
-static bool packExcluded(const Config *c, const char *rel) {
+bool packExcluded(const Config *c, const char *rel) {
   for (int i = 0; i < c->pack.excludes.count; i++) {
     const char *ex = c->pack.excludes.items[i];
     if (!ex || !*ex) continue;

@@ -9,6 +9,9 @@
 bool packEntryParts(const char *entry, char *src, size_t srcN,
                     char *dst, size_t dstN);
 
+/* Cocokkan path relatif (suffix folder sumber) terhadap pack.exclude. */
+bool packExcluded(const Config *c, const char *rel);
+
 /* Return newest mtime of the source side of a pack.files entry. */
 int64_t packEntryMTimeNs(const char *entry);
 
