@@ -281,7 +281,7 @@ int cpuCount(void) {
 
 bool termIsTTY(void) { return isatty(1) == 1; }
 
-bool probeAvailable(const char *exe) {
+static bool probeAvailableScan(const char *exe) {
   if (!exe || !*exe) return false;
   if (exe[0] == '/') return fsFileExists(exe);
 
@@ -305,6 +305,64 @@ bool probeAvailable(const char *exe) {
     p = colon + 1;
   }
   return false;
+}
+
+/* Resolusi nama program ke path absolut, sekali per proses dan di-cache. Spawn
+   memakai path ini: posix_spawnp mencoba execve di setiap direktori PATH (puluhan
+   percobaan gagal per spawn, mahal di proot); dengan path absolut cukup satu. */
+static struct {
+  char *name;
+  char *full; /* NULL = tidak ditemukan di PATH */
+} spawnCache[32];
+static int spawnCacheCount = 0;
+
+static const char *resolveSpawnExe(const char *name) {
+  for (int i = 0; i < spawnCacheCount; i++)
+    if (strcmp(spawnCache[i].name, name) == 0) return spawnCache[i].full;
+  char *found = NULL;
+  const char *pathvar = getenv("PATH");
+  if (!pathvar) pathvar = "/usr/bin:/bin";
+  const char *p = pathvar;
+  while (*p && !found) {
+    const char *colon = strchr(p, ':');
+    size_t len = colon ? (size_t)(colon - p) : strlen(p);
+    if (len > 0 && len < MAX_PATH) {
+      char full[MAX_PATH * 2];
+      snprintf(full, sizeof(full), "%.*s/%s", (int)len, p, name);
+      if (access(full, X_OK) == 0) found = strdup(full);
+    }
+    if (!colon) break;
+    p = colon + 1;
+  }
+  if (spawnCacheCount < (int)(sizeof(spawnCache) / sizeof(spawnCache[0]))) {
+    spawnCache[spawnCacheCount].name = strdup(name);
+    spawnCache[spawnCacheCount].full = found;
+    if (spawnCache[spawnCacheCount].name) spawnCacheCount++;
+  }
+  return found;
+}
+
+/* Cache hasil probe per proses: PATH tidak berubah selama satu run, sedangkan
+   compile.c dan embed.c memanggil probe yang sama berulang kali (tiap fase). */
+static struct {
+  char *exe;
+  bool ok;
+} probeCache[32];
+static int probeCacheCount = 0;
+
+bool probeAvailable(const char *exe) {
+  if (!exe || !*exe) return false;
+  for (int i = 0; i < probeCacheCount; i++)
+    if (strcmp(probeCache[i].exe, exe) == 0) return probeCache[i].ok;
+  bool ok = probeAvailableScan(exe);
+  if (probeCacheCount < (int)(sizeof(probeCache) / sizeof(probeCache[0]))) {
+    probeCache[probeCacheCount].exe = strdup(exe);
+    if (probeCache[probeCacheCount].exe) {
+      probeCache[probeCacheCount].ok = ok;
+      probeCacheCount++;
+    }
+  }
+  return ok;
 }
 
 /*
@@ -436,7 +494,10 @@ static pid_t spawnDirect(const char *cmd, bool ownGroup) {
       }
       posix_spawnattr_setflags(&at, flags);
       pid_t np;
-      if (posix_spawnp(&np, argv[0], NULL, &at, argv, environ) == 0) pid = np;
+      const char *full = strchr(argv[0], '/') ? NULL : resolveSpawnExe(argv[0]);
+      int rc = full ? posix_spawn(&np, full, NULL, &at, argv, environ)
+                    : posix_spawnp(&np, argv[0], NULL, &at, argv, environ);
+      if (rc == 0) pid = np;
       posix_spawnattr_destroy(&at);
     }
   }
