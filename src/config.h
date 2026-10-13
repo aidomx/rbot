@@ -107,7 +107,7 @@ typedef struct {
 
   List sources;
   List flags;
-  List headerInternal; /* metadata saja, tidak dilewatkan ke compiler */
+  List headerInternal; /* dipantau sebagai input build (jalur cepat fingerprint), TIDAK jadi -I */
   List headerPublic;   /* tiap entri jadi -I<entry> */
   List libraries;      /* library aktif: flat + platform yang dipilih */
   List compilers; /* yang pertama tersedia menang */

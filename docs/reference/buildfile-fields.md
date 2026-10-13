@@ -8,7 +8,8 @@ The following fields are part of the v0.2.0 configuration model or are exercised
 | `use workspace` | workspace mode |
 | `root` | project root |
 | `sources` | source directories |
-| `headers` | include/header directories |
+| `headers` | include/header directories (passed as `-I`) |
+| `headers.internal` | header directories tracked as build inputs but NOT passed as `-I`; use for shared internal headers included by relative path, e.g. `headers.internal = ../library` |
 | `exclude` | sources excluded from a target |
 | `flags` | compiler flags |
 | `std` | C language standard |

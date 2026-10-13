@@ -161,11 +161,22 @@ void mkparent(const char *path) {
   *slash = '\0';
   /* Object satu direktori berturut-turut (walkDir mengelompokkan per
      direktori): lewati mkdir berulang — tiap mkdirs() = satu syscall per
-     komponen path, mahal di proot. */
+     komponen path, mahal di proot.
+     Cache di-key juga dengan CWD: workspace/profile mengganti cwd antar
+     proyek, jadi path relatif sama ("build/sub") hanya boleh dilewati
+     bila direktori kerja TIDAK berubah — tanpa itu mkdir dilewati di
+     proyek berikutnya dan object gagal ditulis ("can't create build/..."). */
   static char last[MAX_PATH];
-  if (last[0] && strcmp(last, tmp) == 0) return;
+  static char lastCwd[MAX_PATH];
+  if (last[0] && strcmp(last, tmp) == 0) {
+    char cwd[MAX_PATH];
+    if (fsGetCwd(cwd, sizeof(cwd)) && strcmp(lastCwd, cwd) == 0) return;
+  }
   mkdirs(tmp);
-  if (fsDirExists(tmp)) snprintf(last, sizeof(last), "%s", tmp);
+  if (fsDirExists(tmp)) {
+    snprintf(last, sizeof(last), "%s", tmp);
+    if (!fsGetCwd(lastCwd, sizeof(lastCwd))) lastCwd[0] = '\0'; /* gagal: selalu miss */
+  }
 }
 
 /** Recursively collect paths under `dir` whose name ends with `ext`.

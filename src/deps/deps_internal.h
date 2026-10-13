@@ -105,6 +105,9 @@ uint64_t depPathHash(const char *s);
 int depNodeFind(const DepCache *dc, const char *path);
 int depNodeAddM(DepCache *dc, const char *path, int64_t mtime);
 int depNodeAdd(DepCache *dc, const char *path);
+/* mtime node lewat memo stat proses (hanya hasil positif yang dimemo; lihat
+   cmds_state.c). Negatif dan path yang bisa dibuat build selalu di-stat langsung. */
+int64_t depNodeMTimeMemo(const char *path);
 int depNodeGet(DepCache *dc, const char *path);
 
 /* Tambah index kid ke node tanpa duplikat. */

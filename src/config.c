@@ -27,24 +27,11 @@ static bool sourcesHaveCpp(const Config *c) {
     size_t len = strlen(entry);
     if (len >= 4 && strcmp(entry + len - 4, ".cpp") == 0) return true;
     if (!fsDirExists(entry)) continue;
-    List dirs = {0}, files = {0};
-    listReserve(&dirs, 1024);
-    listReserve(&files, 1024);
-    fsListDir(entry, &dirs, &files);
-    bool found = false;
-    for (int f = 0; f < files.count && !found; f++) {
-      const char *path = files.items[f];
-      size_t fl = strlen(path);
-      if (fl >= 4 && strcmp(path + fl - 4, ".cpp") == 0) found = true;
-    }
-    for (int d = 0; d < dirs.count && !found; d++) {
-      List sub = {0};
-      walkDir(dirs.items[d], ".cpp", &sub);
-      if (sub.count > 0) found = true;
-      listFree(&sub);
-    }
-    listFree(&dirs);
-    listFree(&files);
+    /* Semua .cpp di bawah entry (rekursif), sama dengan scan manual sebelumnya. */
+    List all = {0};
+    wsWalkDirCached(entry, ".cpp", &all);
+    bool found = all.count > 0;
+    listFree(&all);
     if (found) return true;
   }
   return false;

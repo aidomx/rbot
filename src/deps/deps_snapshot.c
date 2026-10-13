@@ -9,6 +9,7 @@
  * satu buka file — lihat deps_dotd.c.
  */
 #include "deps_internal.h"
+#include "../cmds/cmds_internal.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -19,6 +20,7 @@
 #include "../util.h"
 
 DepCache *depsNew(const Config *c) {
+  cmdsStatMemoSetCwd(); /* kunci memo node harus memakai cwd proyek ini */
   DepCache *dc = calloc(1, sizeof(*dc));
   if (!dc) return NULL;
   dc->cfg = c;
@@ -438,3 +440,42 @@ int64_t depsNewestHeaderMTimeAt(DepCache *dc, const char *src, int64_t srcMTimeN
   }
   return best;
 }
+
+/* ==================== closure dependensi (fast-state workspace) ====================
+   Pola traversal sama dengan depsNewestHeaderMTimeAt. Node dloaded (edges dari
+   .d) sudah flat dan lengkap, jadi anak langsungnya dikirim tanpa ditelusuri lagi. */
+static void closureVisitNode(DepCache *dc, int idx, DepVisitFn visit, void *ctx) {
+  if (dc->nodes[idx].mark == dc->gen) return;
+  dc->nodes[idx].mark = dc->gen;
+  if (!dc->nodes[idx].parsed && !dc->nodes[idx].dloaded) depParseNodeIfNeeded(dc, idx);
+  visit(dc->nodes[idx].path, ctx);
+  int nk = dc->nodes[idx].nkids;
+  if (nk <= 0) return;
+  int *kids = malloc((size_t)nk * sizeof(int));
+  if (!kids) return;
+  memcpy(kids, dc->nodes[idx].kids, (size_t)nk * sizeof(int));
+  bool flat = dc->nodes[idx].dloaded;
+  for (int i = 0; i < nk; i++) {
+    int kid = kids[i];
+    if (flat) {
+      if (dc->nodes[kid].mark == dc->gen) continue;
+      dc->nodes[kid].mark = dc->gen;
+      visit(dc->nodes[kid].path, ctx);
+    } else {
+      closureVisitNode(dc, kid, visit, ctx);
+    }
+  }
+  free(kids);
+}
+
+void depsClosureVisit(DepCache *dc, const char *src, DepVisitFn visit, void *ctx) {
+  if (!dc || !src || !visit) return;
+  char path[MAX_PATH];
+  snprintf(path, sizeof(path), "%s", src);
+  depNormalizePath(path);
+  int root = depNodeFind(dc, path);
+  if (root < 0) return;
+  dc->gen++;
+  closureVisitNode(dc, root, visit, ctx);
+}
+

@@ -351,8 +351,15 @@ int bootstrapApply(Bootstrap *bs) {
      punya .rbot/build.state (itu file per-proyek), jadi cek lama selalu
      melaporkan cold pada tiap run `rbot -w`. */
   bool wsMode = bs->want_workspace || (bs->cmd == CMD_BUILD && workspaceFileExists());
-  bs->status.cold = wsMode ? !wsStateValid(".") : !fsFileExists(".rbot/build.state");
+  /* Mode workspace: cold kasar dari keberadaan file gate — validasi stamp
+     gate kini per-closure di workspaceRun (murah untuk `-w <nama>`).
+     Status di sini hanya untuk RBOT_STATUS/evaluasi; mesin build
+     menentukan noop/dirty sendiri saat dispatch. */
+  bs->status.cold = wsMode ? !wsStateFileExists() : !fsFileExists(".rbot/build.state");
   bs->status.has_state = !bs->status.cold;
+  if (getenv("RBOT_STATUS") && *getenv("RBOT_STATUS") && strcmp(getenv("RBOT_STATUS"), "0") != 0)
+    fprintf(stderr, "rbot status: mode=%s cold=%d\n", wsMode ? "workspace" : "project",
+            bs->status.cold ? 1 : 0);
   return 0;
 }
 

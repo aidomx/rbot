@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../cmds/cmds_internal.h"
 #include "../compile.h"
 #include "../portability.h"
 #include "../util.h"
@@ -143,8 +144,15 @@ int depNodeAddM(DepCache *dc, const char *path, int64_t mtime) {
   return idx;
 }
 
+int64_t depNodeMTimeMemo(const char *path) {
+  int64_t m = -1;
+  long long sz = 0;
+  if (cmdsStatCached(path, &m, &sz)) return m;
+  return -1; /* stat gagal: sama dengan fsMTimeNs, tanpa stat kedua */
+}
+
 int depNodeAdd(DepCache *dc, const char *path) {
-  return depNodeAddM(dc, path, fsMTimeNs(path));
+  return depNodeAddM(dc, path, depNodeMTimeMemo(path));
 }
 
 int depNodeGet(DepCache *dc, const char *path) {

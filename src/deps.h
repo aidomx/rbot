@@ -50,6 +50,12 @@ int64_t depsNewestHeaderMTime(DepCache *dc, const char *src);
    (ns; -1 = tidak ada) sehingga tidak di-stat ulang. -2 = tidak diketahui. */
 int64_t depsNewestHeaderMTimeAt(DepCache *dc, const char *src, int64_t srcMTimeNs);
 
+/* Closure dependensi `src` (src + seluruh header yang dijangkau) dikirim ke
+   `visit`. Path relatif root, valid hanya selama callback berjalan. Dipakai
+   fast-state mode workspace sebelum DepCache dibebaskan. */
+typedef void (*DepVisitFn)(const char *path, void *ctx);
+void depsClosureVisit(DepCache *dc, const char *src, DepVisitFn visit, void *ctx);
+
 /*
  * Verifikasi konten (anti recompile tanpa perubahan isi, mis. setelah
  * `touch`): `true` bila snapshot hash source + seluruh dependensinya dari

@@ -132,7 +132,27 @@ projects transitively. The expanded lines win over nothing: any explicit
 `headers`/`library` you also write stays valid and is not duplicated.
 
 Packaging a project's files can reference another project's build outputs;
-such path references become build dependencies automatically.
+such references do NOT order the build by themselves. Declare the order with
+`<project>.depends_on = <other>` (the list order of `projects` is not enough when a
+referenced output must exist first). `depends_on` is kept on purpose: it also guards
+the order when the `projects` list is arranged differently.
+
+## Shared internal headers
+
+A folder of internal headers shared by several projects (for example a `library/`
+folder included as `"../../library/intl.h"`) is not a project and must not be a
+header search path. Adding it to `headers` puts it on `-I`, where its files can
+shadow system headers (for example `library/stdlib.h` hides `<stdlib.h>`). Declare
+it with `headers.internal` instead:
+
+```text
+headers = include, build, I.
+headers.internal = ../library
+```
+
+rbot then tracks files in that folder as build inputs (editing one rebuilds every
+object that includes it, and a touch with unchanged content rebuilds nothing), but
+does not add the folder to the compiler's include path.
 
 ## Releases
 
