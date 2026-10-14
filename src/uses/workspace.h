@@ -2,6 +2,7 @@
 #define RBOT_V0_1_0_USES_WORKSPACE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /*
  * workspace — mode multi-proyek (use workspace / Buildfile.ws).
@@ -55,6 +56,16 @@ int workspaceEnumerate(const char *wsDir, int *count, const char **projectNames,
 
 /* true bila Buildfile.ws (atau nama lama Buildfile.workspace) ada di cwd. */
 bool workspaceFileExists(void);
+
+/*
+ * wsMemberCwdDetect — true bila cwd berada DI DALAM direktori proyek anggota
+ * sebuah workspace INDUK (Buildfile.ws di parent; keanggotaan divalidasi
+ * lewat model — file workspace di parent saja tidak cukup; design/
+ * workspace_v1.md aturan 1 & 5). Mengisi wsRootOut (root workspace induk)
+ * dan memberOut (nama proyek anggota) bila true. Cwd pada root workspace
+ * sendiri selalu false — jalur mode workspace biasa yang menanganinya.
+ */
+bool wsMemberCwdDetect(char *wsRootOut, size_t wsRootN, char *memberOut, size_t memberN);
 
 /*
  * wsStateFileExists — true bila .rbot/workspace.state di root workspace ada

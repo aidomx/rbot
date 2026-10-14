@@ -68,7 +68,43 @@ bool cmdsPackAfterBinary(const Config *c, bool *fastStateSaved, const List *srcs
    (arsip untuk proyek lain), lalu packaging, lalu summary ringkas. */
 int cmdsPackOnlyProject(const Config *c);
 
+/* ==================== commands.c (pass build) ==================== */
+
+/*
+ * Isi pass build satu proyek — lihat definisi di commands.c. Koleksi
+ * source, fingerprint, decide, compile, embed, library, link, state —
+ * TANPA loadConfig dan TANPA chdir (Config & cwd disiapkan pemanggil:
+ * cmdBuildEx untuk single, wsCmdBuild untuk workspace). Config by-value.
+ */
+int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly);
+
+/* Koleksi source .c/.cpp dari Config — entri file langsung, folder discan
+   rekursif (walk cache .rbot/ws.src bila mode workspace aktif); hasil
+   terurut (urutan link reprodusibel). */
+void cmdsCollectSources(const Config *c, List *out);
+
+/* Jalankan logika bersih dari Config yang sudah tersusun — TANPA loadConfig
+   dan TANPA chdir (cmdClean memakainya setelah loadConfig; wsRunProject
+   memakainya dengan Config hasil wsBuildConfig). Path state mengikuti
+   cmdsStateSetWsProject. Return 0 = sukses. */
+int cmdsCleanRun(const Config *c);
+
 /* ==================== cmds_state.c ==================== */
+
+/*
+ * Lokasi file state (state_path): mode workspace membangun SEMUA proyek
+ * dari satu cwd (root workspace), jadi file state per proyek diprefiks
+ * nama di .rbot/workspace/ (design/workspace_v1.md §State & Cache):
+ *   .rbot/workspace/<proyek>.build.fingerprint | .ws.state | .ws.lib.state
+ *   .rbot/workspace/<proyek>.deps.cache | .src
+ * Mode single tetap .rbot/<leaf> relatif cwd (root proyek). Dipanggil
+ * wsCmdBuild sebelum tiap pass proyek; "" = kembali ke jalur lama.
+ */
+void cmdsStateSetWsProject(const char *name); /* "" / NULL = clear */
+const char *cmdsStateWsProject(void);         /* NULL bila mode single */
+void cmdsStatePath(char *out, size_t n, const char *leaf);
+/* mkdirs induk path state (.rbot atau .rbot/workspace) sebelum tulis. */
+void cmdsStateMkdirFor(const char *path);
 
 typedef struct {
   uint64_t compile;
@@ -113,6 +149,7 @@ bool cmdsParseStateEntry(const char *line, char *kind, long long *mt, long long 
    D: mtime, X: path tidak ada); false bila parse gagal atau stamp beda. */
 bool cmdsStateEntryFresh(const char *line);
 void cmdsStatMemoForgetTree(const char *dir);
+void cmdsStatMemoForgetOutputs(const char *buildDir, const List *items);
 void wsWalkDirCached(const char *dir, const char *ext, List *out);
 void wsWalkDirStamps(const char *dir, const char *ext, List *out);
 bool wsModeActive(void);

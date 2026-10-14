@@ -90,6 +90,7 @@ opt_uint n "$NSRC" 1
 opt_uint H "$NHEAD" 1
 opt_uint m "$NMOD" 1
 opt_uint r "$NRUN" 1
+case ${BENCH_EMBED:-} in ""|ld|carray) ;; *) echo "BENCH_EMBED harus ld atau carray" >&2; exit 2 ;; esac
 [[ $MUT_DELAY =~ ^[0-9]+([.][0-9]+)?$ ]] || {
   echo "opsi -d butuh angka detik non-negatif (nilai '$MUT_DELAY')" >&2
   exit 2

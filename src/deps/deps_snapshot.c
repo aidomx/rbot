@@ -100,7 +100,9 @@ void depSnapshotLoad(DepCache *dc) {
   if (dc->snapLoaded) return;
   dc->snapLoaded = true;
 
-  FILE *fp = fopen(DEPS_SNAPSHOT_FILE, "r");
+  char snapPath[256];
+  cmdsStatePath(snapPath, sizeof(snapPath), "deps.cache");
+  FILE *fp = fopen(snapPath, "r");
   if (!fp) {
     dc->snapIncomplete = true; /* belum ada snapshot — wajib direkam */
     return;
@@ -378,9 +380,11 @@ void depsRecordUpdate(DepCache *dc, const char *src) {
 void depsSave(DepCache *dc) {
   if (!dc || (!dc->snapDirty && !dc->edgeDirty)) return;
 
-  mkdirs(".rbot");
+  char snapPath[256];
+  cmdsStatePath(snapPath, sizeof(snapPath), "deps.cache");
+  cmdsStateMkdirFor(snapPath);
   char tmp[MAX_PATH + 8];
-  snprintf(tmp, sizeof(tmp), "%s.tmp", DEPS_SNAPSHOT_FILE);
+  snprintf(tmp, sizeof(tmp), "%s.tmp", snapPath);
   FILE *fp = fopen(tmp, "w");
   if (!fp) return;
 
@@ -391,8 +395,8 @@ void depsSave(DepCache *dc) {
 
   bool ok = fclose(fp) == 0;
   if (ok) {
-    fsRemoveFile(DEPS_SNAPSHOT_FILE);
-    ok = rename(tmp, DEPS_SNAPSHOT_FILE) == 0;
+    fsRemoveFile(snapPath);
+    ok = rename(tmp, snapPath) == 0;
   }
   if (!ok) fsRemoveFile(tmp);
   else {
@@ -466,6 +470,22 @@ static void closureVisitNode(DepCache *dc, int idx, DepVisitFn visit, void *ctx)
     }
   }
   free(kids);
+}
+
+void depsClosureVisitMany(DepCache *dc, const char *const *srcs, int count,
+                          DepVisitFn visit, void *ctx) {
+  if (!dc || !srcs || count <= 0 || !visit) return;
+  /* Satu generation untuk seluruh root: header bersama hanya dikunjungi sekali.
+     API single-source tetap memakai generation sendiri. */
+  dc->gen++;
+  for (int i = 0; i < count; i++) {
+    if (!srcs[i]) continue;
+    char path[MAX_PATH];
+    snprintf(path, sizeof(path), "%s", srcs[i]);
+    depNormalizePath(path);
+    int root = depNodeFind(dc, path);
+    if (root >= 0) closureVisitNode(dc, root, visit, ctx);
+  }
 }
 
 void depsClosureVisit(DepCache *dc, const char *src, DepVisitFn visit, void *ctx) {

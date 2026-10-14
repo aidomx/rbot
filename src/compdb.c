@@ -65,7 +65,7 @@ static uint64_t hashString(uint64_t h, const char *s) {
   return hashBytes(h, &sep, 1);
 }
 
-static uint64_t compdbFingerprint(const Config *c, List *srcs, const char *cwd) {
+static uint64_t compdbEntryHash(const Config *c, const List *srcs, const char *cwd) {
   uint64_t h = 1469598103934665603ULL;
   h = hashString(h, cwd);
   h = hashString(h, "compdb-v2");
@@ -195,12 +195,97 @@ static void saveCompdbBlob(const char *buf, size_t len) {
 
 // ============================================================================
 // 3. Fungsi Utama: writeCompdb (Memory-First Serialization)
-// ============================================================================
+// ===========================================================================
+
+/* Render entri JSON SATU (Config, srcs) ke buffer — dipakai writeCompdb
+   (satu proyek) dan writeCompdbMulti (merged workspace). `first` menandai
+   entri pertama; pemisah ",\n" ditulis di depan entri berikutnya sehingga
+   byte output identik dengan render lama (akhir-entri-berikut-koma). */
+static void compdbAppendEntries(char *buf, size_t *bufLen, size_t bufCap, const Config *c,
+                                List *srcs, const char *cwd, bool *first) {
+  for (int i = 0; i < srcs->count; i++) {
+    const char *src = srcs->items[i];
+    char obj[MAX_PATH];
+    if (!objectPathFor(c, src, obj, sizeof(obj))) continue;
+
+    if (!*first) APPEND(buf, *bufLen, bufCap, ",\n");
+    *first = false;
+
+    APPEND(buf, *bufLen, bufCap, "  {\n    \"arguments\": [\n      ");
+    jsonQuoteAppend(buf, bufLen, bufCap, c->cc);
+    APPEND(buf, *bufLen, bufCap, ",\n      ");
+
+    char *tf = targetFlags(c);
+    if (tf && tf[0]) {
+      char *savePtr = NULL;
+      char *tok = strtok_r(tf, " ", &savePtr);
+      while (tok) {
+        jsonQuoteAppend(buf, bufLen, bufCap, tok);
+        APPEND(buf, *bufLen, bufCap, ",\n      ");
+        tok = strtok_r(NULL, " ", &savePtr);
+      }
+    }
+    free(tf);
+
+    for (int h = 0; h < c->headerPublic.count; h++) {
+      const char *entry = c->headerPublic.items[h];
+      char flag[MAX_PATH + 8];
+      if (entry[0] == '-')
+        snprintf(flag, sizeof(flag), "%s", entry);
+      else
+        snprintf(flag, sizeof(flag), "-I%s",
+                 entry[0] == 'I' && entry[1] == '.' ? entry + 1 : entry);
+      jsonQuoteAppend(buf, bufLen, bufCap, flag);
+      APPEND(buf, *bufLen, bufCap, ",\n      ");
+    }
+
+    for (int f = 0; f < c->flags.count; f++) {
+      const char *fl = c->flags.items[f];
+      char withDash[MAX_PATH + 8];
+      if (fl[0] == '-')
+        snprintf(withDash, sizeof(withDash), "%s", fl);
+      else
+        snprintf(withDash, sizeof(withDash), "-%s", fl);
+      jsonQuoteAppend(buf, bufLen, bufCap, withDash);
+      APPEND(buf, *bufLen, bufCap, ",\n      ");
+    }
+
+    char *df = definesFlags(c);
+    if (df) {
+      char *defSave = NULL;
+      char *defTok = strtok_r(df, " ", &defSave);
+      while (defTok) {
+        jsonQuoteAppend(buf, bufLen, bufCap, defTok);
+        APPEND(buf, *bufLen, bufCap, ",\n      ");
+        defTok = strtok_r(NULL, " ", &defSave);
+      }
+      free(df);
+    }
+
+    APPEND(buf, *bufLen, bufCap, "\"-std=%s\",\n      \"-c\",\n      \"-o\",\n      ", c->std);
+    jsonQuoteAppend(buf, bufLen, bufCap, obj);
+    APPEND(buf, *bufLen, bufCap, ",\n      ");
+    jsonQuoteAppend(buf, bufLen, bufCap, src);
+    APPEND(buf, *bufLen, bufCap, "\n    ],\n");
+
+    char absPath[MAX_PATH * 2];
+    APPEND(buf, *bufLen, bufCap, "    \"directory\": ");
+    jsonQuoteAppend(buf, bufLen, bufCap, cwd);
+    APPEND(buf, *bufLen, bufCap, ",\n    \"file\": ");
+    snprintf(absPath, sizeof(absPath), "%s/%s", cwd, src);
+    jsonQuoteAppend(buf, bufLen, bufCap, absPath);
+    APPEND(buf, *bufLen, bufCap, ",\n    \"output\": ");
+    snprintf(absPath, sizeof(absPath), "%s/%s", cwd, obj);
+    jsonQuoteAppend(buf, bufLen, bufCap, absPath);
+    APPEND(buf, *bufLen, bufCap, "\n  }\n");
+  }
+}
+
 void writeCompdb(const Config *c, List *srcs) {
   char cwd[MAX_PATH];
   if (!fsGetCwd(cwd, sizeof(cwd))) return;
 
-  uint64_t fingerprint = compdbFingerprint(c, srcs, cwd);
+  uint64_t fingerprint = compdbEntryHash(c, srcs, cwd);
   if (compdbCacheHit(fingerprint)) {
     printf("%s CompDB  : compile_commands.json unchanged (cache hit)\n", repPrefix());
     return;
@@ -219,93 +304,8 @@ void writeCompdb(const Config *c, List *srcs) {
 
   APPEND(buf, bufLen, bufCap, "[\n");
 
-  for (int i = 0; i < srcs->count; i++) {
-    const char *src = srcs->items[i];
-    char obj[MAX_PATH];
-    if (!objectPathFor(c, src, obj, sizeof(obj))) continue;
-
-    APPEND(buf, bufLen, bufCap, "  {\n    \"arguments\": [\n      ");
-
-    // Compiler
-    jsonQuoteAppend(buf, &bufLen, bufCap, c->cc);
-    APPEND(buf, bufLen, bufCap, ",\n      ");
-
-    // Target Flags
-    char *tf = targetFlags(c);
-    if (tf && tf[0]) {
-      char *savePtr = NULL;
-      char *tok = strtok_r(tf, " ", &savePtr);
-      while (tok) {
-        jsonQuoteAppend(buf, &bufLen, bufCap, tok);
-        APPEND(buf, bufLen, bufCap, ",\n      ");
-        tok = strtok_r(NULL, " ", &savePtr);
-      }
-    }
-    free(tf);
-
-    // Header Public
-    for (int h = 0; h < c->headerPublic.count; h++) {
-      const char *entry = c->headerPublic.items[h];
-      char flag[MAX_PATH + 8];
-      if (entry[0] == '-')
-        snprintf(flag, sizeof(flag), "%s", entry);
-      else
-        snprintf(flag, sizeof(flag), "-I%s",
-                 entry[0] == 'I' && entry[1] == '.' ? entry + 1 : entry);
-
-      jsonQuoteAppend(buf, &bufLen, bufCap, flag);
-      APPEND(buf, bufLen, bufCap, ",\n      ");
-    }
-
-    // Flags
-    for (int f = 0; f < c->flags.count; f++) {
-      const char *fl = c->flags.items[f];
-      char withDash[MAX_PATH + 8];
-      if (fl[0] == '-')
-        snprintf(withDash, sizeof(withDash), "%s", fl);
-      else
-        snprintf(withDash, sizeof(withDash), "-%s", fl);
-
-      jsonQuoteAppend(buf, &bufLen, bufCap, withDash);
-      APPEND(buf, bufLen, bufCap, ",\n      ");
-    }
-
-    // Defines (design/flags.md §2.1) — prefix mengikuti compiler aktif
-    char *df = definesFlags(c);
-    if (df) {
-      char *defSave = NULL;
-      char *defTok = strtok_r(df, " ", &defSave);
-      while (defTok) {
-        jsonQuoteAppend(buf, &bufLen, bufCap, defTok);
-        APPEND(buf, bufLen, bufCap, ",\n      ");
-        defTok = strtok_r(NULL, " ", &defSave);
-      }
-      free(df);
-    }
-
-    // Std, -c, -o, obj, src
-    APPEND(buf, bufLen, bufCap, "\"-std=%s\",\n      \"-c\",\n      \"-o\",\n      ", c->std);
-    jsonQuoteAppend(buf, &bufLen, bufCap, obj);
-    APPEND(buf, bufLen, bufCap, ",\n      ");
-    jsonQuoteAppend(buf, &bufLen, bufCap, src);
-    APPEND(buf, bufLen, bufCap, "\n    ],\n");
-
-    // Directory, File, Output
-    char absPath[MAX_PATH * 2];
-
-    APPEND(buf, bufLen, bufCap, "    \"directory\": ");
-    jsonQuoteAppend(buf, &bufLen, bufCap, cwd);
-
-    APPEND(buf, bufLen, bufCap, ",\n    \"file\": ");
-    snprintf(absPath, sizeof(absPath), "%s/%s", cwd, src);
-    jsonQuoteAppend(buf, &bufLen, bufCap, absPath);
-
-    APPEND(buf, bufLen, bufCap, ",\n    \"output\": ");
-    snprintf(absPath, sizeof(absPath), "%s/%s", cwd, obj);
-    jsonQuoteAppend(buf, &bufLen, bufCap, absPath);
-
-    APPEND(buf, bufLen, bufCap, "\n  }%s\n", i + 1 < srcs->count ? "," : "");
-  }
+  bool first = true;
+  compdbAppendEntries(buf, &bufLen, bufCap, c, srcs, cwd, &first);
 
   APPEND(buf, bufLen, bufCap, "]\n");
 
@@ -320,4 +320,58 @@ void writeCompdb(const Config *c, List *srcs) {
   free(buf);
   saveCompdbCache(fingerprint);
   printf("%s CompDB  : compile_commands.json refreshed\n", repPrefix());
+}
+
+/* ============ merged workspace (multi-Config) ============
+ * Satu compile_commands.json mewakili SELURUH workspace: beberapa
+ * (Config, srcs) dirender berurutan (topo order proyek) menjadi SATU file
+ * di root workspace. Skip-write bila fingerprint gabungan cocok dengan
+ * cache (.rbot/compile_commands.cache) — no-op tidak menyentuh disk dan
+ * tidak mencetak apa pun; blob (.rbot/compile_commands.blob) dipakai untuk
+ * restore tanpa render, sama dengan jalur single-project. */
+
+uint64_t compdbMultiFingerprint(const Config *const *cfgs, List *const *srcs, int count) {
+  char cwd[MAX_PATH];
+  if (!fsGetCwd(cwd, sizeof(cwd))) return 0;
+  uint64_t fp = 1469598103934665603ULL;
+  fp = hashString(fp, cwd);
+  fp = hashString(fp, "compdb-ws-v1");
+  for (int i = 0; i < count; i++) {
+    uint64_t part = compdbEntryHash(cfgs[i], srcs[i], cwd);
+    fp = hashBytes(fp, &part, sizeof(part));
+  }
+  return fp;
+}
+
+void writeCompdbMulti(const Config *const *cfgs, List *const *srcs, int count) {
+  uint64_t fingerprint = compdbMultiFingerprint(cfgs, srcs, count);
+  if (!fingerprint) return;
+
+  if (compdbCacheHit(fingerprint)) return; /* identik: tanpa tulis, diam */
+  if (!fsFileExists("compile_commands.json") && compdbRestoreFromBlob(fingerprint)) return;
+
+  char cwd[MAX_PATH];
+  if (!fsGetCwd(cwd, sizeof(cwd))) return;
+
+  size_t bufCap = 2 * 1024 * 1024;
+  char *buf = malloc(bufCap);
+  if (!buf) return;
+  size_t bufLen = 0;
+  APPEND(buf, bufLen, bufCap, "[\n");
+
+  bool first = true;
+  for (int i = 0; i < count; i++)
+    compdbAppendEntries(buf, &bufLen, bufCap, cfgs[i], srcs[i], cwd, &first);
+
+  APPEND(buf, bufLen, bufCap, "]\n");
+
+  FILE *fp = fopen("compile_commands.json", "w");
+  if (fp) {
+    fwrite(buf, 1, bufLen, fp);
+    fclose(fp);
+  }
+  saveCompdbBlob(buf, bufLen);
+  free(buf);
+  saveCompdbCache(fingerprint);
+  printf("%s CompDB  : compile_commands.json refreshed (workspace)\n", repPrefix());
 }

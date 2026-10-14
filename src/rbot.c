@@ -112,10 +112,12 @@ int rbotRun(int argc, const char *argv[]) {
        revisi 2); diterima bersama build polos maupun command release, dan
        diteruskan ke workspaceRun sebagai releaseSel. */
     if (bs.generate_compdb) {
-      fprintf(stderr,
-              "rbot: -g compdb saat ini hanya di mode satu-proyek (jalankan di folder proyek, bukan root workspace)\n");
-      rc = 2;
-      goto done;
+      /* Query-only: CompDB merged seluruh workspace di root, tanpa build
+         dan tanpa mengubah build state (design/workspace_v1.md §No-op
+         dan CompDB). `--` selector tidak berlaku untuk compdb. */
+      rc = workspaceRun("compdb", bs.jobs, NULL, NULL);
+      bootstrapCleanup(&bs);
+      return rc;
     }
     /* `-- key=value` = override release run ini; `release` tanpa `--` =
        build + release (releaseOnly aktif hanya bila selektor ada —
@@ -129,6 +131,23 @@ int rbotRun(int argc, const char *argv[]) {
     if (sel) free(sel);
     bootstrapCleanup(&bs);
     return rc;
+  }
+
+  /* Guard keanggotaan: build/clean dari direktori anggota sebuah workspace
+     induk ditolak — keanggotaan divalidasi lewat model Buildfile.ws induk
+     (design/workspace_v1.md aturan 1 & 5). `-g compdb` ikut tercakup (ada
+     di jalur CMD_BUILD); proyek standalone di luar workspace tidak
+     terpengaruh. */
+  if (bs.cmd == CMD_BUILD || bs.cmd == CMD_CLEAN) {
+    char wsRoot[MAX_PATH], member[64];
+    if (wsMemberCwdDetect(wsRoot, sizeof(wsRoot), member, sizeof(member))) {
+      fprintf(stderr,
+              "rbot: direktori ini adalah anggota workspace '%s' (proyek '%s')\n"
+              "        build hanya dari root workspace — build selektif: rbot -w %s\n",
+              wsRoot, member, member);
+      rc = 2;
+      goto done;
+    }
   }
 
   /* Dispatch perintah standar — switch enum, bukan strcmp. */

@@ -242,7 +242,7 @@ gen_ws() {
     echo "ruka.sources = src"
     echo "ruka.output.binaryName = ruka"
     echo "ruka.depends_on = rupamod"
-    echo "ruka.embedded.modules.file = ../rupamod/dist/rupa_modules.tar.gz"
+    echo "ruka.embedded.modules.file = rupamod/dist/rupa_modules.tar.gz"
     echo "ruka.embedded.modules.variable = MODULES"
     echo "ruka.headers = build, I."
   } >"$WS/Buildfile.ws"
@@ -383,8 +383,10 @@ have_scenario() {
 }
 
 reset_all() {
+  # build/bin/dist root = output root-centric rbot (design/workspace_v1.md);
+  # sisanya layout nested ninja/make.
   ( cd "$WS" && rm -rf rupa/build rupa/bin ruka/build ruka/bin \
-      rupamod/build rupamod/dist .ninja_log .ninja_deps )
+      rupamod/build rupamod/dist build bin dist .ninja_log .ninja_deps )
 }
 
 ARTIFACT_WARNED=0

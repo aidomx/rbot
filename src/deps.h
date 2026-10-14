@@ -55,6 +55,9 @@ int64_t depsNewestHeaderMTimeAt(DepCache *dc, const char *src, int64_t srcMTimeN
    fast-state mode workspace sebelum DepCache dibebaskan. */
 typedef void (*DepVisitFn)(const char *path, void *ctx);
 void depsClosureVisit(DepCache *dc, const char *src, DepVisitFn visit, void *ctx);
+/* Union closure banyak source dalam satu traversal generation (workspace state). */
+void depsClosureVisitMany(DepCache *dc, const char *const *srcs, int count,
+                          DepVisitFn visit, void *ctx);
 
 /*
  * Verifikasi konten (anti recompile tanpa perubahan isi, mis. setelah

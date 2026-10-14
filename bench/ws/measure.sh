@@ -43,8 +43,15 @@ run_once() {
   # dan setelah edit header tidak boleh ada object basi yang lolos (nilai
   # WS_SHARED_VALUE mengalir ke kedua main).
   if [ "$rc" -eq 0 ]; then
-    if ! "$WS/core/bin/rupa" >/dev/null 2>>"$ERRLOG" ||
-       ! "$WS/bade/bin/bade" >/dev/null 2>>"$ERRLOG"; then
+    # Path binary: rbot root-centric (bin/ di root workspace — design/
+    # workspace_v1.md); ninja/make memakai layout nested per proyek.
+    local rupa_bin bade_bin
+    case $label in
+      rbot) rupa_bin="$WS/bin/rupa"; bade_bin="$WS/bin/bade" ;;
+      *) rupa_bin="$WS/core/bin/rupa"; bade_bin="$WS/bade/bin/bade" ;;
+    esac
+    if ! "$rupa_bin" >/dev/null 2>>"$ERRLOG" ||
+       ! "$bade_bin" >/dev/null 2>>"$ERRLOG"; then
       rc=96
       echo "$label/$scen: runtime check gagal (circular / object basi)" >> "$ERRLOG"
     fi

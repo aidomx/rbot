@@ -591,6 +591,63 @@ static void listForSection(Config *c, const char *section, const char *sub, cons
   }
 }
 
+/*
+ * configApplyResolved — routing SATU baris `key = value` format `use
+ * project` SETELAH alias di-resolve: key bertitik dipecah menjadi
+ * section/sub/subsub, lalu dirutekan ke listForSection (section list:
+ * sources/flags/compiler/exclude/headers/library/defines — value dipotong
+ * koma di tempat) atau configApply (section lain). key & value MUTABLE dan
+ * dipotong di tempat — pemanggil menyiapkan buffer sendiri.
+ */
+static void configApplyResolved(Config *c, char *key, char *v) {
+  char *parts[8];
+  int np = 0;
+  for (char *tok = key; tok && np < 8;) {
+    char *dot = strchr(tok, '.');
+    parts[np++] = tok;
+    if (!dot) break;
+    *dot = '\0';
+    tok = dot + 1;
+  }
+
+  bool isListSection = strcmp(parts[0], "sources") == 0 || strcmp(parts[0], "flags") == 0 ||
+                       strcmp(parts[0], "compiler") == 0 || strcmp(parts[0], "exclude") == 0 ||
+                       strcmp(parts[0], "headers") == 0 || strcmp(parts[0], "library") == 0 ||
+                       strcmp(parts[0], "defines") == 0;
+  if (isListSection) {
+    if (!*v) return;
+    for (char *save = v;;) {
+      char *comma = strchr(save, ',');
+      if (comma) *comma = '\0';
+      char *item = trim(save);
+      if (*item) listForSection(c, parts[0], np >= 2 ? parts[1] : NULL, item);
+      if (!comma) break;
+      save = comma + 1;
+    }
+    return;
+  }
+
+  if (np == 1)
+    configApply(c, NULL, NULL, NULL, parts[0], v);
+  else if (np == 2)
+    configApply(c, parts[0], NULL, NULL, parts[1], v);
+  else if (np == 3)
+    configApply(c, parts[0], parts[1], NULL, parts[2], v);
+  else if (np == 4)
+    configApply(c, parts[0], parts[1], parts[2], parts[3], v);
+  else if (np >= 5 && strcmp(parts[np - 2], "with") == 0)
+    configApply(c, parts[0], parts[1], "with", parts[np - 1], v);
+}
+
+void configApplyLine(Config *c, const char *key, const char *value) {
+  if (!c || !key || !value) return;
+  char k[256], v[2048];
+  if (strlen(key) >= sizeof(k)) return;
+  copyStr(k, sizeof(k), key);
+  copyStr(v, sizeof(v), value);
+  configApplyResolved(c, k, v);
+}
+
 static void parseLine(Config *c, char *section, char *sub, char *subsub, int *subIndent,
                       int *subsubIndent, char *text, int indent, bool useAlias) {
   bool isItem = text[0] == '-';
@@ -636,44 +693,7 @@ static void parseLine(Config *c, char *section, char *sub, char *subsub, int *su
         copyStr(key, sizeof(key), full);
       }
       aliasResolve(&c->aliases, key, sizeof(key));
-
-      char *parts[8];
-      int np = 0;
-      for (char *tok = key; tok && np < 8;) {
-        char *dot = strchr(tok, '.');
-        parts[np++] = tok;
-        if (!dot) break;
-        *dot = '\0';
-        tok = dot + 1;
-      }
-
-      bool isListSection = strcmp(parts[0], "sources") == 0 || strcmp(parts[0], "flags") == 0 ||
-                           strcmp(parts[0], "compiler") == 0 || strcmp(parts[0], "exclude") == 0 ||
-                           strcmp(parts[0], "headers") == 0 || strcmp(parts[0], "library") == 0 ||
-                           strcmp(parts[0], "defines") == 0;
-      if (isListSection) {
-        if (!*v) return;
-        for (char *save = v;;) {
-          char *comma = strchr(save, ',');
-          if (comma) *comma = '\0';
-          char *item = trim(save);
-          if (*item) listForSection(c, parts[0], np >= 2 ? parts[1] : NULL, item);
-          if (!comma) break;
-          save = comma + 1;
-        }
-        return;
-      }
-
-      if (np == 1)
-        configApply(c, NULL, NULL, NULL, parts[0], v);
-      else if (np == 2)
-        configApply(c, parts[0], NULL, NULL, parts[1], v);
-      else if (np == 3)
-        configApply(c, parts[0], parts[1], NULL, parts[2], v);
-      else if (np == 4)
-        configApply(c, parts[0], parts[1], parts[2], parts[3], v);
-      else if (np >= 5 && strcmp(parts[np - 2], "with") == 0)
-        configApply(c, parts[0], parts[1], "with", parts[np - 1], v);
+      configApplyResolved(c, key, v);
       return;
     }
     /* tanpa '=' dan tanpa ' as ': jatuh ke jalur parse lama di bawah */

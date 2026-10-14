@@ -23,9 +23,39 @@
 #include "../portability.h"
 #include "../util.h"
 
-/* ==================== Fingerprint build state ==================== */
+/* ==================== Lokasi file state (state_path) ====================
+ *
+ * Definisi & semantik ada di cmds_internal.h (bagian cmds_state.c).
+ * Mode workspace: file per proyek di .rbot/workspace/<proyek>.<leaf>;
+ * mode single: .rbot/<leaf> relatif cwd. */
+static char g_stateWsProj[80] = "";
 
-#define BUILD_FP_FILE ".rbot/build.fingerprint"
+void cmdsStateSetWsProject(const char *name) {
+  if (!name || !*name) {
+    g_stateWsProj[0] = '\0';
+    return;
+  }
+  snprintf(g_stateWsProj, sizeof(g_stateWsProj), "%s", name);
+}
+
+const char *cmdsStateWsProject(void) { return g_stateWsProj[0] ? g_stateWsProj : NULL; }
+
+void cmdsStatePath(char *out, size_t n, const char *leaf) {
+  if (g_stateWsProj[0])
+    snprintf(out, n, ".rbot/workspace/%s.%s", g_stateWsProj, leaf);
+  else
+    snprintf(out, n, ".rbot/%s", leaf);
+}
+
+void cmdsStateMkdirFor(const char *path) {
+  char dir[256];
+  snprintf(dir, sizeof(dir), "%s", path);
+  char *slash = strrchr(dir, '/');
+  if (slash) *slash = '\0';
+  mkdirs(dir[0] ? dir : ".rbot");
+}
+
+/* ==================== Fingerprint build state ==================== */
 
 static uint64_t fpBytes(uint64_t h, const void *data, size_t n) {
   const unsigned char *p = (const unsigned char *)data;
@@ -91,7 +121,9 @@ void cmdsFingerprintMake(const Config *c, const List *srcs, CmdsBuildFingerprint
 }
 
 bool cmdsFingerprintLoad(CmdsBuildFingerprint *fp) {
-  FILE *f = fopen(BUILD_FP_FILE, "r");
+  char path[256];
+  cmdsStatePath(path, sizeof(path), "build.fingerprint");
+  FILE *f = fopen(path, "r");
   if (!f) return false;
   unsigned long long c = 0, l = 0, s = 0;
   bool ok = fscanf(f, "%llx %llx %llx", &c, &l, &s) == 3;
@@ -119,24 +151,29 @@ void cmdsFingerprintSave(const CmdsBuildFingerprint *fp, bool libOnly) {
       out.link = prev.link;
     }
   }
-  mkdirs(".rbot");
-  FILE *f = fopen(BUILD_FP_FILE ".tmp", "w");
+  char path[256], tmp[272];
+  cmdsStatePath(path, sizeof(path), "build.fingerprint");
+  cmdsStateMkdirFor(path);
+  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+  FILE *f = fopen(tmp, "w");
   if (!f) return;
   fprintf(f, "%016llx %016llx %016llx\n", (unsigned long long)out.compile,
           (unsigned long long)out.link, (unsigned long long)out.sources);
   bool ok = fclose(f) == 0;
   if (ok) {
 #ifdef _WIN32
-    fsRemoveFile(BUILD_FP_FILE);
+    fsRemoveFile(path);
 #endif
-    if (rename(BUILD_FP_FILE ".tmp", BUILD_FP_FILE) != 0) fsRemoveFile(BUILD_FP_FILE ".tmp");
+    if (rename(tmp, path) != 0) fsRemoveFile(tmp);
   } else {
-    fsRemoveFile(BUILD_FP_FILE ".tmp");
+    fsRemoveFile(tmp);
   }
 }
 
 void cmdsFingerprintInvalidate(void) {
-  fsRemoveFile(BUILD_FP_FILE);
+  char path[256];
+  cmdsStatePath(path, sizeof(path), "build.fingerprint");
+  fsRemoveFile(path);
 }
 
 /* ==================== Fast no-op snapshot ==================== */
@@ -773,46 +810,68 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
 int cmdClean(const char *buildfilePath) {
   Config c = configDefaults();
   if (!loadConfig(&c, buildfilePath)) return 1;
+  return cmdsCleanRun(&c);
+}
 
+/* Jalankan logika bersih TANPA loadConfig — dipakai jalur clean tunggal
+   (cmdClean) dan mode workspace (Config disusun dari Buildfile.ws oleh
+   wsBuildConfig; path state mengikuti cmdsStateSetWsProject). */
+int cmdsCleanRun(const Config *c) {
   bool any = false;
-  if (c.cleanBuildDir && safeRelative(c.outBuildDir)) {
-    if (fsRemoveTree(c.outBuildDir))
-      printf("> Removed   : %s\n", c.outBuildDir);
+  if (c->cleanBuildDir && safeRelative(c->outBuildDir)) {
+    if (fsRemoveTree(c->outBuildDir))
+      printf("> Removed   : %s\n", c->outBuildDir);
     else
-      printf("> Removed   : %s (sebagian gagal dihapus)\n", c.outBuildDir);
+      printf("> Removed   : %s (sebagian gagal dihapus)\n", c->outBuildDir);
     any = true;
   }
   /* Hapus FILE library (.a/.so/.dll), bukan foldernya — dulu fsRemoveTree
      pada outLibDir menghapus folder lib/ sekaligus isinya. Folder tetap
      ada; build berikutnya membuat ulang isinya bila diminta. */
-  if (c.cleanBuildDir && c.libRequested && safeRelative(c.outLibDir)) {
+  if (c->cleanBuildDir && c->libRequested && safeRelative(c->outLibDir)) {
     char libPath[MAX_PATH * 2];
-    if (c.libStatic) {
-      cmdsLibStaticPath(&c, libPath, sizeof(libPath));
+    if (c->libStatic) {
+      cmdsLibStaticPath(c, libPath, sizeof(libPath));
       if (fsRemoveFile(libPath)) {
         printf("> Removed   : %s\n", libPath);
         any = true;
       }
     }
-    if (c.libShared) {
-      cmdsLibSharedPath(&c, libPath, sizeof(libPath));
+    if (c->libShared) {
+      cmdsLibSharedPath(c, libPath, sizeof(libPath));
       if (fsRemoveFile(libPath)) {
         printf("> Removed   : %s\n", libPath);
         any = true;
       }
     }
   }
-  if (c.cleanCompileCommands && fsFileExists("compile_commands.json")) {
+  if (c->cleanCompileCommands && fsFileExists("compile_commands.json")) {
     fsRemoveFile("compile_commands.json");
     printf("> Removed   : compile_commands.json\n");
     any = true;
   }
   /* Snapshot hash dependensi dihapus juga: verifikasi konten dimulai dari
      nol pada build berikutnya (build sukses merekam ulang dari awal). */
-  if (fsFileExists(".rbot/deps.cache")) {
-    fsRemoveFile(".rbot/deps.cache");
-    printf("> Removed   : .rbot/deps.cache\n");
+  char depsLeaf[256];
+  cmdsStatePath(depsLeaf, sizeof(depsLeaf), "deps.cache");
+  if (fsFileExists(depsLeaf)) {
+    fsRemoveFile(depsLeaf);
+    printf("> Removed   : %s\n", depsLeaf);
     any = true;
+  }
+  /* Mode workspace: state fast & snapshot source per proyek ikut dibuang
+     (root-centric) — clean berarti build berikutnya mulai dari nol. */
+  if (cmdsStateWsProject()) {
+    static const char *wsLeaves[] = {"ws.state", "ws.lib.state", "src", NULL};
+    for (int i = 0; wsLeaves[i]; i++) {
+      char p[256];
+      cmdsStatePath(p, sizeof(p), wsLeaves[i]);
+      if (fsFileExists(p)) {
+        fsRemoveFile(p);
+        printf("> Removed   : %s\n", p);
+        any = true;
+      }
+    }
   }
   /* State fast no-op kedua fase (binary & library) ikut dibuang. */
   if (fsFileExists(BUILD_STATE_FILE)) {
@@ -905,4 +964,61 @@ void cmdsStatMemoForgetTree(const char *dir) {
   }
   free(old);
   statMemoCount = kept;
+}
+
+/* Satu rehash untuk invalidasi seluruh output workspace. Jika alokasi gagal,
+   reset memo agar tidak ada stamp output basi yang dipakai. */
+static int memoKeyCompare(const void *a, const void *b) {
+  return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+void cmdsStatMemoForgetOutputs(const char *buildDir, const List *items) {
+  if (!statMemoCap) return;
+  char prefix[MAX_PATH * 4] = "";
+  if (buildDir && *buildDir) memoKeyFor(buildDir, prefix, sizeof(prefix));
+  size_t pl = strlen(prefix);
+  size_t n = 0;
+  for (int i = 0; items && i < items->count; i++)
+    if (items->items[i][0] == 'O') n++;
+  char **keys = n ? calloc(n, sizeof(*keys)) : NULL;
+  if (n && !keys) { cmdsStatMemoReset(); return; }
+  size_t used = 0;
+  for (int i = 0; items && i < items->count; i++) {
+    if (items->items[i][0] != 'O') continue;
+    keys[used] = malloc(MAX_PATH * 4);
+    if (!keys[used]) {
+      for (size_t j = 0; j < used; j++) free(keys[j]);
+      free(keys);
+      cmdsStatMemoReset();
+      return;
+    }
+    memoKeyFor(items->items[i] + 2, keys[used], MAX_PATH * 4);
+    used++;
+  }
+  if (used > 1) qsort(keys, used, sizeof(*keys), memoKeyCompare);
+  StatMemoEntry *fresh = calloc(statMemoCap, sizeof(*fresh));
+  if (!fresh) {
+    for (size_t j = 0; j < used; j++) free(keys[j]);
+    free(keys);
+    cmdsStatMemoReset();
+    return;
+  }
+  size_t kept = 0;
+  for (size_t i = 0; i < statMemoCap; i++) {
+    if (!statMemo[i].path) continue;
+    const char *path = statMemo[i].path;
+    bool inTree = pl && strncmp(path, prefix, pl) == 0 &&
+                  (path[pl] == '\0' || path[pl] == '/');
+    bool inOutputs = used && bsearch(&path, keys, used, sizeof(*keys), memoKeyCompare);
+    if (inTree || inOutputs) { free(statMemo[i].path); continue; }
+    size_t j = statMemoHash(path) & (statMemoCap - 1);
+    while (fresh[j].path) j = (j + 1) & (statMemoCap - 1);
+    fresh[j] = statMemo[i];
+    kept++;
+  }
+  free(statMemo);
+  statMemo = fresh;
+  statMemoCount = kept;
+  for (size_t j = 0; j < used; j++) free(keys[j]);
+  free(keys);
 }

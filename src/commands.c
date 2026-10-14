@@ -675,6 +675,48 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
     return 1;
   }
 
+  return cmdsBuildPassRun(jobs, c, buildfilePath, libOnly);
+}
+
+/*
+ * cmdsCollectSources — koleksi source .c/.cpp dari Config: entri FILE
+ * (mis. hasil `rbot -xf` untuk build.ninja flat) masuk langsung; selain
+ * itu dianggap folder dan discan rekursif (walk cache .rbot/ws.src bila
+ * mode workspace aktif — lihat wsModeSet). Urutan hasil = urutan link:
+ * .c dan .cpp dihasilkan dua walkDir terpisah per folder root, jadi di-sort
+ * ulang jadi satu barisan stabil — baris link reprodusible antar mesin dan
+ * urutan inisialisasi object statis C++ tidak melekat pada readdir.
+ * Dipakai cmdsBuildPassRun dan jalur CompDB workspace (wsCompdbRefresh).
+ */
+void cmdsCollectSources(const Config *c, List *out) {
+  listReserve(out, 1024);
+  for (int i = 0; i < c->sources.count; i++) {
+    const char *entry = c->sources.items[i];
+    size_t elen = strlen(entry);
+    if (elen >= 2 &&
+        (strcmp(entry + elen - 2, ".c") == 0 || strcmp(entry + elen - 2, ".cpp") == 0) &&
+        fsFileExists(entry)) {
+      listAdd(out, entry);
+      continue;
+    }
+    wsWalkDirCached(entry, ".c", out);
+    wsWalkDirCached(entry, ".cpp", out);
+  }
+  listSort(out);
+}
+
+/*
+ * cmdsBuildPassRun — isi pass build satu proyek (fase library / fase
+ * binary): koleksi source, fingerprint, decide, compile, embed, library,
+ * link, state. TANPA loadConfig & TANPA chdir — pemanggil sudah
+ * menyiapkan Config (path selaras cwd) dan cwd yang benar:
+ *   - single project : cmdBuildEx (cwd = root proyek lewat fsSetCwd)
+ *   - workspace      : wsCmdBuild (cwd = root workspace, tidak pernah
+ *                      chdir; cmdBuildEx TIDAK dipanggil — design/
+ *                      workspace_v1.md §Pemisahan Jalur Build)
+ * Config by-value: body hanya membaca field-nya (list dibagi, tak dimutasi).
+ */
+int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly) {
   /* Proyek kemasan (output.binary = false): SEBELUM koleksi source —
      proyek kemasan sah tidak punya satu .c pun. Dua varian:
        pack.*    -> pengemasan artefak (tar.gz/deb/checksum);
@@ -707,28 +749,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   }
 
   List srcs = {0};
-  listReserve(&srcs, 1024);
-  for (int i = 0; i < c.sources.count; i++) {
-    const char *entry = c.sources.items[i];
-    /* Entri FILE .c (mis. hasil `rbot -xf` untuk build.ninja flat) masuk
-       langsung; selain itu dianggap folder dan discan rekursif. */
-    size_t elen = strlen(entry);
-    if (elen >= 2 &&
-        (strcmp(entry + elen - 2, ".c") == 0 || strcmp(entry + elen - 2, ".cpp") == 0) &&
-        fsFileExists(entry)) {
-      listAdd(&srcs, entry);
-      continue;
-    }
-    wsWalkDirCached(entry, ".c", &srcs);
-    wsWalkDirCached(entry, ".cpp", &srcs);
-  }
-  /* Urutan final source = urutan link (driver C++ tetap mendukung urutan):
-     .c dan .cpp dihasilkan dua walkDir terpisah per folder root — gabungan
-     dua walk tidak selalu leksikografis ("a.cpp" dulu lalu "b.c" melanggar
-     urutan a.c, a.cpp, b.c). Sort ulang jadi satu barisan stabil agar
-     baris link reprodusible antar mesin dan urutan inisialisasi object
-     statis C++ tidak lagi melekat pada readdir. */
-  listSort(&srcs);
+  cmdsCollectSources(&c, &srcs);
 
   /* One-pass stat plan: stamp source (selalu) + object (default; hilangkan
    * dengan RBOT_STATPLAN_OBS=0) SEKALI di sini. Konsumen berikutnya memakai
@@ -772,7 +793,10 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
      berubah, atau set source berubah. Perubahan isi source/header tidak
      mengubah command compile. */
   profMark("pre-compdb");
-  if (compdbEnabled(&c)) {
+  if (compdbEnabled(&c) && !wsModeActive()) {
+    /* Mode workspace: CompDB ditulis terpusat oleh jalur workspace (satu
+       compile_commands.json mewakili SELURUH workspace) — pass per proyek
+       tidak menulis apa pun (design/workspace_v1.md §No-op dan CompDB). */
     bool compdbMissing = !fsFileExists("compile_commands.json");
     if (compdbMissing || !haveBuildFp || compileConfigChanged || sourceSetChanged)
       writeCompdb(&c, &srcs);
@@ -956,9 +980,12 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
       depsFree(deps);
       return 1;
     }
-    if (compiled > 0 || depsSnapshotIncomplete(deps)) {
+    if (depsSnapshotIncomplete(deps)) {
       for (int i = 0; i < srcs.count; i++)
         depsRecordUpdate(deps, srcs.items[i]);
+    } else if (compiled > 0) {
+      for (int i = 0; i < pending.count; i++)
+        depsRecordUpdate(deps, pending.items[i]);
     }
     depsSave(deps);
     if (wsModeActive()) wsFastStateSave(deps, &c, &srcs, "", buildfilePath, true);
@@ -1173,9 +1200,12 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   }
 
   /* Build sukses: rekam snapshot hash (lihat jalur up-to-date di atas). */
-  if (compiled > 0 || depsSnapshotIncomplete(deps)) {
+  if (depsSnapshotIncomplete(deps)) {
     for (int i = 0; i < srcs.count; i++)
       depsRecordUpdate(deps, srcs.items[i]);
+  } else if (compiled > 0) {
+    for (int i = 0; i < pending.count; i++)
+      depsRecordUpdate(deps, pending.items[i]);
   }
   depsSave(deps);
   if (wsModeActive()) wsFastStateSave(deps, &c, &srcs, target, buildfilePath, libOnly);

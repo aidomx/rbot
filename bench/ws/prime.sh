@@ -38,8 +38,11 @@ s_release() {
 }
 
 reset_all() {
+  # root build/bin/lib/dist = output root-centric rbot (design/
+  # workspace_v1.md); sisanya layout nested ninja/make + state rbot.
   (cd "$WS" && rm -rf core/build core/bin bade/build bade/bin \
-    rupamod/build rupamod/modules modules .rbot core/lib bade/lib .ninja_log .ninja_deps)
+    rupamod/build rupamod/modules modules .rbot core/lib bade/lib .ninja_log .ninja_deps \
+    build bin lib dist)
 }
 
 ARTIFACT_WARNED=0
@@ -77,20 +80,33 @@ prime_tool() {
 # ke file dulu.
 prime_gate() {
   local archive="$WS/modules/rupa_modules.tar" f list="$OUTDIR/.gate.list"
+  # Path keluaran per tool: rbot root-centric (bin/, lib/, build/<proyek>/
+  # di root workspace — design/workspace_v1.md); ninja/make layout nested.
+  local rupa_bin bade_bin core_so bade_so core_main core_a bade_a
+  case $1 in
+    rbot)
+      rupa_bin="bin/rupa"; bade_bin="bin/bade"
+      core_so="lib/libcore.so"; bade_so="lib/libbade.so"
+      core_main="build/core/main.o"; core_a="lib/libcore.a"; bade_a="lib/libbade.a" ;;
+    *)
+      rupa_bin="core/bin/rupa"; bade_bin="bade/bin/bade"
+      core_so="core/lib/libcore.so"; bade_so="bade/lib/libbade.so"
+      core_main="core/build/main.o"; core_a="core/build/libcore.a"; bade_a="bade/build/libbade.a" ;;
+  esac
   [ -s "$archive" ] || { echo "  ✗ $1: archive tidak ditemukan: $archive" >&2; return 1; }
   tar -tf "$archive" > "$list" 2> /dev/null
   grep -Eq '(^|/)m1[.]rp$' "$list" || { echo "  ✗ $1: archive tidak berisi m1.rp" >&2; return 1; }
-  for f in "$WS/core/lib/libcore.so" "$WS/bade/lib/libbade.so"; do
+  for f in "$WS/$core_so" "$WS/$bade_so"; do
     [ -s "$f" ] || { echo "  ✗ $1: shared library hilang: $f" >&2; return 1; }
   done
   # Pastikan resource benar-benar berada dalam binary, bukan sekadar file .o.
-  nm "$WS/bade/bin/bade" > "$OUTDIR/.nm.list" 2> /dev/null
+  nm "$WS/$bade_bin" > "$OUTDIR/.nm.list" 2> /dev/null
   grep -Eq '_binary_.*rupa_modules_tar_start' "$OUTDIR/.nm.list" || {
     echo "  ✗ $1: embedded archive tidak ter-link ke binary bade" >&2
     return 1
   }
   # Keberhasilan link saja tidak membuktikan circular symbol teratasi.
-  if ! "$WS/core/bin/rupa" || ! "$WS/bade/bin/bade"; then
+  if ! "$WS/$rupa_bin" || ! "$WS/$bade_bin"; then
     printf '  ✗ %s: runtime circular dependency gagal\n' "$1" >&2
     return 1
   fi
@@ -104,8 +120,8 @@ prime_gate() {
     return 0
   fi
   local no_group_core=0 no_group_bade=0
-  (cd "$WS" && gcc core/build/main.o core/build/libcore.a bade/build/libbade.a -o "$OUTDIR/.nogroup-core") >/dev/null 2>&1 || no_group_core=1
-  (cd "$WS" && gcc bade/build/main.o bade/build/libbade.a core/build/libcore.a -o "$OUTDIR/.nogroup-bade") >/dev/null 2>&1 || no_group_bade=1
+  (cd "$WS" && gcc "$core_main" "$core_a" "$bade_a" -o "$OUTDIR/.nogroup-core") >/dev/null 2>&1 || no_group_core=1
+  (cd "$WS" && gcc "$WS/bade/build/main.o" "$bade_a" "$core_a" -o "$OUTDIR/.nogroup-bade") >/dev/null 2>&1 || no_group_bade=1
   if (( no_group_core == 0 && no_group_bade == 0 )); then
     echo "  ✗ $1: circular semu (kedua link tanpa group berhasil)" >&2
     return 1

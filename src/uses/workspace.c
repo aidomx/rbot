@@ -11,7 +11,9 @@
 
 #include "../cmds/cmds_internal.h"
 #include "../commands.h"
+#include "../compdb.h"
 #include "../config.h"
+#include "../compile.h"
 #include "../embed.h"
 #include "../pack/pack.h"
 #include "../pack/pack_internal.h"
@@ -97,6 +99,18 @@ typedef struct {
 /* Deklarasi maju: dipakai workspaceRun (gate per-closure) — definisinya ada
    di bagian workspace state jauh di bawah. */
 static bool wsGateStartValid = false;
+
+/* Guard direktori anggota (wsMemberCwdDetect): selama keanggotaan divalidasi
+   lewat model induk, pesan parser workspace dibungkam — induk yang rusak
+   berarti "bukan anggota", bukan kesalahan run ini. Definisi & pemakaian di
+   bagian guard (dekat akhir file). */
+static bool wsGuardQuiet = false;
+
+/* Fast-hit per proyek pada run berjalan (wsRunProject): proyek yang
+   lolos fast-state source-nya dijamin tak berubah oleh stamp folder di
+   ws.state — memungkinkan workspace_log memuat ulang daftar source dari
+   snapshot <n>.src tanpa re-scan (keputusan (a) workspace_log). */
+static bool wsLogFastOk[WS_MAX_PROJECTS];
 static bool wsStateValidFiltered(const WsModel *m, const unsigned char *needed);
 static void wsStateSave(const WsModel *m, const char *wsDir);
 
@@ -172,9 +186,10 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
      di sini supaya Buildfile.ws lama gagal JELAS, bukan diam-diam
      salah kemas. */
   if (strcmp(key, "releases") == 0 || strncmp(key, "releases.", 9) == 0) {
-    fprintf(stderr, "rbot: workspace: sintaks 'releases' tidak lagi didukung\n"
-                    "        gunakan section release.* — SATU paket workspace\n"
-                    "        (release.name/files/exclude/format; lihat design/release.md)\n");
+    if (!wsGuardQuiet)
+      fprintf(stderr, "rbot: workspace: sintaks 'releases' tidak lagi didukung\n"
+                      "        gunakan section release.* — SATU paket workspace\n"
+                      "        (release.name/files/exclude/format; lihat design/release.md)\n");
     return;
   }
 
@@ -206,9 +221,10 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
          per proyek — nilai workspace-level tidak mengagregasi output
          ke root workspace. Agregasi lewat path per proyek (../bin). */
       if (strcmp(key, "root") == 0) {
-        fprintf(stderr, "rbot: workspace: 'root' diabaikan (root berlaku per proyek — "
-                        "cwd build = folder proyek; agregasi output ke root workspace "
-                        "pakai output.binaryDir = ../bin dsb.)\n");
+        if (!wsGuardQuiet)
+          fprintf(stderr, "rbot: workspace: 'root' diabaikan (root berlaku per proyek — "
+                          "deklarasikan per proyek: <nama>.root = ...; output tetap "
+                          "root-centric otomatis: bin/, build/, lib/ di root workspace)\n");
         return;
       }
       if (wsIsEngineSection(key)) wsAddCommon(m, key, value);
@@ -246,7 +262,7 @@ static bool wsParse(WsModel *m, const char *path) {
 
   FILE *fp = fopen(path, "r");
   if (!fp) {
-    fprintf(stderr, "rbot: cannot open %s\n", path);
+    if (!wsGuardQuiet) fprintf(stderr, "rbot: cannot open %s\n", path);
     return false;
   }
 
@@ -282,7 +298,8 @@ static bool wsParse(WsModel *m, const char *path) {
         if (comma) *comma = '\0';
         char *item = trim(save);
         if (*item && !wsEnsureProject(m, item)) {
-          fprintf(stderr, "rbot: workspace: invalid project name '%s'\n", item);
+          if (!wsGuardQuiet)
+            fprintf(stderr, "rbot: workspace: invalid project name '%s'\n", item);
           fclose(fp);
           listFree(&aliases);
           return false;
@@ -324,77 +341,6 @@ static bool wsProjectPackFiles(const WsProject *p, List *out) {
   return found;
 }
 
-static bool wsPackMergeInfo(const WsModel *m, const WsProject *owner, char *out, size_t n) {
-  out[0] = '\0';
-  for (int i = 0; i < owner->lines.count; i++) {
-    const char *ln = owner->lines.items[i];
-    if (strncmp(ln, "pack.merge = ", 13) != 0) continue;
-    const char *v = ln + 13;
-    char buf[WS_LINE_LEN * 2];
-    if (strlen(v) >= sizeof(buf)) return false;
-    copyStr(buf, sizeof(buf), v);
-    for (char *save = buf;;) {
-      char *comma = strchr(save, ',');
-      if (comma) *comma = '\0';
-      char *item = trim(save);
-      if (*item) {
-        int dep = wsFindProject(m, item);
-        if (dep < 0) {
-          fprintf(stderr, "rbot: workspace: '%s' pack.merge unknown project '%s'\n", owner->name,
-                  item);
-          return false;
-        }
-        List files = {0};
-        if (!wsProjectPackFiles(&m->projects[dep], &files)) {
-          fprintf(stderr, "rbot: workspace: '%s' pack.merge project '%s' has no pack.files\n",
-                  owner->name, item);
-          listFree(&files);
-          return false;
-        }
-        for (int j = 0; j < files.count; j++) {
-          const char *entry = files.items[j];
-          const char *colon = strchr(entry, ':');
-          char src[WS_LINE_LEN], dst[WS_LINE_LEN], dstBuf[WS_LINE_LEN];
-          if (colon) {
-            size_t sl = (size_t)(colon - entry);
-            if (sl == 0 || sl >= sizeof(src)) {
-              listFree(&files);
-              return false;
-            }
-            memcpy(src, entry, sl);
-            src[sl] = '\0';
-            copyStr(dstBuf, sizeof(dstBuf), colon + 1);
-            copyStr(dst, sizeof(dst), trim(dstBuf));
-          } else {
-            copyStr(src, sizeof(src), entry);
-            copyStr(dst, sizeof(dst), entry);
-          }
-          char mapped[WS_LINE_LEN * 2];
-          int written =
-              snprintf(mapped, sizeof(mapped), "../%s/%s:%s", m->projects[dep].root, src, dst);
-          if (written < 0 || (size_t)written >= sizeof(mapped)) {
-            listFree(&files);
-            return false;
-          }
-          if (out[0] && strlen(out) + 2 >= n) {
-            listFree(&files);
-            return false;
-          }
-          if (out[0]) strcat(out, ", ");
-          if (strlen(out) + strlen(mapped) + 1 >= n) {
-            listFree(&files);
-            return false;
-          }
-          strcat(out, mapped);
-        }
-        listFree(&files);
-      }
-      if (!comma) break;
-      save = comma + 1;
-    }
-  }
-  return true;
-}
 
 static bool wsValidatePackMerges(WsModel *m) {
   for (int i = 0; i < m->projectCount; i++) {
@@ -658,19 +604,18 @@ static bool wsLibraryValue(const WsModel *m, const WsProject *owner, const char 
         else if (strncmp(ln, "output.libDir = ", 16) == 0)
           snprintf(libDir, sizeof(libDir), "%s", ln + 16);
       }
-      /* Paths in synthesized Buildfile are relative to consumer root.
-         Build the string only after checking its exact size so long workspace
-         project/library paths cannot trigger snprintf truncation. */
+      /* Path artifact lintas-proyek relatif ROOT WORKSPACE: library
+         ditulis ke <libDir>/ di root workspace (design/workspace.md,
+         "lib/ di root"), jadi path-nya <libDir>/lib<name>.a — tanpa nama
+         folder proyek di depannya. Size dicek dulu agar path panjang
+         tidak terpotong snprintf. */
       {
-        const char *prefix = "../";
-        const char *middle = "/";
         const char *libPrefix = "/lib";
         const char *suffix = ".a";
-        size_t need = strlen(prefix) + strlen(dep->root) + strlen(middle) + strlen(libDir) +
-                      strlen(libPrefix) + strlen(libName) + strlen(suffix) + 1;
+        size_t need = strlen(libDir) + strlen(libPrefix) + strlen(libName) + strlen(suffix) + 1;
         if (need > sizeof(mapped)) return false;
         char *dst = mapped;
-        const char *parts[] = {prefix, dep->root, middle, libDir, libPrefix, libName, suffix};
+        const char *parts[] = {libDir, libPrefix, libName, suffix};
         for (size_t k = 0; k < sizeof(parts) / sizeof(parts[0]); k++) {
           size_t partLen = strlen(parts[k]);
           memcpy(dst, parts[k], partLen);
@@ -694,17 +639,18 @@ static bool wsLibraryValue(const WsModel *m, const WsProject *owner, const char 
 /*
  * cdeps = <proyek lain>[, ...] — ketergantungan compile-time lintas proyek
  * dalam satu key (todos/7_10_2026.txt). Menggantikan penulisan manual:
- *     <n>.headers = ../<dep>/include      (folder header publik proyek)
- *     <n>.library.<os> = <dep>            (artifact library per-OS)
- * Dengan cdeps, sintesis workspace menerbitkan `library = ../<dep>/...
- * dan `headers = ../<dep>/<dir>` secara internal. Siklus antar proyek
- * sah — sama seperti library.<os>: dua fase build workspace yang
- * menyelesaikannya (fase library melewatkan artifact path proyek lain).
+ *     <n>.headers = <dep>/include      (folder header publik proyek)
+ *     <n>.library.<os> = <dep>          (artifact library per-OS)
+ * Dengan cdeps, WsConfig menerbitkan `library = <dep>/<libDir>/lib<name>.a`
+ * dan `headers = <dep>/<dir>` (keduanya relatif root workspace) secara
+ * internal. Siklus antar proyek sah — sama seperti library.<os>: dua fase
+ * build workspace yang menyelesaikannya (fase library melewatkan artifact
+ * path proyek lain).
  */
 
 /* Folder header publik proyek `dep`: semua nilai `headers = ...` proyek
-   itu (diprefix ../<root>/), default "include" bila proyek tidak
-   menulis headers sama sekali. */
+   itu (diprefix <root>/ — relatif root workspace), default <root>/include
+   bila proyek tidak menulis headers sama sekali. */
 static void wsProjectHeaderDirs(const WsProject *dep, List *out) {
   bool any = false;
   for (int j = 0; j < dep->lines.count; j++) {
@@ -719,14 +665,12 @@ static void wsProjectHeaderDirs(const WsProject *dep, List *out) {
       if (comma) *comma = '\0';
       char *item = trim(save);
       if (*item) {
-        /* "../" + root + "/" + item — dibangun manual (memcpy) agar
-           gcc -Wformat-truncation tidak menolak path panjang. */
+        /* <root>/<item> — relatif root workspace; dibangun manual
+           (memcpy) agar gcc -Wformat-truncation tidak menolak path. */
         char joined[MAX_PATH];
-        size_t need = 3 + strlen(dep->root) + 1 + strlen(item) + 1;
+        size_t need = strlen(dep->root) + 1 + strlen(item) + 1;
         if (need > sizeof(joined)) continue;
         char *dst = joined;
-        memcpy(dst, "../", 3);
-        dst += 3;
         size_t rl = strlen(dep->root);
         memcpy(dst, dep->root, rl);
         dst += rl;
@@ -743,11 +687,9 @@ static void wsProjectHeaderDirs(const WsProject *dep, List *out) {
   }
   if (!any) {
     char joined[MAX_PATH];
-    size_t need = 3 + strlen(dep->root) + strlen("/include") + 1;
+    size_t need = strlen(dep->root) + strlen("/include") + 1;
     if (need <= sizeof(joined)) {
       char *dst = joined;
-      memcpy(dst, "../", 3);
-      dst += 3;
       size_t rl = strlen(dep->root);
       memcpy(dst, dep->root, rl);
       dst += rl;
@@ -766,32 +708,224 @@ static bool wsListHas(const List *l, const char *s) {
   return false;
 }
 
-/* Ekspansi blok cdeps proyek `p` menjadi baris Buildfile sintesis:
-   satu `library = ...` per proyek dep + satu `headers = ...` gabungan.
-   Baris `cdeps = ...` asli TIDAK ikut ditulis (sudah dikonsumsi). */
-static bool wsEmitCdeps(const WsModel *m, const WsProject *p, char *body, size_t cap) {
-  List deps = {0}, hdirs = {0}, ownHeaders = {0};
-  bool found = false;
+/* ==================== Susun Config di memori (WsConfig) ====================
+ *
+ * Menggantikan sintesis file + loadConfig (design/workspace_v1.md §Pemisahan
+ * Jalur Build): tiap proyek memperoleh Config hasil resolusi Buildfile.ws
+ * di memori — tanpa file .Buildfile sintesis, tanpa chdir. Skoping path
+ * per-kunci:
+ *   - konten-proyek (sources, headers, archive.src, embedded.*.src) ->
+ *     relatif root proyek (di-prefix <root>/);
+ *   - lintas-proyek/workspace (headers.internal, archive.dir,
+ *     embedded.*.file, library.<os> = <proyek>) -> relatif root workspace;
+ *   - output: build/<proyek>, bin, lib di root workspace.
+ */
 
-  /* Folder header milik proyek sendiri — supaya emit tidak menduplikasi
-     entri yang sudah eksplisit di Buildfile user. */
-  for (int j = 0; j < p->lines.count; j++) {
-    const char *ln = p->lines.items[j];
-    if (strncmp(ln, "headers = ", 10) != 0) continue;
-    const char *v = ln + 10;
-    char buf[WS_LINE_LEN];
-    if (strlen(v) >= sizeof(buf)) continue;
-    copyStr(buf, sizeof(buf), v);
-    for (char *save = buf;;) {
-      char *comma = strchr(save, ',');
-      if (comma) *comma = '\0';
-      char *item = trim(save);
-      if (*item) listAdd(&ownHeaders, item);
-      if (!comma) break;
-      save = comma + 1;
+/* true bila item adalah path relatif yang harus ditempel ke root proyek
+   (bukan flag -I/-D, bukan path absolut POSIX maupun Windows). */
+static bool wsIsRelPath(const char *item) {
+  if (!item || !*item) return false;
+  if (item[0] == '-' || item[0] == '/') return false;
+  if (item[1] == ':' && item[2]) return false; /* C:\... / C:/... */
+  return true;
+}
+
+/* Peta daftar "a, b, c" per item -> out (dipisah ", ").
+   headersForm: sintaks headers — "I." = root proyek, "I.x" = <root>/.x
+   (semantik headerEntryDir lama terhadap root proyek). */
+static bool wsMapList(const char *root, const char *value, bool headersForm, char *out,
+                      size_t n) {
+  char buf[WS_LINE_LEN];
+  if (!value || strlen(value) >= sizeof(buf)) return false;
+  copyStr(buf, sizeof(buf), value);
+  out[0] = '\0';
+  bool first = true;
+  for (char *save = buf;;) {
+    char *comma = strchr(save, ',');
+    if (comma) *comma = '\0';
+    char *item = trim(save);
+    char mapped[WS_LINE_LEN];
+    mapped[0] = '\0';
+    if (*item) {
+      if (headersForm && item[0] == 'I' && item[1] == '.') {
+        if (item[2] == '\0')
+          snprintf(mapped, sizeof(mapped), "%s", root); /* "I." */
+        else
+          snprintf(mapped, sizeof(mapped), "%s/%s", root, item + 1); /* "<root>/.x" */
+      } else if (strcmp(item, ".") == 0) {
+        snprintf(mapped, sizeof(mapped), "%s", root);
+      } else if (wsIsRelPath(item)) {
+        if ((size_t)snprintf(mapped, sizeof(mapped), "%s/%s", root, item) >= sizeof(mapped))
+          return false;
+      } else {
+        snprintf(mapped, sizeof(mapped), "%s", item); /* flag/abs */
+      }
+      if (!first && strlen(out) + 2 >= n) return false;
+      if (!first) strcat(out, ", ");
+      if (strlen(out) + strlen(mapped) + 1 >= n) return false;
+      strcat(out, mapped);
+      first = false;
     }
+    if (!comma) break;
+    save = comma + 1;
+  }
+  return true;
+}
+
+/* Normalize workspace header groups into a deterministic, duplicate-free
+   include list. Parentheses group tracked roots; they do not change -I
+   precedence based on their position in the declaration. */
+static int wsHeaderCmp(const void *a, const void *b) {
+  return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+static bool wsMapHeaders(const char *root, const char *value, bool global,
+                         char *out, size_t n) {
+  char flat[WS_LINE_LEN];
+  size_t used = 0;
+  int depth = 0;
+  for (const char *p = value; *p; ++p) {
+    if (*p == '(') { if (depth++) return false; continue; }
+    if (*p == ')') { if (--depth < 0) return false; continue; }
+    if (used + 1 >= sizeof(flat)) return false;
+    flat[used++] = *p;
+  }
+  if (depth) return false;
+  flat[used] = '\0';
+  char *items[256];
+  int count = 0;
+  char buf[WS_LINE_LEN];
+  copyStr(buf, sizeof(buf), flat);
+  for (char *part = buf;;) {
+    char *comma = strchr(part, ',');
+    if (comma) *comma = '\0';
+    char *item = trim(part);
+    if (*item) {
+      char mapped[WS_LINE_LEN];
+      const char *base = global && strncmp(item, "I.", 2) != 0 ? "." : root;
+      if (global && strcmp(item, "I.") != 0 && wsIsRelPath(item)) {
+        char candidate[WS_LINE_LEN];
+        if (snprintf(candidate, sizeof(candidate), "%s/include", item) >= (int)sizeof(candidate)) return false;
+        if (fsDirExists(candidate)) copyStr(mapped, sizeof(mapped), candidate);
+        else if (!wsMapList(base, item, true, mapped, sizeof(mapped))) return false;
+      } else if (!wsMapList(base, item, true, mapped, sizeof(mapped))) return false;
+      if (count >= 256) return false;
+      items[count] = malloc(strlen(mapped) + 1);
+      if (!items[count]) goto fail;
+      strcpy(items[count++], mapped);
+    }
+    if (!comma) break;
+    part = comma + 1;
+  }
+  qsort(items, (size_t)count, sizeof(items[0]), wsHeaderCmp);
+  out[0] = '\0';
+  for (int i = 0; i < count; i++) {
+    if (i && strcmp(items[i], items[i - 1]) == 0) continue;
+    size_t have = strlen(out), add = strlen(items[i]);
+    if (have + add + (have ? 2 : 0) + 1 > n) goto fail;
+    if (have) strcat(out, ", ");
+    strcat(out, items[i]);
+  }
+  for (int i = 0; i < count; i++) free(items[i]);
+  return true;
+fail:
+  for (int i = 0; i < count; i++) free(items[i]);
+  return false;
+}
+
+/* "key = value" -> key kanonik (ter-trim) + pointer value di buffer
+   mutable milik pemanggil. */
+static bool wsSplitKV(char *line, char *key, size_t kn, char **val) {
+  char *eq = strchr(line, '=');
+  if (!eq) return false;
+  *eq = '\0';
+  char *k = trim(line);
+  char *v = trim(eq + 1);
+  if (!*k || strlen(k) >= kn) return false;
+  memcpy(key, k, strlen(k) + 1);
+  *val = v;
+  return true;
+}
+
+/* pack.* per proyek di luar scope v1 — peringatan sekali per run. */
+static bool wsPackWarned = false;
+
+/* Terapkan SATU baris model (key sudah kanonik) ke Config dengan skoping
+   per-kunci (lihat komentar seksi di atas). */
+static void wsApplyLine(const WsModel *m, const WsProject *p, Config *c, const char *key,
+                        const char *value, bool global) {
+  char mapped[WS_LINE_LEN * 4];
+
+  if (strncmp(key, "pack.", 5) == 0) {
+    if (!wsPackWarned) {
+      wsPackWarned = true;
+      fprintf(stderr, "rbot: workspace: pack.* per proyek diabaikan di mode workspace "
+                      "(lihat design/workspace_v1.md)\n");
+    }
+    return;
+  }
+  if (strcmp(key, "cdeps") == 0) return; /* dikonsumsi wsApplyCdeps */
+  /* headers.internal = folder shared di root workspace -> publik lewat
+     `headers` supaya ikut -I (kriteria: shared headers di-root ditambahkan
+     ke -I). Value relatif root workspace — tanpa prefix. */
+  if (strcmp(key, "headers.internal") == 0) {
+    configApplyLine(c, "headers", value);
+    return;
   }
 
+  const char *root = p->root[0] ? p->root : ".";
+
+  if (strncmp(key, "sources", 7) == 0 && (key[7] == '\0' || key[7] == '.')) {
+    if (wsMapList(root, value, false, mapped, sizeof(mapped))) configApplyLine(c, key, mapped);
+    return;
+  }
+  if (strncmp(key, "headers", 7) == 0 && (key[7] == '\0' || key[7] == '.')) {
+    if (wsMapHeaders(root, value, global, mapped, sizeof(mapped))) configApplyLine(c, key, mapped);
+    return;
+  }
+  if (strcmp(key, "archive.src") == 0) {
+    if (wsIsRelPath(value)) {
+      if (strcmp(value, ".") == 0)
+        snprintf(mapped, sizeof(mapped), "%s", root);
+      else if ((size_t)snprintf(mapped, sizeof(mapped), "%s/%s", root, value) >= sizeof(mapped))
+        return;
+      configApplyLine(c, key, mapped);
+      return;
+    }
+    configApplyLine(c, key, value);
+    return;
+  }
+  if (strncmp(key, "embedded.", 9) == 0) {
+    /* embedded.<n>.src = konten proyek (prefix root proyek); .file/.dir/
+       .extract dst lintas-proyek (apa adanya, relatif root workspace). */
+    size_t kl = strlen(key);
+    if (kl >= 4 && strcmp(key + kl - 4, ".src") == 0 && wsIsRelPath(value)) {
+      if (strcmp(value, ".") == 0)
+        snprintf(mapped, sizeof(mapped), "%s", root);
+      else if ((size_t)snprintf(mapped, sizeof(mapped), "%s/%s", root, value) >= sizeof(mapped))
+        return;
+      configApplyLine(c, key, mapped);
+      return;
+    }
+    configApplyLine(c, key, value);
+    return;
+  }
+  if (strncmp(key, "library", 7) == 0 && (key[7] == '\0' || key[7] == '.')) {
+    /* library.<os> = <nama proyek> -> path artifact; item non-proyek
+       (ssl, m, pthread, ...) lewat apa adanya. */
+    if (wsLibraryValue(m, p, value, mapped, sizeof(mapped))) configApplyLine(c, key, mapped);
+    return;
+  }
+  /* Lainnya (compiler/flags/defines/std/exclude/output./clean./progress/
+     foreground/target/depends_on): diterapkan apa adanya. */
+  configApplyLine(c, key, value);
+}
+
+/* cdeps -> `library = <dep>/<libDir>/lib<name>.a` + `headers = <dep>/<dir>`
+   (keduanya relatif root workspace; tanpa ../ — tidak ada chdir). */
+static void wsApplyCdeps(const WsModel *m, const WsProject *p, Config *c) {
+  List deps = {0};
+  bool found = false;
   for (int j = 0; j < p->lines.count; j++) {
     const char *ln = p->lines.items[j];
     if (strncmp(ln, "cdeps = ", 8) != 0) continue;
@@ -818,181 +952,98 @@ static bool wsEmitCdeps(const WsModel *m, const WsProject *p, char *body, size_t
     }
   }
   if (!found) {
-    listFree(&ownHeaders);
-    return true;
+    listFree(&deps);
+    return;
   }
-
   for (int j = 0; j < deps.count; j++) {
     int di = wsFindProject(m, deps.items[j]);
     const WsProject *dep = &m->projects[di];
     char mapped[WS_LINE_LEN];
-    if (!wsLibraryValue(m, p, dep->name, mapped, sizeof(mapped))) continue;
-    char line[WS_LINE_LEN * 2];
-    int written = snprintf(line, sizeof(line), "library = %s", mapped);
-    if (written < 0 || (size_t)written >= sizeof(line)) continue;
-    if (strlen(body) + strlen(line) + 2 > cap) {
-      listFree(&deps);
-      listFree(&hdirs);
-      listFree(&ownHeaders);
-      return false;
-    }
-    strcat(body, line);
-    strcat(body, "\n");
-    /* Header publik proyek dep — jangan duplikasi dengan own/terlanjur. */
+    if (wsLibraryValue(m, p, dep->name, mapped, sizeof(mapped)))
+      configApplyLine(c, "library", mapped);
     List depHeaders = {0};
     wsProjectHeaderDirs(dep, &depHeaders);
-    for (int k = 0; k < depHeaders.count; k++) {
-      const char *hd = depHeaders.items[k];
-      if (wsListHas(&hdirs, hd) || wsListHas(&ownHeaders, hd)) continue;
-      listAdd(&hdirs, hd);
+    if (depHeaders.count > 0) {
+      char joined[WS_LINE_LEN * 4];
+      size_t off = 0;
+      off += (size_t)snprintf(joined + off, sizeof(joined) - off, "%s", depHeaders.items[0]);
+      for (int k = 1; k < depHeaders.count && off < sizeof(joined) - 2; k++)
+        off += (size_t)snprintf(joined + off, sizeof(joined) - off, ", %s", depHeaders.items[k]);
+      configApplyLine(c, "headers", joined);
     }
     listFree(&depHeaders);
   }
-
-  if (hdirs.count > 0) {
-    char line[WS_LINE_LEN * 4];
-    size_t off = 0;
-    off += (size_t)snprintf(line + off, sizeof(line) - off, "headers = ");
-    for (int k = 0; k < hdirs.count; k++) {
-      if (k > 0) off += (size_t)snprintf(line + off, sizeof(line) - off, ", ");
-      off += (size_t)snprintf(line + off, sizeof(line) - off, "%s", hdirs.items[k]);
-      if (off >= sizeof(line) - 2) break;
-    }
-    if (strlen(body) + off + 2 > cap) {
-      listFree(&deps);
-      listFree(&hdirs);
-      listFree(&ownHeaders);
-      return false;
-    }
-    strcat(body, line);
-    strcat(body, "\n");
-  }
   listFree(&deps);
-  listFree(&hdirs);
-  listFree(&ownHeaders);
-  return true;
 }
 
-/* Tulis file hanya bila isinya berubah — mtime stabil agar cache config
-   & fast path tidak miss sia-sia. */
-static bool wsWriteIfChanged(const char *path, const char *body) {
-  bool same = false;
-  FILE *rf = fopen(path, "rb");
-  if (rf) {
-    char old[16384];
-    size_t got = fread(old, 1, sizeof(old), rf);
-    fclose(rf);
-    same = (got == strlen(body)) && memcmp(old, body, got) == 0;
+/* Susun Config proyek `idx` dari model Buildfile.ws — tanpa file sintesis,
+   tanpa loadConfig. Urutan: defaults -> baris bersama -> baris proyek ->
+   cdeps -> fixup output/konvensi -> configFinalize -> resolveCompiler
+   (dipanggil pemanggil, wsRunProject). */
+static bool wsBuildConfig(const WsModel *m, int idx, Config *c) {
+  const WsProject *p = &m->projects[idx];
+  if (!p->root[0]) return false;
+  *c = configDefaults();
+
+  for (int pass = 0; pass < 2; pass++) {
+    const List *lines = pass == 0 ? &m->commonLines : &p->lines;
+    for (int i = 0; i < lines->count; i++) {
+      char buf[WS_LINE_LEN * 2];
+      char key[WS_LINE_LEN];
+      if (strlen(lines->items[i]) >= sizeof(buf)) continue;
+      copyStr(buf, sizeof(buf), lines->items[i]);
+      char *val = NULL;
+      if (!wsSplitKV(buf, key, sizeof(key), &val)) continue;
+      wsApplyLine(m, p, c, key, val, pass == 0);
+    }
   }
-  if (same) return true;
-  FILE *wf = fopen(path, "w");
-  if (!wf) {
-    fprintf(stderr, "rbot: cannot write %s\n", path);
-    return false;
+  wsApplyCdeps(m, p, c);
+
+  const char *root = p->root[0] ? p->root : ".";
+  /* Output root-centric: object di build/<proyek> (agar nama source antar-
+     proyek tidak bertabrakan); bin/ & lib/ sudah root lewat default. */
+  if (strcmp(c->outBuildDir, "build") == 0)
+    snprintf(c->outBuildDir, sizeof(c->outBuildDir), "build/%s", p->name);
+  /* Nama binary default = nama proyek (bukan basename cwd = root ws). */
+  if (!c->outBinaryName[0]) copyStr(c->outBinaryName, sizeof(c->outBinaryName), p->name);
+  /* Konvensi sources/headers berbasis root PROYEK — configFinalize berjalan
+     dengan cwd root workspace, jadi defaults disediakan dahulu. */
+  if (c->sources.count == 0) {
+    char defSrc[MAX_PATH * 2];
+    if (strcmp(root, ".") == 0)
+      snprintf(defSrc, sizeof(defSrc), "src");
+    else
+      snprintf(defSrc, sizeof(defSrc), "%s/src", root);
+    listAdd(&c->sources, defSrc);
   }
-  fputs(body, wf);
-  fclose(wf);
-  return true;
-}
+  /* Workspace-root include/ is conventional, even with explicit headers. */
+  if (fsDirExists("include")) {
+    bool present = false;
+    for (int i = 0; i < c->headerPublic.count; i++)
+      if (strcmp(c->headerPublic.items[i], "include") == 0) present = true;
+    if (!present) listAdd(&c->headerPublic, "include");
+  }
+  bool hdrDeclared = c->headerPublic.count > 0;
+  if (!hdrDeclared) {
+    char incDir[MAX_PATH * 2];
+    if (strcmp(root, ".") == 0)
+      snprintf(incDir, sizeof(incDir), "include");
+    else
+      snprintf(incDir, sizeof(incDir), "%s/include", root);
+    if (fsDirExists(incDir)) listAdd(&c->headerPublic, incDir);
+  }
+  int hpBefore = c->headerPublic.count;
 
-static bool wsSynthesize(const WsModel *m, const char *outDir, const char *wsName) {
-  mkdirs(outDir);
-  for (int i = 0; i < m->projectCount; i++) {
-    const WsProject *p = &m->projects[i];
+  configFinalize(c);
 
-    /* Bandingkan isi lama vs baru: hanya tulis ulang bila berubah agar
-       mtime stabil (cache config & fast path tidak miss sia-sia). */
-    size_t n = 4096;
-    for (int j = 0; j < m->commonLines.count; j++)
-      n += strlen(m->commonLines.items[j]) + 1;
-    for (int j = 0; j < p->lines.count; j++)
-      n += strlen(p->lines.items[j]) + 1;
-    n += (size_t)WS_MAX_PROJECTS * WS_LINE_LEN * 2;
-    char *body = malloc(n);
-    if (!body) return false;
-    body[0] = '\0';
-
-    char hdr[192];
-    snprintf(hdr, sizeof(hdr), "/* Generated by rbot from %s — project '%s'. Do not edit. */\n",
-             wsName, p->name);
-    strcat(body, hdr);
-    strcat(body, "use project\n\noutput as o\nclean as c\n\n");
-    /* root = ".": tiap proyek dieksekusi dengan cwd = root proyeknya
-       (wsExecOne), jadi root tetap "kualifikasi" tanpa menonaktifkan
-       fastState (yang menuntut root == "."). */
-    strcat(body, "root = .\n\n");
-    for (int j = 0; j < m->commonLines.count; j++) {
-      strcat(body, m->commonLines.items[j]);
-      strcat(body, "\n");
-    }
-    char mergedFiles[WS_MAX_PROJECTS * WS_LINE_LEN * 2];
-    if (!wsPackMergeInfo(m, p, mergedFiles, sizeof(mergedFiles))) {
-      free(body);
-      return false;
-    }
-    for (int j = 0; j < p->lines.count; j++) {
-      const char *ln = p->lines.items[j];
-      if (strncmp(ln, "cdeps = ", 8) == 0) continue; /* dikonsumsi wsEmitCdeps */
-      if (strncmp(ln, "pack.merge = ", 13) == 0) continue;
-      if (strncmp(ln, "pack.files = ", 13) == 0 && mergedFiles[0]) {
-        char mergedLine[WS_LINE_LEN * 2 + 32];
-        int written = snprintf(mergedLine, sizeof(mergedLine), "%s, %s", ln, mergedFiles);
-        if (written < 0 || (size_t)written >= sizeof(mergedLine)) {
-          free(body);
-          return false;
-        }
-        strcat(body, mergedLine);
-        strcat(body, "\n");
-        continue;
-      }
-      if (strncmp(ln, "library.", 8) == 0) {
-        const char *eq = strchr(ln, '=');
-        if (eq) {
-          char key[WS_LINE_LEN], value[WS_LINE_LEN], mapped[WS_LINE_LEN * 2];
-          size_t kl = (size_t)(eq - ln);
-          if (kl < sizeof(key)) {
-            memcpy(key, ln, kl);
-            key[kl] = '\0';
-            snprintf(value, sizeof(value), "%s", eq + 1);
-            char *k = trim(key);
-            char *v = trim(value);
-            if (wsLibraryValue(m, p, v, mapped, sizeof(mapped))) {
-              char rewritten[WS_LINE_LEN * 3];
-              snprintf(rewritten, sizeof(rewritten), "%s = %s", k, mapped);
-              strcat(body, rewritten);
-              strcat(body, "\n");
-              continue;
-            }
-          }
-        }
-      }
-      strcat(body, ln);
-      strcat(body, "\n");
-    }
-
-    /* cdeps: library artifact + folder header proyek lain — satu key
-       (lihat wsEmitCdeps). Dipanggil SETELAH baris proyek supaya pengaturan
-       eksplisit user tetap menang di parser (last-wins tidak relevan untuk
-       list, tapi posisi baris yang konsisten lebih mudah dibaca). */
-    if (!wsEmitCdeps(m, p, body, n)) {
-      free(body);
-      return false;
-    }
-
-    /* Buildfile utama (fase build: library & binary pass) — pack.* proyek
-       tetap berjalan normal di kedua jalur cmdBuild (kemasan per-proyek ke
-       project/dist). Release TIDAK disintesis di sini: fase release
-       menjalankan pack engine langsung dengan konfigurasi release.*
-       (lihat wsRelease). */
-    /* outDir (2*MAX_PATH) + WS_NAME_LEN + "/"+".Buildfile" — tak pernah
-       terpotong (nama proyek maks. WS_NAME_LEN-1). */
-    char path[WS_PATH_LEN + WS_NAME_LEN + 16]; /* outDir sekarang WS_PATH_LEN */
-    snprintf(path, sizeof(path), "%s/%s.Buildfile", outDir, p->name);
-    if (!wsWriteIfChanged(path, body)) {
-      free(body);
-      return false;
-    }
-    free(body);
+  /* configFinalize bisa menyuntik default "include" telanjang (berbasis
+     cwd root workspace) bila proyek tak mendeklarasikan headers — buang;
+     default sah hanya <root>/include di atas. */
+  if (!hdrDeclared && c->headerPublic.count > hpBefore && c->headerPublic.count > 0 &&
+      strcmp(c->headerPublic.items[0], "include") == 0) {
+    memmove(c->headerPublic.items, c->headerPublic.items + 1,
+            sizeof(char *) * (size_t)(c->headerPublic.count - 1));
+    c->headerPublic.count--;
   }
   return true;
 }
@@ -1039,49 +1090,66 @@ static bool wsProjectArchiveOnly(const WsProject *p) {
   return false;
 }
 
-static int wsExecOne(const WsModel *m, const char *name, const char *cmd, int jobs,
-                     const char *wsDir, bool libOnly) {
+/*
+ * Jalankan SATU proyek dari root workspace — pengganti wsExecOne (yang
+ * dulu chdir ke root proyek lalu memanggil cmdBuildEx; keduanya kini
+ * dilarang design/workspace_v1.md):
+ *   cmd "clean" -> Config in-memory (wsBuildConfig) + cmdsCleanRun;
+ *   cmd "build" -> label pass -> fast-state -> wsBuildConfig ->
+ *                  resolveCompiler -> cmdsBuildPassRun (library/binary).
+ * State per proyek ditandai cmdsStateSetWsProject (.rbot/workspace/<n>.*).
+ */
+static int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
+                        bool libOnly) {
   int idx = wsFindProject(m, name);
   if (idx < 0) return 1;
-  if (!m->projects[idx].root[0]) return 1;
+  const WsProject *p = &m->projects[idx];
+  if (!p->root[0]) return 1;
 
-  /* Buildfile hasil sintesis: <wsDir>/.rbot/workspace/<nama>.Buildfile.
-     Path di dalamnya dievaluasi terhadap CWD saat build — dan wsExecOne
-     selalu masuk ke root proyek dulu — jadi path relatif = relatif root
-     PROYEK, bukan root workspace. Referensi antar-proyek memakai ../
-     (mis. ../rupamod/dist/x.tar.gz). */
-  char bf[WS_PATH_LEN];
-  snprintf(bf, sizeof(bf), "%s/%s/%s.Buildfile", wsDir, WORKSPACE_SYNTH_DIR, name);
+  cmdsStateSetWsProject(name);
 
   if (strcmp(cmd, "clean") == 0) {
-    if (!fsSetCwd(m->projects[idx].root)) {
-      fprintf(stderr, "rbot: cannot enter project root '%s'\n", m->projects[idx].root);
-      return 1;
-    }
-    int rc = cmdClean(bf);
-    fsSetCwd(wsDir);
+    Config c;
+    int rc = wsBuildConfig(m, idx, &c) ? cmdsCleanRun(&c) : 1;
+    cmdsStateSetWsProject("");
     return rc;
   }
 
-  /* build: cwd ke root proyek agar state (.rbot/, build/, bin/, lib/)
-     muncul di root proyek masing-masing; cmdBuild chdir lagi ke root
-     (nilai sama) dan root = "." membuat fastState tetap aktif. */
-  if (!fsSetCwd(m->projects[idx].root)) {
-    fprintf(stderr, "rbot: cannot enter project root '%s'\n", m->projects[idx].root);
-    return 1;
-  }
-  /* Label fase: proyek kemasan (output.binary = false) fase 1-nya adalah
-     ARSIP (buildEmbedded), bukan library — label harus mencerminkan itu. */
+  /* Label fase: proyek kemasan (output.binary = false) fase 1-nya ARSIP. */
   const char *passLabel = "binary";
-  if (libOnly)
-    passLabel = wsProjectArchiveOnly(&m->projects[idx]) ? "archive" : "library";
+  if (libOnly) passLabel = wsProjectArchiveOnly(p) ? "archive" : "library";
   printf("\n%s Project : %s\n", repPrefix(), name);
   printf("%s Fase    : %s\n", repPrefix(), passLabel);
-  wsModeSet(true);
-  int rc = cmdBuildEx(jobs, bf, libOnly);
-  if (rc != 0) cmdsStatMemoReset(); /* build gagal: output mungkin sudah berubah sebagian */
-  wsModeSet(false);
-  fsSetCwd(wsDir);
+
+  /* Fast no-op per fase — padanan bagian atas cmdBuildEx. Label META
+     stabil per proyek (file sintesis sudah tidak ada; label lama berupa
+     path .Buildfile gagal validasi -> rebuild penuh sekali saat migrasi). */
+  char bfLabel[WS_NAME_LEN + 32];
+  snprintf(bfLabel, sizeof(bfLabel), "Buildfile.ws:%s", name);
+  if (wsFastStateValid(bfLabel, libOnly)) {
+    wsLogFastOk[idx] = true;
+    cmdsStateSetWsProject("");
+    return 0;
+  }
+
+  Config c;
+  if (!wsBuildConfig(m, idx, &c) || !resolveCompiler(&c)) {
+    cmdsStateSetWsProject("");
+    return 1;
+  }
+  procSetForeground(jobs > 1 ? false : c.foreground);
+
+  /* pack.* diabaikan (v1): proyek kemasan tanpa arsip & tanpa binary =
+     tidak ada target build — lewati, jangan gagalkan seluruh run. */
+  if (!c.binary && c.embCount == 0) {
+    printf("%s Skipped : tanpa target build (pack.* diabaikan)\n", repPrefix());
+    cmdsStateSetWsProject("");
+    return 0;
+  }
+
+  int rc = cmdsBuildPassRun(jobs, c, bfLabel, libOnly);
+  if (rc != 0) cmdsStatMemoReset(); /* build gagal: output mungkin berubah sebagian */
+  cmdsStateSetWsProject("");
   return rc;
 }
 
@@ -1237,27 +1305,29 @@ static int wsRelease(WsModel *m, int jobs, const char *wsDir) {
       for (int l = 0; l < pp->lines.count; l++) {
         const char *ln = pp->lines.items[l];
         if (strncmp(ln, "output.libraryName = ", 21) == 0 && !isArchive) {
+          /* Library di root workspace: lib/lib<name>.a/.so (design v1). */
           char libEntry[WS_LINE_LEN * 2];
           const char *libName = ln + 21;
-          int w1 = snprintf(libEntry, sizeof(libEntry), "%s/lib/lib%s.a", pp->root, libName);
+          int w1 = snprintf(libEntry, sizeof(libEntry), "lib/lib%s.a", libName);
           if (w1 > 0 && (size_t)w1 < sizeof(libEntry) && !listAdd(&c.pack.files, libEntry))
             goto oom;
           char shEntry[WS_LINE_LEN * 4];
-          int w2 = snprintf(shEntry, sizeof(shEntry), "%s/lib/lib%s.so", pp->root, libName);
+          int w2 = snprintf(shEntry, sizeof(shEntry), "lib/lib%s.so", libName);
           if (w2 > 0 && (size_t)w2 < sizeof(shEntry) && !listAdd(&c.pack.files, shEntry)) goto oom;
         }
       }
       if (!isArchive) {
-        /* nama binary: dari baris output.binaryName, bila ada */
+        /* Binary di root workspace: bin/<binaryName>; default = nama proyek
+           (sama dengan wsBuildConfig). */
+        const char *binName = NULL;
         for (int l = 0; l < pp->lines.count; l++) {
           const char *ln = pp->lines.items[l];
-          if (strncmp(ln, "output.binaryName = ", 20) == 0) {
-            char binEntry[WS_LINE_LEN * 3];
-            int w = snprintf(binEntry, sizeof(binEntry), "%s/bin/%s", pp->root, ln + 20);
-            if (w > 0 && (size_t)w < sizeof(binEntry) && !listAdd(&c.pack.files, binEntry))
-              goto oom;
-          }
+          if (strncmp(ln, "output.binaryName = ", 20) == 0) binName = ln + 20;
         }
+        if (!binName) binName = pp->name;
+        char binEntry[WS_LINE_LEN * 3];
+        int w = snprintf(binEntry, sizeof(binEntry), "bin/%s", binName);
+        if (w > 0 && (size_t)w < sizeof(binEntry) && !listAdd(&c.pack.files, binEntry)) goto oom;
       }
     }
   }
@@ -1343,11 +1413,12 @@ static int wsBuildWorklist(const WsModel *m, const unsigned char *needed, WsWork
 /* Serial: persis perilaku lama — penanda fase per anak, henti saat gagal. */
 static int wsRunBatchSerial(const WsModel *m, const WsWork *batch, int n, int jobs,
                             const char *cmd, const char *wsDir, bool libOnly) {
+  (void)wsDir; /* proyek dieksekusi in-process dari root workspace */
   const char *pre = libOnly ? "ws-libpass-pre" : "ws-binpass-pre";
   const char *post = libOnly ? "ws-libpass-post" : "ws-binpass-post";
   for (int i = 0; i < n; i++) {
     profMark(pre);
-    int rc = wsExecOne(m, batch[i].name, cmd, jobs, wsDir, libOnly);
+    int rc = wsRunProject(m, batch[i].name, cmd, jobs, libOnly);
     profMark(post);
     if (rc != 0) return rc;
   }
@@ -1363,6 +1434,7 @@ static int wsRunBatchSerial(const WsModel *m, const WsWork *batch, int n, int jo
    dicetak sekali per batch (bukan per anak). */
 static int wsRunBatchFork(const WsModel *m, const WsWork *batch, int n, int jobs,
                           const char *cmd, const char *wsDir, bool libOnly) {
+  (void)wsDir; /* proyek dieksekusi in-process dari root workspace */
   const char *pre = libOnly ? "ws-libpass-pre" : "ws-binpass-pre";
   const char *post = libOnly ? "ws-libpass-post" : "ws-binpass-post";
   mkdirs(".rbot");
@@ -1392,7 +1464,7 @@ static int wsRunBatchFork(const WsModel *m, const WsWork *batch, int n, int jobs
       dup2(fds[i], STDOUT_FILENO);
       dup2(fds[i], STDERR_FILENO);
       if (fds[i] > STDERR_FILENO) close(fds[i]);
-      int crc = wsExecOne(m, batch[i].name, cmd, pj, wsDir, libOnly);
+      int crc = wsRunProject(m, batch[i].name, cmd, pj, libOnly);
       fflush(NULL);
       _exit(crc); /* bukan exit(): hindari atexit ganda setelah fork */
     }
@@ -1407,7 +1479,7 @@ static int wsRunBatchFork(const WsModel *m, const WsWork *batch, int n, int jobs
       if (crc != 0 && rc == 0) rc = crc;
     } else {
       /* mkstemp/fork gagal untuk slot ini: kerjakan serial (stdout asli). */
-      int crc = wsExecOne(m, batch[i].name, cmd, jobs, wsDir, libOnly);
+      int crc = wsRunProject(m, batch[i].name, cmd, jobs, libOnly);
       if (crc != 0 && rc == 0) rc = crc;
     }
     if (fds[i] >= 0) {
@@ -1438,12 +1510,246 @@ static int wsRunBatchFork(const WsModel *m, const WsWork *batch, int n, int jobs
    untuk lingkungan native yang bisa diuntungkan — ukur dulu sebelum memakai. */
 static int wsRunBatch(const WsModel *m, const WsWork *batch, int n, int jobs, const char *cmd,
                       const char *wsDir, bool libOnly) {
+  (void)wsDir; /* proyek dieksekusi in-process dari root workspace */
   if (n <= 0) return 0;
 #ifndef _WIN32
   if (jobs > 1 && n > 1 && getenv("RBOT_WS_PAR"))
     return wsRunBatchFork(m, batch, n, jobs, cmd, wsDir, libOnly);
 #endif
   return wsRunBatchSerial(m, batch, n, jobs, cmd, wsDir, libOnly);
+}
+
+/* ==================== workspace_log + CompDB merged ==================== */
+
+/* Indeks no-op & CompDB (design/workspace_v1.md §No-op dan CompDB): satu
+   blok per proyek — (2) hash konfigurasi Buildfile.ws, (3) fingerprint
+   daftar source dari snapshot <n>.src, (4) hash isi compile_commands.json
+   terakhir (sama untuk seluruh workspace). Hanya dua keputusan: (a) proyek
+   fast-hit + (2)+(3) identik -> daftar source dimuat dari snapshot tanpa
+   re-scan; (b) (4) identik + file ada -> CompDB tidak ditulis ulang. */
+#define WS_LOG_FILE ".rbot/workspace_log"
+
+static uint64_t wsFnv1a(uint64_t h, const void *data, size_t n) {
+  const unsigned char *p = (const unsigned char *)data;
+  for (size_t i = 0; i < n; i++) {
+    h ^= p[i];
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
+static uint64_t wsFnv1aStr(uint64_t h, const char *s) {
+  h = wsFnv1a(h, s, strlen(s));
+  const unsigned char sep = 0xff;
+  return wsFnv1a(h, &sep, 1);
+}
+
+/* Hash konfigurasi proyek (field 2): baris bersama + root override + baris
+   proyek — semua baris Buildfile.ws yang memengaruhinya. */
+static uint64_t wsLogCfgHash(const WsModel *m, int idx) {
+  uint64_t h = 1469598103934665603ULL;
+  for (int i = 0; i < m->commonLines.count; i++)
+    h = wsFnv1aStr(h, m->commonLines.items[i]);
+  h = wsFnv1aStr(h, m->projects[idx].root);
+  for (int i = 0; i < m->projects[idx].lines.count; i++)
+    h = wsFnv1aStr(h, m->projects[idx].lines.items[i]);
+  return h;
+}
+
+/* Hash isi file — 0 bila tak bisa dibaca/kosong. */
+static uint64_t wsLogFileHash(const char *path) {
+  FILE *f = fopen(path, "rb");
+  if (!f) return 0;
+  uint64_t h = 1469598103934665603ULL;
+  char buf[4096];
+  size_t n;
+  bool any = false;
+  while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+    h = wsFnv1a(h, buf, n);
+    any = true;
+  }
+  fclose(f);
+  return any ? h : 0;
+}
+
+static void wsLogSnapshotPath(char *out, size_t n, const char *name) {
+  snprintf(out, n, ".rbot/workspace/%s.src", name);
+}
+
+/* Baca entry log utk `name` (field 2/3/4). false bila log tak ada/tak cocok. */
+static bool wsLogReadEntry(const char *name, uint64_t *cfg, uint64_t *src, uint64_t *cdb) {
+  FILE *f = fopen(WS_LOG_FILE, "r");
+  if (!f) return false;
+  char line[512];
+  bool found = false;
+  if (fgets(line, sizeof(line), f) && strncmp(line, "RBOTWLOG1 ", 10) == 0) {
+    while (fgets(line, sizeof(line), f)) {
+      char pname[WS_NAME_LEN];
+      unsigned long long a = 0, b = 0, c = 0;
+      if (sscanf(line, "P %63s %llx %llx %llx", pname, &a, &b, &c) == 4 &&
+          strcmp(pname, name) == 0) {
+        *cfg = (uint64_t)a;
+        *src = (uint64_t)b;
+        *cdb = (uint64_t)c;
+        found = true;
+        break;
+      }
+    }
+  }
+  fclose(f);
+  return found;
+}
+
+/* Fingerprint compdb tercatat (field 4 entri mana pun — sama antarproyek);
+   0 bila log tidak ada / tak berisi entri. */
+static uint64_t wsLogCompdbFp(void) {
+  FILE *f = fopen(WS_LOG_FILE, "r");
+  if (!f) return 0;
+  char line[512];
+  uint64_t fp = 0;
+  while (fgets(line, sizeof(line), f)) {
+    char pname[WS_NAME_LEN];
+    unsigned long long a = 0, b = 0, c = 0;
+    if (sscanf(line, "P %63s %llx %llx %llx", pname, &a, &b, &c) == 4) {
+      fp = (uint64_t)c;
+      break;
+    }
+  }
+  fclose(f);
+  return fp;
+}
+
+/* Muat daftar source dari snapshot <n>.src TANPA re-scan (baris "S <path>").
+   Pemanggil hanya memanggil bila fast-state proyek valid DAN hash snapshot
+   cocok dengan log — source set dijamin tak berubah. */
+static bool wsLogLoadSrcs(const char *name, List *out) {
+  char path[WS_PATH_LEN];
+  wsLogSnapshotPath(path, sizeof(path), name);
+  FILE *f = fopen(path, "r");
+  if (!f) return false;
+  char line[WS_PATH_LEN + 32];
+  bool ok = fgets(line, sizeof(line), f) != NULL && strncmp(line, "RBOTWSLIST1 ", 12) == 0;
+  while (ok && fgets(line, sizeof(line), f)) {
+    size_t n = strlen(line);
+    if (n && line[n - 1] == '\n') line[n - 1] = '\0';
+    if (strncmp(line, "S ", 2) == 0)
+      ok = listAdd(out, line + 2);
+    else if (line[0])
+      ok = false;
+  }
+  fclose(f);
+  if (!ok || out->count == 0) {
+    listFree(out);
+    return false;
+  }
+  return true;
+}
+
+/* Tulis ulang workspace_log penuh (tmp + rename). */
+static void wsLogWrite(const WsModel *m, const uint64_t *cfgH, const uint64_t *srcH,
+                       uint64_t cdb) {
+  char cwd[WS_PATH_LEN];
+  if (!fsGetCwd(cwd, sizeof(cwd))) return;
+  mkdirs(".rbot");
+  FILE *f = fopen(WS_LOG_FILE ".tmp", "w");
+  if (!f) return;
+  fprintf(f, "RBOTWLOG1 %s\n", cwd);
+  for (int i = 0; i < m->projectCount; i++)
+    fprintf(f, "P %s %016llx %016llx %016llx\n", m->projects[i].name,
+            (unsigned long long)cfgH[i], (unsigned long long)srcH[i], (unsigned long long)cdb);
+  if (fclose(f) != 0) {
+    fsRemoveFile(WS_LOG_FILE ".tmp");
+    return;
+  }
+#ifdef _WIN32
+  fsRemoveFile(WS_LOG_FILE);
+#endif
+  if (rename(WS_LOG_FILE ".tmp", WS_LOG_FILE) != 0) fsRemoveFile(WS_LOG_FILE ".tmp");
+}
+
+/*
+ * wsCompdbRefresh — CompDB root merged SELURUH workspace + workspace_log:
+ *   1. Susun Config + daftar source tiap proyek (urutan topo). Proyek yang
+ *      fast-hit kali ini DAN cocok log (field 2+3) memuat source dari
+ *      snapshot <n>.src tanpa re-scan — keputusan (a).
+ *   2. Render/gabung ke SATU compile_commands.json di root; skip-write bila
+ *      fingerprint gabungan == field 4 log — keputusan (b); backstop cache/
+ *      blob di writeCompdbMulti.
+ *   3. Tulis ulang workspace_log.
+ * Tidak menyentuh build state apa pun — aman untuk `-g compdb` query-only.
+ * Return false bila gagal (pesan sudah dicetak).
+ */
+static bool wsCompdbRefresh(const WsModel *m) {
+  int n = m->projectCount;
+  Config *cfgs = (Config *)calloc((size_t)n, sizeof(Config));
+  List *srcs = (List *)calloc((size_t)n, sizeof(List));
+  uint64_t *cfgH = (uint64_t *)calloc((size_t)n, sizeof(uint64_t));
+  uint64_t *srcH = (uint64_t *)calloc((size_t)n, sizeof(uint64_t));
+  const Config **cps = (const Config **)calloc((size_t)n, sizeof(Config *));
+  List **sps = (List **)calloc((size_t)n, sizeof(List *));
+  if (!cfgs || !srcs || !cfgH || !srcH || !cps || !sps) {
+    free(cfgs);
+    free(srcs);
+    free(cfgH);
+    free(srcH);
+    free(cps);
+    free(sps);
+    return false;
+  }
+
+  bool ok = true;
+  int cnt = 0;
+  for (int i = 0; i < n && ok; i++) {
+    cfgH[i] = wsLogCfgHash(m, i);
+    if (!wsBuildConfig(m, i, &cfgs[i]) || !resolveCompiler(&cfgs[i])) {
+      fprintf(stderr, "rbot: workspace: gagal menyusun config '%s' (compdb)\n",
+              m->projects[i].name);
+      ok = false;
+      break;
+    }
+    /* CompDB hanya mewakili proyek yang mengompilasi source; proyek
+       kemasan (output.binary = false) & compdb=false tidak berkontribusi. */
+    if (!cfgs[i].binary || !compdbEnabled(&cfgs[i]) || cfgs[i].sources.count == 0) continue;
+
+    /* Keputusan (a): fast-hit + config cocok + snapshot tak berubah sejak
+       log ditulis -> muat daftar dari snapshot, tanpa walk. */
+    uint64_t logCfg = 0, logSrc = 0, logCdb = 0;
+    char snap[WS_PATH_LEN];
+    wsLogSnapshotPath(snap, sizeof(snap), m->projects[i].name);
+    bool reused = false;
+    if (wsLogFastOk[i] && wsLogReadEntry(m->projects[i].name, &logCfg, &logSrc, &logCdb) &&
+        logCfg == cfgH[i] && logSrc != 0 && logSrc == wsLogFileHash(snap))
+      reused = wsLogLoadSrcs(m->projects[i].name, &srcs[i]);
+    if (!reused) cmdsCollectSources(&cfgs[i], &srcs[i]);
+    srcH[i] = wsLogFileHash(snap); /* field 3: fingerprint snapshot (0 bila belum ada) */
+
+    if (srcs[i].count > 0) {
+      cps[cnt] = &cfgs[i];
+      sps[cnt] = &srcs[i];
+      cnt++;
+    }
+  }
+
+  uint64_t fp = 0;
+  if (ok && cnt > 0) {
+    fp = compdbMultiFingerprint(cps, sps, cnt);
+    /* Keputusan (b): hash CompDB tercatat identik + file ada -> tidak
+       ditulis ulang (tanpa render, tanpa sentuh disk). */
+    if (fp && fsFileExists("compile_commands.json") && wsLogCompdbFp() == fp)
+      printf("%s CompDB  : compile_commands.json unchanged (workspace)\n", repPrefix());
+    else
+      writeCompdbMulti(cps, sps, cnt);
+  }
+
+  if (ok) wsLogWrite(m, cfgH, srcH, fp);
+
+  free(cfgs);
+  free(srcs);
+  free(cfgH);
+  free(srcH);
+  free(cps);
+  free(sps);
+  return ok;
 }
 
 int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel) {
@@ -1453,11 +1759,25 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
     return 1;
   }
   WsModel m;
-  const char *wsName = NULL; /* dipakai wsSynthesize di bawah */
+  const char *wsName = NULL; /* diisi wsModelLoad: nama file ws (pesan) */
   if (!wsModelLoad(wsDir, &m, &wsName)) return 1;
   if (!wsTopoSort(&m)) {
     wsModelFree(&m);
     return 1;
+  }
+  memset(wsLogFastOk, 0, sizeof(wsLogFastOk));
+
+  /* `-g compdb` query-only: hasilkan CompDB merged SELURUH workspace +
+     perbarui workspace_log, TANPA build dan TANPA mengubah build state
+     (design/workspace_v1.md §No-op dan CompDB). `-w <nama>` tidak
+     membatasi: compdb selalu mewakili seluruh workspace. */
+  if (strcmp(cmd, "compdb") == 0) {
+    wsModeSet(true);
+    cmdsStatMemoSetCwd();
+    bool cok = wsCompdbRefresh(&m);
+    wsModeSet(false);
+    wsModelFree(&m);
+    return cok ? 0 : 1;
   }
 
   /* Dua mode (design/release.md revisi 2):
@@ -1523,13 +1843,9 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
     return 1;
   }
 
-  char synthDir[WS_PATH_LEN];
-  snprintf(synthDir, sizeof(synthDir), "%s/%s", wsDir, WORKSPACE_SYNTH_DIR);
-  if (!wsSynthesize(&m, synthDir, wsName)) {
-    wsModelFree(&m);
-    return 1;
-  }
-  profMark("workspace-parse+synth");
+  /* Config per proyek disusun di memori tiap pass (wsBuildConfig) —
+     tidak ada file sintesis (design/workspace_v1.md §Pemisahan Jalur). */
+  profMark("workspace-parse");
 
   unsigned char needed[WS_MAX_PROJECTS] = {0};
   if (releaseOnly || (only && *only)) {
@@ -1564,6 +1880,15 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
   /* Gerbang workspace per-closure: hanya entri milik proyek needed yang
      di-stat — `-w <nama>` tidak membayar validasi seluruh workspace. */
   if (strcmp(cmd, "build") == 0) {
+    /* .rbot di direktori anggota = state lama: diabaikan + peringatan
+       (design/workspace_v1.md: state hanya di root workspace). */
+    for (int i = 0; i < m.projectCount; i++) {
+      char mp[WS_PATH_LEN];
+      snprintf(mp, sizeof(mp), "%s/%s/.rbot", wsDir, m.projects[i].root);
+      if (fsDirExists(mp))
+        fprintf(stderr, "rbot: workspace: %s/.rbot diabaikan — state workspace di root (%s)\n",
+                m.projects[i].root, WS_STATE_FILE);
+    }
     wsStateValidFiltered(&m, needed);
     /* Status gerbang akurat (per closure yang dibangun), dihitung di sini setelah
        parse agar tidak mengubah urutan validasi build. */
@@ -1577,6 +1902,16 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
   int wcount = wsBuildWorklist(&m, needed, work);
 
   if (strcmp(cmd, "build") == 0) {
+    /* Mode ws aktif sekali per run: cache sumber (.rbot/ws.src) dipakai
+       lintas proyek — satu traversal per direktori (design §Pipeline). */
+    wsModeSet(true);
+    cmdsStatMemoSetCwd(); /* memo stat ber-key cwd root workspace */
+    /* CompDB harus tersedia meskipun kompilasi/link gagal. */
+    if (!wsCompdbRefresh(&m)) {
+      wsModeSet(false);
+      wsModelFree(&m);
+      return 1;
+    }
     /* FASE 1 — library pass: tiap proyek mengkompilasi source-nya dan
        mengemas lib<name>.a/.so TANPA link binary. Dipecah per level
        dependensi: proyek pada level sama tidak saling butuh hasil build
@@ -1603,8 +1938,9 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
   } else {
     /* clean: satu pass serial (binary pass), tanpa fase library. */
     for (int i = 0; rc == 0 && i < wcount; i++)
-      rc = wsExecOne(&m, work[i].name, cmd, jobs, wsDir, false);
+      rc = wsRunProject(&m, work[i].name, cmd, jobs, false);
   }
+  if (strcmp(cmd, "build") == 0) wsModeSet(false);
 
   /* FASE 3 — release pass: pack SATU paket workspace pada root workspace,
      output ke dist/ (design/release.md revisi 2). Bila tidak ada section
@@ -1652,10 +1988,11 @@ bool workspaceFileExists(void) {
 /* ==================== workspace state (design/workspace.md) ==================== */
 
 /*
- * workspace.state (design/workspace.md): stamp SEMUA input seluruh workspace,
- * dalam path absolut, diambil dari state yang sudah ditulis build proyek:
- *   .rbot/ws.state, .rbot/ws.lib.state  (F/D/X per proyek)
- *   .rbot/ws.src                        (folder + file sumber yang ditelusuri)
+ * workspace.state (design/workspace_v1.md): stamp SEMUA input seluruh
+ * workspace, dalam path absolut, diambil dari state yang sudah ditulis
+ * build proyek:
+ *   .rbot/workspace/<n>.ws.state / <n>.ws.lib.state  (F/D/X per proyek)
+ *   .rbot/ws.src                                     (cache sumber di root)
  * Baris pertama: RBOTWSG1 <wsDir absolut>. Lalu baris F/D/X seperti ws.state.
  * `cold` = stamp tidak lagi cocok. Path absolut membuat hasil stat ini ikut
  * masuk memo proses, sehingga validator per proyek tidak men-stat ulang.
@@ -1758,10 +2095,10 @@ static void wsGateReadState(List *out, const char *projDir, const char *file) {
   fclose(fp);
 }
 
-/* Folder sumber & file yang ditelusuri (ws.src): D dan S. Mtime D dari walk. */
-static void wsGateReadSrc(List *out, const char *projDir, const List *excl) {
-  char file[WS_PATH_LEN];
-  wsPathJoin(file, sizeof(file), projDir, ".rbot/ws.src");
+/* Folder sumber & file yang ditelusuri (.rbot/ws.src — SATU cache di root
+   workspace untuk seluruh proyek): D dan S. Mtime D dari walk. Path di
+   dalam file relatif root workspace -> baseDir. */
+static void wsGateReadSrc(List *out, const char *baseDir, const char *file, const List *excl) {
   FILE *fp = fopen(file, "r");
   if (!fp) return;
   char line[WS_GATE_PATH * 2];
@@ -1771,7 +2108,7 @@ static void wsGateReadSrc(List *out, const char *projDir, const List *excl) {
     long long mt = 0;
     if (line[0] == 'D' && sscanf(line, "D %lld %" WS_SCAN "s", &mt, rel) == 2) {
       if (wsGateIsState(rel) || wsGateExcluded(excl, rel)) continue;
-      wsPathJoin(abs, sizeof(abs), projDir, rel);
+      wsPathJoin(abs, sizeof(abs), baseDir, rel);
       /* Mtime folder diambil SEKARANG (bukan dari catatan walk): folder bisa berubah
          setelah walk dalam run yang sama, dan gerbang harus memuat keadaan akhir. */
       int64_t cur = -1;
@@ -1781,7 +2118,7 @@ static void wsGateReadSrc(List *out, const char *projDir, const List *excl) {
       (void)mt;
     } else if (line[0] == 'S' && sscanf(line, "S %" WS_SCAN "s", rel) == 1) {
       if (wsGateIsState(rel) || wsGateExcluded(excl, rel)) continue;
-      wsPathJoin(abs, sizeof(abs), projDir, rel);
+      wsPathJoin(abs, sizeof(abs), baseDir, rel);
       wsGateAdd(out, 'F', abs, 0, 0); /* mtime file sumber: diambil saat save (lihat wsStateSave) */
     }
   }
@@ -1829,18 +2166,22 @@ static void wsStateSave(const WsModel *m, const char *wsDir) {
   wsGateAdd(&items, 'F', bf, bm, bs);
 
   for (int i = 0; i < m->projectCount; i++) {
-    const char *root = m->projects[i].root[0] ? m->projects[i].root : ".";
-    char projDir[WS_GATE_PATH];
-    if (strcmp(root, ".") == 0) snprintf(projDir, sizeof(projDir), "%s", wsAbs);
-    else wsPathJoin(projDir, sizeof(projDir), wsAbs, root);
-    char f1[WS_GATE_PATH], f2[WS_GATE_PATH];
-    wsPathJoin(f1, sizeof(f1), projDir, ".rbot/ws.state");
-    wsPathJoin(f2, sizeof(f2), projDir, ".rbot/ws.lib.state");
-    wsGateReadState(&items, projDir, f1);
-    wsGateReadState(&items, projDir, f2);
+    /* State proyek kini di root: .rbot/workspace/<n>.ws[.lib].state — path
+       DI DALAM file relatif root workspace (satu cwd), jadi base join =
+       wsAbs, bukan root proyek. */
+    char f1[WS_GATE_PATH * 2], f2[WS_GATE_PATH * 2];
+    snprintf(f1, sizeof(f1), "%s/.rbot/workspace/%s.ws.state", wsAbs, m->projects[i].name);
+    snprintf(f2, sizeof(f2), "%s/.rbot/workspace/%s.ws.lib.state", wsAbs, m->projects[i].name);
+    wsGateReadState(&items, wsAbs, f1);
+    wsGateReadState(&items, wsAbs, f2);
+  }
+  /* .rbot/ws.src: satu cache sumber di root untuk seluruh proyek. */
+  {
     List excl = {0};
-    wsGateCollectExcludes(&m->projects[i], &excl);
-    wsGateReadSrc(&items, projDir, &excl);
+    for (int i = 0; i < m->projectCount; i++) wsGateCollectExcludes(&m->projects[i], &excl);
+    char srcFile[WS_GATE_PATH * 2];
+    wsPathJoin(srcFile, sizeof(srcFile), wsAbs, ".rbot/ws.src");
+    wsGateReadSrc(&items, wsAbs, srcFile, &excl);
     listFree(&excl);
   }
 
@@ -1992,6 +2333,137 @@ static bool wsStateValidFiltered(const WsModel *m, const unsigned char *needed) 
   free(pref);
   wsGateStartValid = ok;
   return ok;
+}
+
+/* ==================== guard direktori anggota ======================== */
+
+/* Batas naik ke parent saat mencari Buildfile.ws induk — jauh melebihi
+   kedalaman workspace wajar, tetapi tetap terbatas supaya tidak pernah
+   menembus ke root filesystem. */
+#define WS_MEMBER_MAX_UP 16
+
+/* Normalisasi path ("<ws>/a/../b/./c" -> "<ws>/b/c") secara leksikal atas
+   string — cukup karena semua kandidat path dibangun dari fsGetCwd (sudah
+   dinormalkan OS) + penyusunan string, tanpa resolusi symlink. */
+static void wsPathCanon(char *s) {
+  bool abs = s[0] == '/';
+  const char *seg[128];
+  int top = 0;
+  bool overflow = false;
+  char *p = s + (abs ? 1 : 0);
+  while (*p && !overflow) {
+    char *start = p;
+    while (*p && *p != '/') p++;
+    if (*p) *p++ = '\0';
+    if (strcmp(start, ".") == 0) continue;
+    if (strcmp(start, "..") == 0) {
+      if (top > 0 && strcmp(seg[top - 1], "..") != 0)
+        top--; /* pop segmen biasa */
+      else if (abs)
+        continue; /* ".." di atas root filesystem: buang */
+      else if (top < 128)
+        seg[top++] = start; /* path relatif: ".." dipertahankan */
+      else
+        overflow = true;
+      continue;
+    }
+    if (!*start) continue;
+    if (top < 128)
+      seg[top++] = start;
+    else
+      overflow = true;
+  }
+  if (overflow) return; /* path absurd — biarkan apa adanya */
+
+  char *w = s;
+  if (abs) *w++ = '/';
+  for (int i = 0; i < top; i++) {
+    size_t l = strlen(seg[i]);
+    if (i) *w++ = '/';
+    memmove(w, seg[i], l); /* selalu mundur: aman in-place */
+    w += l;
+  }
+  if (w == s) *w++ = '.';
+  *w = '\0';
+}
+
+/*
+ * wsMemberCwdDetect — true bila cwd berada DI DALAM direktori proyek anggota
+ * sebuah workspace INDUK (Buildfile.ws di salah satu parent). Keanggotaan
+ * divalidasi lewat model Buildfile.ws induk (parse daftar projects + root) —
+ * keberadaan file workspace di parent saja TIDAK cukup (design/
+ * workspace_v1.md aturan 1 & 5); proyek standalone di luar workspace tidak
+ * terpengaruh (jalur single-project tidak berubah).
+ *
+ * Bila true: wsRootOut = root workspace induk (absolut), memberOut = nama
+ * proyek anggota sesuai deklarasi. Cwd pada root workspace sendiri selalu
+ * false — jalur mode workspace (workspaceRun) yang menanganinya.
+ */
+bool wsMemberCwdDetect(char *wsRootOut, size_t wsRootN, char *memberOut, size_t memberN) {
+  if (workspaceFileName()) return false; /* cwd = root workspace sendiri */
+  char cwd[WS_PATH_LEN];
+  if (!fsGetCwd(cwd, sizeof(cwd))) return false;
+  wsPathCanon(cwd);
+
+  char probe[WS_PATH_LEN];
+  copyStr(probe, sizeof(probe), cwd);
+  for (int up = 0; up < WS_MEMBER_MAX_UP; up++) {
+    char *slash = strrchr(probe, '/');
+    if (!slash || slash == probe) break; /* mencapai root filesystem */
+    *slash = '\0';
+    if (!probe[0]) break;
+
+    /* Kandidat induk: Buildfile.ws (atau nama lama) di parent. */
+    char wsf[WS_PATH_LEN + 40];
+    const char *wsName = NULL;
+    snprintf(wsf, sizeof(wsf), "%s/%s", probe, WORKSPACE_FILENAME);
+    if (fsFileExists(wsf))
+      wsName = WORKSPACE_FILENAME;
+    else {
+      snprintf(wsf, sizeof(wsf), "%s/%s", probe, WORKSPACE_FILENAME_LEGACY);
+      if (fsFileExists(wsf)) wsName = WORKSPACE_FILENAME_LEGACY;
+    }
+    if (!wsName) continue;
+
+    /* Validasi keanggotaan lewat model — parse TENANG; file rusak/gagal
+       parse = bukan workspace valid, lanjut naik ke parent berikutnya. */
+    WsModel m;
+    wsGuardQuiet = true;
+    bool parsed = wsParse(&m, wsf);
+    wsGuardQuiet = false;
+    if (!parsed) {
+      wsModelFree(&m);
+      continue;
+    }
+
+    for (int i = 0; i < m.projectCount; i++) {
+      const char *root = m.projects[i].root[0] ? m.projects[i].root : m.projects[i].name;
+      /* Buffer muat worst case "probe/root" tanpa potong (bukti statis
+         untuk snprintf — tanpa warning format-truncation). */
+      char mem[WS_PATH_LEN + MAX_PATH + 4];
+#ifdef _WIN32
+      bool absRoot = root[0] == '/' || (root[0] && root[1] == ':');
+#else
+      bool absRoot = root[0] == '/';
+#endif
+      if (absRoot)
+        snprintf(mem, sizeof(mem), "%s", root);
+      else
+        snprintf(mem, sizeof(mem), "%s/%s", probe, root);
+      wsPathCanon(mem);
+      size_t ml = strlen(mem);
+      /* cwd == root anggota, atau di bawahnya (boundary '/'). */
+      bool hit = strcmp(cwd, mem) == 0 || (strncmp(cwd, mem, ml) == 0 && cwd[ml] == '/');
+      if (hit) {
+        copyStr(wsRootOut, wsRootN, probe);
+        copyStr(memberOut, memberN, m.projects[i].name);
+        wsModelFree(&m);
+        return true;
+      }
+    }
+    wsModelFree(&m);
+  }
+  return false;
 }
 
 /*

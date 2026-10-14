@@ -1,1 +1,3 @@
 use project
+
+sources = manager, src

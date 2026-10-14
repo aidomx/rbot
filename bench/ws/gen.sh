@@ -31,6 +31,11 @@ embed_mode() {
     printf '%s' "$BENCH_EMBED"
     return
   }
+  # ld -r -b binary adalah fitur GNU/Linux; jangan coba pada platform lain.
+  if [ "$(uname -s)" != Linux ] || ! command -v ld >/dev/null 2>&1; then
+    printf carray
+    return
+  fi
   local d
   d=$(mktemp -d 2> /dev/null) || {
     printf ld
@@ -54,8 +59,8 @@ gen_ws() {
   mkdir -p "$WS/library" "$WS/core/include" "$WS/bade/include" "$WS/modules"
   printf '#pragma once\n#define WS_SHARED_VALUE 7\n' > "$WS/library/a.h"
   printf '#pragma once\n#include "a.h"\n#define WS_BADE_VALUE WS_SHARED_VALUE\n' > "$WS/library/b.h"
-  # Header internal: hanya di-include langsung ("../../library/ext.h"), tanpa
-  # symlink di include/. Dipantau rbot lewat headers.internal, bukan -I.
+  # Header bersama: library/ dipantau lewat headers workspace;
+  # ext.h tetap di-include secara relatif tanpa symlink.
   printf '#pragma once\n#define WS_EXT_VALUE 3\n' > "$WS/library/ext.h"
   ln -s ../../library/a.h "$WS/core/include/a.h"
   ln -s ../../library/b.h "$WS/bade/include/b.h"
@@ -107,7 +112,7 @@ EOF
   # Source tambahan khusus ini tidak mengubah arti -n (jumlah source beban).
   # ---- Buildfile.ws (Sesuai desain terbaru) ----
   {
-    local extract_tmp="${TMPDIR:-${PREFIX:+$PREFIX/tmp}}"
+    extract_tmp="${TMPDIR:-${PREFIX:+$PREFIX/tmp}}"
     extract_tmp="${extract_tmp:-/tmp}"
     echo "use workspace"
     echo "projects.rupamod as mod"
@@ -115,14 +120,13 @@ EOF
     echo "projects = bade, core, rupamod"
     echo "compiler = $COMPILERS"
     echo "flags = Wall, Wextra, MMD, MP, fPIC"
-    echo "headers = include, I."
-    echo "headers.internal = ../library"
+    echo "headers = (core, bade, I.), library"
     echo "std = gnu11"
     echo "mod.output.binary = false"
     echo "mod.archive.src = ."
     echo "mod.archive.name = rupa_modules"
     echo "mod.archive.with = tar"
-    echo "mod.archive.dir = ../modules"
+    echo "mod.archive.dir = modules"
     echo "mod.archive.exclude = build, dist, LICENSE, README.md, self_archive"
     echo "core.sources = src"
     echo "core.exclude = main.c"
@@ -135,7 +139,7 @@ EOF
     echo "bade.output.libraryName = bade"
     echo "bade.output.libraryShared = true"
     echo "bade.depends_on = rupamod"
-    echo "bade.embedded.modules.file = ../modules/rupa_modules.tar"
+    echo "bade.embedded.modules.file = modules/rupa_modules.tar"
     echo "bade.embedded.modules.variable = MODULES"
     echo "bade.embedded.modules.extract = ${extract_tmp}/rupa-system"
     echo "bade.embedded.modules.pattern = .rp"

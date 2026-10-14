@@ -1,40 +1,291 @@
 # Workspace
 
-Seluruh kinerja workspace untuk saat ini sudah sangat bagus, tapi setelah audit terbaru ada masalah yang ditemukan.
+Dokumen ini mencatat aturan, desain, dan target implementasi workspace `rbot` v0.2.3+. Workspace adalah jalur build tersendiri; perubahan di sini tidak mengubah perilaku maupun performa single-project.
 
-## [√] workspace state
+---
 
-Saat di mode workspace akan menghasilkan `.rbot/workspace` tapi tidak menghasilkan `.rbot/workspace.state` yang dimana ini sangat berguna untuk pengecekan di `src/bootstrap.c` untuk mode no-op yang saat ini `.rbot/build.state` saja yang di cek.
+## Filosofi
 
-Simulasi struktur mode workspace :
+Workspace di `rbot` dirancang dengan prinsip:
+- **Convention over Configuration** — proyek anggota tidak butuh `Buildfile` lokal kecuali memang ingin berdiri sendiri.
+- **Root-Centric Output** — semua artefak build (biner, objek, library, arsip, state, CompDB) dipusatkan di root workspace. Direktori anggota hanya berisi sumber.
+- **Single Source of Truth** — `Buildfile.ws` di root adalah satu-satunya konfigurasi untuk seluruh workspace.
+- **Two-Phase Build** — library pass dulu (tanpa link binary), baru binary pass. Ini memungkinkan dependensi siklik (`core ↔ bade`) diselesaikan secara native.
 
+---
+
+## Aturan Pengguna
+
+1. **Build hanya dari root workspace.** Pemanggilan `rbot` atau `rbot -g compdb` dari direktori proyek anggota ditolak dengan pesan yang menunjuk ke root workspace dan `rbot -w <project>`.
+2. **Build selektif** menggunakan `rbot -w <project>` dan membangun dependency closure yang diperlukan. Build penuh tetap `rbot -w`.
+3. **Editor sebaiknya membuka root workspace** agar source seluruh proyek dan satu `compile_commands.json` dapat diakses bersama.
+4. **Direktori anggota adalah penyedia source/config**, bukan tempat output build.
+5. **Deteksi anggota workspace** harus memvalidasi keanggotaan pada `Buildfile.ws` induk; keberadaan file workspace pada parent saja tidak cukup. Jalur single-project di luar workspace tidak berubah.
+6. **Proyek anggota tidak perlu `Buildfile` lokal.** Seluruh konfigurasi didefinisikan di `Buildfile.ws`. Pengecualian: proyek yang ingin bisa di-build secara standalone boleh punya `Buildfile` sendiri, dan diintegrasikan ke workspace via **symlink**.
+
+---
+
+## Struktur Direktori
+
+```text
+workspace/
+ ├── Buildfile.ws                 # Satu-satunya file konfigurasi
+ ├── compile_commands.json        # CompDB global (seluruh workspace)
+ ├── library/                     # Shared headers (nama bebas, tidak harus 'include')
+ │   └── ext.h
+ ├── .rbot/                       # State & cache terpusat
+ │   ├── workspace.state          # State global (untuk no-op check)
+ │   ├── workspace/               # State per-proyek (prefiks nama proyek)
+ │   │   ├── rupa.ws.state            # fase binary
+ │   │   ├── rupa.ws.lib.state        # fase library
+ │   │   ├── rupa.build.fingerprint
+ │   │   ├── rupa.build.state
+ │   │   ├── rupa.deps.cache
+ │   │   └── rupa.src                 # snapshot daftar source terakhir
+ │   └── workspace_log            # Indeks no-op & CompDB (lihat seksi No-op)
+ ├── build/                       # Objek (.o) dan dependency files (.d)
+ │   ├── rupa/
+ │   └── bade/
+ ├── bin/                         # Biner final (FILE, bukan direktori per proyek)
+ │   ├── rupa                     # bin/rupa, bukan bin/rupa/rupa
+ │   └── bade
+ ├── lib/                         # Static/shared libraries
+ │   ├── librupa.a
+ │   └── libbade.a
+ ├── dist/                        # Release
+ │   └── rupa_v0.2.2.deb
+ ├── modules/                     # Arsip sumber (archive.dir, nama bebas)
+ │   └── rupa_modules.tar
+ ├── rupa/                        # Source proyek (BERSIH, tanpa .rbot)
+ ├── bade/                        # Source proyek (BERSIH)
+ └── rupamod/                     # Source proyek (BERSIH)
 ```
-/wsproject
-  .rbot
-    workspace # direktori yang saat ini memang sudah dihasilkan
-    workspace.state
+
+**Aturan penting:**
+- Binary di root adalah **file**: `bin/bade`, bukan `bin/bade/bade`. Object memakai `build/<project>/...` agar nama source antar-proyek tidak bertabrakan.
+- Nama output binary/library/archive yang bentrok **harus dideteksi**, bukan ditimpa diam-diam.
+- Jika `rbot` mendeteksi folder `.rbot/` di dalam direktori proyek anggota saat mode workspace aktif, dia harus mengabaikannya atau memberikan peringatan, dan tetap menggunakan state di root workspace.
+- Nama folder shared headers bebas (tidak harus 'include'). Inilah alasan `headers.internal = library` — karena nama folder yang dipilih user adalah `library`.
+
+---
+
+## Konfigurasi Buildfile.ws
+
+### Sintaks Dasar
+
+```text
+use workspace
+
+# Alias singkat (opsional, untuk mengurangi pengetikan)
+projects.rupamod as mod
+projects.core as core
+
+# Daftar proyek — root default <root>/<nama>, bisa dioverride per proyek
+projects = bade, core, rupamod
+projects.bade.root = path/khusus    # opsional; dipakai bila folder ≠ <root>/<nama>
+
+# Pengaturan global (berlaku untuk semua proyek, kecuali ditimpa).
+# Catatan skoping path: kunci konten-proyek (sumber, headers, exclude,
+# output) relatif ROOT PROYEK masing-masing; kunci lintas-proyek/workspace
+# (headers.internal, cdeps, embed, archive.dir, sisi source release.files)
+# relatif ROOT WORKSPACE.
+compiler = gcc, clang
+flags = Wall, Wextra, MMD, MP
+headers = include, I.       # per-proyek: relatif root tiap anggota
+library.default = ssl, crypto
+library.linux = m, pthread
+library.macos = m
+library.windows = ws2_32
+std = gnu11
 ```
 
-## [] workspace flatten
+### Platform-Specific Flags & Libraries
 
-> Eksperimen ada di `/tmp/rbot_flat`
+Properti yang mendukung sufiks spesifik: `flags`, `library`, `headers`, `defines`, `std`.
 
-Hanya sampingan bukan utama tapi kalau hasilnya lebih baik bisa diterapkan ke source asli.
+```text
+# Flags global
+flags = Wall, Wextra
 
-> Eksekusi: Tidak
+# Flags spesifik platform (di-append ke global, deduplikasi otomatis)
+flags.linux = D_POSIX_C_SOURCE=200809L
+flags.macos = D_DARWIN_C_SOURCE
+flags.windows = D_CRT_SECURE_NO_WARNINGS, DWIN32_LEAN_AND_MEAN
 
-## [] workspace build
+# Flags spesifik compiler
+flags.clang = fcolor-diagnostics
+flags.gcc = fdiagnostics-color=always
 
-Saat mode workspace proses build harusnya terjadj didalam direktori workspace bukan didalam per-proyek.
+# Defines (rbot otomatis translasi -D untuk GCC/Clang, /D untuk MSVC)
+defines = DEBUG, VERSION=\\\"1.0.0\\\"
+defines.linux = _POSIX_C_SOURCE=200809L
+defines.windows = UNICODE, _UNICODE
 
-Aturan workspace dari rbot masih sangat ketat, karena percuma jika sebuah projek sudah masuk ke workspace menjalankan per-proyek tidak akan menghasilkan apapun.
+# Library
+library.linux = pthread, m, dl
+library.windows = ws2_32, advapi32, userenv
 
-Karena workspace dari rbot sudah menyediakan `rbot -w project_name` untuk selektif.
+# Headers lintas-proyek: relatif ROOT WORKSPACE (nama folder bebas)
+headers.internal = library
+```
 
-Begitu juga dengan `compile_commands.json` yang harusnya berada di direktori workspace bukan per-proyek.
+**Aturan Resolusi:**
+- Nilai global dimuat pertama, lalu nilai spesifik platform/compiler di-append.
+- Untuk array (`flags`, `library`), duplikat dihapus otomatis.
+- User tidak perlu menulis prefix `-D` atau `/D` di `defines`; `rbot` menerjemahkan berdasarkan compiler yang terdeteksi.
+- Fallback `unix` berlaku untuk semua OS berbasis POSIX jika tidak ada definisi spesifik.
 
-Logikanya jika sudah menggunakan workspace otomatis akan lebih mudah membukanya langsung di direktori workspace tersebut alih-alih masuk ke proyek masing-masing.
+### Proyek Anggota
 
-Dan jika `compile_commands.json` tidak ada, text editor akan kesulitan membaca.
+```text
+# A. rupamod — proyek kemasan (archive)
+mod.output.binary = false
+mod.archive.src = .                     # relatif root proyek
+mod.archive.name = rupa_modules
+mod.archive.with = tar
+mod.archive.exclude = build, dist, LICENSE, README.md, self_archive
+mod.archive.dir = modules                # lintas-proyek: relatif root workspace
 
-Proyek hanya menyediakan source untuk workspace, karena aturan ketat dari workspace untuk saat ini.
+# B. Core engine
+core.sources = src
+core.exclude = main.c
+core.output as coreout
+core.library as corelib
+coreout.binaryName = rupa
+coreout.libraryName = core
+coreout.libDir = lib
+coreout.libraryShared = true
+
+# C. bade — embed arsip dari rupamod
+bade.sources = manager, src
+bade.exclude = manager/main.c
+bade.output as badeout
+bade.library as badelib
+badeout.binaryName = bade
+badeout.libraryName = bade
+badeout.libDir = lib
+badeout.libraryShared = true
+bade.embedded.modules as bademod
+bade.depends_on = rupamod
+bademod.file = modules/rupa_modules.tar    # lintas-proyek: relatif root workspace
+bademod.variable = MODULES
+bademod.extract = /tmp/rupa-system
+bademod.pattern = .rp
+
+# Dependensi siklik (core ↔ bade) — ditangani Two-Phase Build
+badelib.cdeps = core
+corelib.cdeps = bade
+```
+
+### Release & Packaging
+
+```text
+# Release — SATU paket distribusi workspace (semua path relatif root workspace)
+release.name = rupa
+release.version = 0.2.2
+release.files = bin/rupa:bin/rupa, bin/bade:bin/bade, core/src/prompt/cmd.txt:share/rupa/cmd.txt
+release.exclude = build, dist
+release.output = dist/{name}-v{version}.tar.gz
+release.format = deb
+release.checksum = sha256
+release.deb.install_prefix = /usr/local
+```
+
+Release bisa dipicu murni dari CLI tanpa deklarasi:
+```bash
+rbot -w release -- name=rupamod target=deb
+```
+
+**`pack.*` per proyek di luar scope v1:** jalur workspace hanya mendukung **build + release workspace** (`release.*`). Properti `pack.*` per proyek diabaikan dengan peringatan singkat (tidak menggagalkan build); dukungan menyusul di iterasi terpisah.
+
+---
+
+## Resolusi Path & State
+
+### Path
+
+1. **CWD Tetap di Root:** `rbot` tidak pernah mengubah CWD ke direktori proyek anggota saat build. CWD selalu di root workspace; `fsSetCwd()` per-proyek dilarang di jalur workspace.
+2. **Root Proyek:** default `<root>/<nama>`; override eksplisit `projects.<nama>.root`. Semua path yang ditafsirkan relatif proyek memakai root ini.
+3. **Default Output Path (Root-Centric):**
+   - Binary: `<root>/bin/<binaryName>` — **file**, bukan direktori; default `binaryName` = nama proyek sehingga menghasilkan `bin/bade` (bukan `bin/bade/bade`).
+   - Build (Object/Dep): `<root>/build/<nama_proyek>/`
+   - Library: `<root>/lib/`
+   - Release/Dist: `<root>/dist/`
+4. **Source Path (kunci konten-proyek):** `sources`, `exclude`, `headers` (tanpa `.internal`), `archive.src`, dan lokasi file proyek lain ditafsirkan relatif terhadap root proyek; hasil kompilasi dikirim ke `<root>/build/<nama_proyek>/`.
+5. **Path Lintas-Proyek & Workspace (kunci ws):** `headers.internal`, `cdeps`, `embedded.*.file`, `archive.dir`, dan sisi source `release.files` ditafsirkan relatif terhadap root workspace — misal `headers.internal = library` = `<root>/library`.
+
+### State & Cache
+
+1. **Global State:** `workspace.state` dan `compile_commands.json` selalu di root workspace.
+2. **Per-Project State:** file state spesifik proyek (`ws.state`, `ws.lib.state`, `build.fingerprint`, `build.state`, `deps.cache`, snapshot source) dipindah dari `<project>/.rbot/` ke `<root>/.rbot/workspace/<nama_proyek>.<nama_file>` — misal `rupa.ws.state`, `rupa.build.fingerprint`, `rupa.deps.cache`.
+3. **Implementasi C:** fungsi penentu path state harus menerima argumen `root_dir` dan `project_name`, lalu menyusun path ke `<root>/.rbot/workspace/` alih-alih `project_dir/.rbot/`.
+4. **No-Op Check:** `src/bootstrap.c` membaca `.rbot/workspace.state` (bukan `.rbot/build.state`) untuk mode workspace. Jika fingerprint workspace tidak berubah dan tidak ada flag `--force`, langsung exit.
+
+---
+
+## Pipeline `wsCmdBuild()`
+
+1. **Muat model dan `WsConfig` workspace**, lalu validasi proyek serta konflik output.
+2. **Discovery seluruh workspace sekali:** satu traversal per direktori, kumpulkan seluruh ekstensi source yang didukung, terapkan `exclude`, dan buat indeks source → proyek. Hindari `opendir()` ganda dan `stat()` yang tidak perlu.
+3. **Hitung dependency closure** untuk target selektif dan rencana pekerjaan dari indeks yang sama, tanpa discovery ulang per proyek.
+4. **Periksa incremental state**, source/header dependencies, command/fingerprint, dan output.
+5. **Compile secara paralel** ke `build/<project>/...` serta hasilkan dependency files (path `.d` dibuat relatif root — aman karena CWD tidak berubah).
+6. **Kerjakan library, archive/embed, dan linking** sesuai dependensi nyata, termasuk dependensi siklik yang didukung. Binary di `bin/<name>` (file), library di `lib/`, arsip member ke `archive.dir` (mis. `modules/`), release ke `dist/`.
+7. **Perbarui `workspace.state`**, `.rbot/workspace_log`, dan CompDB bila memang berubah.
+
+### Pemisahan Jalur Build
+
+- `cmdBuildEx()` hanya menjadi referensi alur untuk implementasi workspace, **bukan dipanggil** dari build workspace.
+- Implementasi workspace berada di `src/workspace/` dengan `wsCmdBuild()` dan `WsConfig` sendiri. `WsConfig` adalah model workspace (parse `Buildfile.ws`, resolusi path per-kunci, closure) yang dimiliki penuh oleh modul workspace — tanpa sintesis sebagai konfigurasi yang bisa di-edit user, tanpa `loadConfig()` sebagai *jalur utama*, dan tanpa pemanggilan `cmdBuildEx()`. Mesin mekanis yang sudah matang (decide mtime + deps `.d`, parallel jobs, link, kemasan library, fingerprint, fast-state) dipakai ulang dengan `Config` per proyek yang **disusun/di-rebase di memori** sebagai pembungkus path hasil resolusi `WsConfig` — chdir tidak pernah terjadi, dan state/CompDB/output tetap mengikuti aturan root-centric di atas. (Amendasi hybrid: ketergantungan yang dilarang adalah *alur* Config+loadConfig+chdir, bukan pemakaian tipe `Config` sebagai wadah path.)
+- Jalur workspace **tidak mengubah CWD** ke direktori proyek (`fsSetCwd()` per-proyek dilarang).
+- Komponen bersama yang independen dari `Config` (filesystem, process runner) boleh dipakai tanpa mengubah perilakunya. Jangan menambah overhead workspace ke jalur single-project.
+- Setelah `wsCmdBuild()` lengkap dan lolos regresi, bersihkan cabang workspace yang sudah tidak diperlukan di `cmdBuildEx()`.
+
+---
+
+## No-op dan CompDB
+
+- **`.rbot/workspace_log` — indeks no-op & CompDB.** Format: berkas teks, satu blok per proyek, berisi:
+  1. nama proyek,
+  2. hash konfigurasinya dari `Buildfile.ws` (baris yang memengaruhinya),
+  3. fingerprint daftar source terakhir (dari snapshot `<nama>.src`),
+  4. hash isi `compile_commands.json` terakhir.
+
+  File ini hanya dipakai untuk dua keputusan: **(a) no-op cepat** — proyek dengan (2)+(3) identik dilewati tanpa re-scan source-nya; **(b) skip-write CompDB** — `compile_commands.json` hanya ditulis ulang bila hash-nya berbeda dari (4). `workspace_log` **tidak** menyimpan mtime/size/artefak — domain itu milik `workspace.state` (global) dan `<nama>.build.state` per proyek; jangan menduplikasinya.
+- `compile_commands.json` **hanya ada di root workspace** dan selalu merepresentasikan seluruh workspace, sekalipun build terakhir selektif.
+- `rbot -g compdb` dari root workspace bersifat **query-only**: tidak menjalankan build atau mengubah build state.
+- Jangan tulis ulang CompDB yang identik. Perubahan daftar source atau command harus terdeteksi meski `Buildfile.ws` tidak berubah.
+- No-op tidak boleh memicu kompilasi, link, archive, atau penulisan artefak yang tidak diperlukan.
+
+---
+
+## Ide Masa Depan: Workspace Flatten (Cold Build Optimization)
+
+*Catatan: Ini adalah desain konseptual, tidak dieksekusi secara default.*
+
+Untuk mempercepat cold build, `rbot` dapat menerapkan **Source Flattening & Batch Compilation**:
+
+1. **Fase 0 (Flatten):** `rbot` membaca `Buildfile.ws` sekali, meratakan semua daftar source dari semua proyek menjadi satu daftar raksasa di memori.
+2. **Fase 1 (Batch Compile):** Antrian raksasa dilempar ke compiler pool secara bersamaan. Tidak ada sekat antar proyek. Kecepatan setara Ninja.
+3. **Fase 2 (Reverse Map):** Setelah `.o` terbentuk, `rbot` melakukan pencocokan path (`src_a/a.c` → `build/a.o`) untuk mengembalikan object files ke proyek masing-masing.
+4. **Fase 3 (Library & Binary Pass):** Berjalan seperti biasa menggunakan object files yang sudah siap.
+
+**Dampak:** Mengurangi overhead konteks antar-proyek saat fase kompilasi, membuat cold build jauh lebih cepat tanpa mengubah arsitektur fase build.
+
+---
+
+## Kriteria Selesai
+
+- [ ] Bootstrap berhasil; build penuh dan `rbot -w <project>` berhasil dari root workspace.
+- [ ] **Tidak ada build state, object, binary, atau CompDB baru di direktori anggota proyek.** (Semua harus di root workspace).
+- [ ] Compile, link, archive/embed, dan dependensi lintas proyek benar-benar dijalankan; tidak ada fase yang dilewati hanya untuk mempercepat benchmark.
+- [ ] No-op dan incremental (edit source/header, penambahan/penghapusan source, perubahan config) diuji; CompDB lengkap dan valid tanpa rewrite pada no-op.
+- [ ] Pemanggilan dari anggota workspace ditolak; proyek standalone tetap dapat dibangun seperti sebelumnya.
+- [ ] `cmdBuildEx()` tidak dipanggil pada jalur workspace dan tidak mengalami regresi fungsional/performa.
+- [ ] Dependensi siklik (`core ↔ bade`) diselesaikan dengan Two-Phase Build tanpa error `dependency cycle`.
+- [ ] Shared headers di root (nama bebas) dikenali dan ditambahkan ke `-I` secara otomatis.
+- [ ] Platform-specific flags (`flags.linux`, `defines.windows`, dll.) di-resolve dan di-append dengan benar.
+- [ ] Fixture workspace (`tests/rupaws/Buildfile.ws`) dan generator bench dimigrasi ke path root-centric; seluruh regresi lulus (self-host, 12 skenario `bench/ws.sh`, rupaws).
+- [ ] `pack.*` per proyek diabaikan dengan peringatan di mode workspace (di luar scope v1, tidak menggagalkan build).
+
+---

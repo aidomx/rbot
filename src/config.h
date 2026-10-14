@@ -233,6 +233,16 @@ bool loadConfig(Config *c, const char *path);
 bool loadConfigEx(Config *c, const char *path, bool cacheWrite);
 
 /*
+ * configApplyLine — terapkan SATU baris `key = value` format `use project`
+ * (key bertitik; tanpa indentasi; alias sudah di-resolve pemanggil) ke
+ * Config. Dipakai jalur workspace: WsConfig menyusun Config per proyek
+ * DI MEMORI dari Buildfile.ws — tanpa file sintesis & tanpa loadConfig
+ * (design/workspace_v1.md §Pemisahan Jalur Build). Panggil configFinalize()
+ * setelah seluruh baris diterapkan (lihat urutan di uses/workspace.c).
+ */
+void configApplyLine(Config *c, const char *key, const char *value);
+
+/*
  * configFinalize — terapkan konvensi proyek standar pada Config yang sudah
  * di-parse (sources->src, headers->include bila folder ada, nama binary
  * dari cwd, deteksi C++, resolusi path embedded). Dipanggil loadConfig

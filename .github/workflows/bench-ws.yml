@@ -1,0 +1,63 @@
+name: Workspace Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Sources per project"
+        type: number
+        required: true
+        default: 1000
+      repeats:
+        description: "Benchmark repetitions"
+        type: number
+        required: true
+        default: 3
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential ninja-build make
+
+      - name: Build rbot
+        run: |
+          ./install.sh --dev
+
+      - name: System information
+        run: |
+          uname -a
+          lscpu
+          free -h
+          df -h
+          gcc --version
+          ninja --version
+
+      - name: Workspace benchmark
+        run: |
+          mkdir -p benchmark-results
+
+          bash bench/ws.sh \
+            -b "$PWD/build/bin/rbot" \
+            -n "${{ inputs.sources }}" \
+            -H 100 \
+            -m 100 \
+            -r "${{ inputs.repeats }}" \
+            -t rbot,ninja \
+            -o benchmark-results
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-benchmark
+          path: benchmark-results/

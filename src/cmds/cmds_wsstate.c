@@ -2,7 +2,10 @@
  * cmds_wsstate — fast-state khusus mode workspace. Terpisah dari
  * cmdsFastStateSave/cmdsFastStateValid (yang tetap untuk single project).
  *
- * File: .rbot/ws.state (fase binary) dan .rbot/ws.lib.state (fase library).
+ * File: .rbot/workspace/<proyek>.ws.state (fase binary) dan
+ *       .rbot/workspace/<proyek>.ws.lib.state (fase library) — mode
+ *       workspace root-centric (state_path, lihat cmds_internal.h);
+ *       bila proyek belum ditetapkan, fallback ke .rbot/ws.state lama.
  * Format (whitespace-delimited, path tanpa spasi):
  *   RBOTWS2 <cwd>
  *   META <skipped> <target|-> <buildfile>
@@ -29,9 +32,11 @@ static bool wsModeOn = false;
 
 static void srcCacheReset(void); /* didefinisikan di bagian langkah 1 */
 
-/* Setiap proyek punya cwd dan .rbot/ws.src sendiri. Cache daftar sumber
-   harus dikosongkan di awal setiap proyek; jika tidak, record proyek
-   sebelumnya terbawa dan ditulis ke file proyek berikutnya. */
+/* Mode workspace kini memakai SATU cwd (root workspace) dan SATU
+   .rbot/ws.src untuk seluruh proyek — record sumber dipakai lintas proyek
+   (direktori sumber berpath relatif root). wsModeSet(true) dipanggil
+   sekali per run oleh wsCmdBuild; reset di sini tetap mengosongkan record
+   lama saat run baru dimulai. */
 void wsModeSet(bool on) {
   wsModeOn = on;
   if (on) srcCacheReset();
@@ -69,8 +74,52 @@ static void wsAddSourceDirs(List *items);
 
 static bool hasSpace(const char *s) { return s && strpbrk(s, " \t\r\n") != NULL; }
 
-static const char *wsStateFile(bool libOnly) {
-  return libOnly ? ".rbot/ws.lib.state" : ".rbot/ws.state";
+static void wsStateFilePath(char *out, size_t n, bool libOnly) {
+  cmdsStatePath(out, n, libOnly ? "ws.lib.state" : "ws.state");
+}
+
+/* Snapshot daftar source per proyek (design/workspace_v1.md §State):
+   .rbot/workspace/<proyek>.src — dipakai workspace_log sebagai fingerprint
+   daftar source (keputusan no-op & skip-write CompDB). Ditulis hanya bila
+   isinya berubah; tanpa proyek aktif (jalur lama) dilewati. */
+static void wsWriteSrcSnapshot(const List *srcs) {
+  if (!cmdsStateWsProject() || !srcs) return;
+  char cwd[WS_PATH_LEN];
+  if (!fsGetCwd(cwd, sizeof(cwd))) return;
+  char path[256];
+  cmdsStatePath(path, sizeof(path), "src");
+  List lines = {0};
+  char buf[WS_PATH_LEN + 32];
+  snprintf(buf, sizeof(buf), "RBOTWSLIST1 %s", cwd);
+  listAdd(&lines, buf);
+  for (int i = 0; i < srcs->count; i++) {
+    snprintf(buf, sizeof(buf), "S %s", srcs->items[i]);
+    listAdd(&lines, buf);
+  }
+  bool same = false;
+  FILE *rf = fopen(path, "r");
+  if (rf) {
+    same = true;
+    int i = 0;
+    char line[WS_PATH_LEN + 32];
+    while (same && fgets(line, sizeof(line), rf)) {
+      size_t n = strlen(line);
+      if (n && line[n - 1] == '\n') line[n - 1] = '\0';
+      if (i >= lines.count || strcmp(line, lines.items[i]) != 0) same = false;
+      i++;
+    }
+    if (same && i != lines.count) same = false;
+    fclose(rf);
+  }
+  if (!same) {
+    cmdsStateMkdirFor(path);
+    FILE *fp = fopen(path, "w");
+    if (fp) {
+      for (int i = 0; i < lines.count; i++) fprintf(fp, "%s\n", lines.items[i]);
+      fclose(fp);
+    }
+  }
+  listFree(&lines);
 }
 
 void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, const char *target,
@@ -82,6 +131,7 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
   const char *bf = buildfilePath && *buildfilePath ? buildfilePath : "Buildfile";
   const char *tgt = (!libOnly && target && *target) ? target : "-";
   if (hasSpace(cwd) || hasSpace(bf) || hasSpace(tgt)) return; /* format whitespace-delimited */
+  wsWriteSrcSnapshot(srcs); /* snapshot daftar source utk workspace_log */
 
   List items = {0};
   addKind(&items, 'F', bf);
@@ -108,11 +158,12 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
   for (int i = 0; i < srcs->count; i++) {
     const char *src = srcs->items[i];
     addKind(&items, 'F', src);
-    /* Closure = header yang benar-benar dijangkau source ini (dari .d / snapshot). */
-    depsClosureVisit(dc, src, closureCollect, &ctx);
     char obj[WS_PATH_LEN];
     if (objectPathFor(c, src, obj, sizeof(obj))) addKind(&items, 'O', obj);
   }
+
+  /* Union closure: header bersama antar-source dikunjungi sekali saja. */
+  depsClosureVisitMany(dc, (const char *const *)srcs->items, srcs->count, closureCollect, &ctx);
 
   /* Embedded: object, archive hasil generate, dan verdict ld (sama dengan single). */
   bool hasEmb = false;
@@ -133,16 +184,28 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
   for (int i = 0; i < c->headerPublic.count; i++) wsAddHeaderDir(&items, c->headerPublic.items[i]);
   for (int i = 0; i < c->headerInternal.count; i++) wsAddHeaderDir(&items, c->headerInternal.items[i]);
 
-  if (items.count > 1) qsort(items.items, (size_t)items.count, sizeof(char *), cmpEntry);
+  /* Urutkan dan hilangkan duplikat sekali, sebelum pemeriksaan output/stat.
+     Closure dari source berbeda sering memuat header yang sama. */
+  if (items.count > 1) {
+    qsort(items.items, (size_t)items.count, sizeof(char *), cmpEntry);
+    int unique = 0;
+    for (int i = 0; i < items.count; i++) {
+      if (unique && strcmp(items.items[i], items.items[unique - 1]) == 0) {
+        free(items.items[i]);
+      } else {
+        items.items[unique++] = items.items[i];
+      }
+    }
+    items.count = unique;
+  }
 
   /* Pre-pass: output dan folder build/ dibuang dari memo sebelum ada pembacaan.
      Dengan begitu input yang dibaca dari memo tidak memuat nilai pra-build. */
-  cmdsStatMemoForgetTree("build");
-  for (int i = 0; i < items.count; i++)
-    if (items.items[i][0] == 'O') cmdsStatMemoForget(items.items[i] + 2);
+  cmdsStatMemoForgetOutputs(c->outBuildDir, &items);
 
-  const char *path = wsStateFile(libOnly);
-  mkdirs(".rbot");
+  char path[256];
+  wsStateFilePath(path, sizeof(path), libOnly);
+  cmdsStateMkdirFor(path);
   char tmp[WS_PATH_LEN];
   snprintf(tmp, sizeof(tmp), "%s.tmp", path);
   FILE *fp = fopen(tmp, "w");
@@ -155,12 +218,9 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
   fprintf(fp, "META %d %s %s\n", srcs->count, tgt, bf);
   for (int i = 0; i < libs.count; i++) fprintf(fp, "LIB %s\n", libs.items[i] + 2);
 
-  char prev[MAX_PATH * 4] = "";
   for (int i = 0; i < items.count; i++) {
-    if (strcmp(items.items[i], prev) == 0) continue; /* hapus duplikat */
-    snprintf(prev, sizeof(prev), "%s", items.items[i]);
-    char kind = prev[0];
-    const char *p = prev + 2;
+    char kind = items.items[i][0];
+    const char *p = items.items[i] + 2;
     int64_t m = 0;
     long long sz = 0;
     /* Output baru dibangun: stat langsung. Input (source, header, folder)
@@ -188,8 +248,10 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
 bool wsFastStateValid(const char *buildfilePath, bool libOnly) {
   char cwd[WS_PATH_LEN];
   if (!fsGetCwd(cwd, sizeof(cwd))) return false;
-  cmdsStatMemoSetCwd(); /* memo harus memakai cwd proyek ini, bukan proyek sebelumnya */
-  FILE *fp = fopen(wsStateFile(libOnly), "r");
+  cmdsStatMemoSetCwd(); /* memo memakai cwd root workspace (konstan antar proyek) */
+  char statePath[256];
+  wsStateFilePath(statePath, sizeof(statePath), libOnly);
+  FILE *fp = fopen(statePath, "r");
   if (!fp) return false;
 
   const char *want = buildfilePath && *buildfilePath ? buildfilePath : "Buildfile";
