@@ -95,6 +95,8 @@ jobs:
 
       - name: Measure workspace benchmark
         run: |
+          mkdir -p benchmark-results
+
           bash bench/ws.sh \
             -b "$PWD/build/bin/rbot" \
             -n "$BENCH_SOURCES" \
@@ -107,6 +109,7 @@ jobs:
             -O abba \
             -o "$PWD/benchmark-results/measured" \
             2>&1 | tee benchmark-results/measured.log
+
           exit "${PIPESTATUS[0]}"
 
       - name: Upload benchmark artifacts

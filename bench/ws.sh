@@ -56,17 +56,19 @@ TOOLS_OPT="rbot,ninja,make" # -t : subset tool pembanding
 OUTDIR=""                   # -o : direktori kerja
 NPROC=$(nproc 2> /dev/null || echo 4)
 MUT_DELAY=0 # -d : jeda (detik) sebelum tiap edit
+RUN_DELAY=0 # -D : jeda (detik) sebelum tiap pengukuran
+RUN_ORDER=grouped # -O : grouped atau abba (rotasi urutan tool)
 
 usage() {
   sed -n '2,/^# ====.*$/p' "$0"
   exit 0
 }
-while getopts "n:H:m:r:b:a:c:d:ko:s:t:h" opt; do
+while getopts "n:H:m:r:b:a:c:d:D:O:ko:s:t:h" opt; do
   case $opt in
     n) NSRC=$OPTARG ;; H) NHEAD=$OPTARG ;; m) NMOD=$OPTARG ;;
     r) NRUN=$OPTARG ;; b) RBOT=$OPTARG ;; a) RBOT_ARGS=$OPTARG ;;
     c) COMPILERS=$OPTARG ;; k) KEEP=1 ;; o) OUTDIR=$OPTARG ;;
-    s) ONLY=$OPTARG ;; t) TOOLS_OPT=$OPTARG ;; d) MUT_DELAY=$OPTARG ;; *) usage ;;
+    s) ONLY=$OPTARG ;; t) TOOLS_OPT=$OPTARG ;; d) MUT_DELAY=$OPTARG ;; D) RUN_DELAY=$OPTARG ;; O) RUN_ORDER=$OPTARG ;; *) usage ;;
   esac
 done
 
@@ -95,6 +97,9 @@ case ${BENCH_EMBED:-} in ""|ld|carray) ;; *) echo "BENCH_EMBED harus ld atau car
   echo "opsi -d butuh angka detik non-negatif (nilai '$MUT_DELAY')" >&2
   exit 2
 }
+
+[[ $RUN_DELAY =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "opsi -D butuh detik non-negatif" >&2; exit 2; }
+case "$RUN_ORDER" in grouped|abba) ;; *) echo "opsi -O: grouped atau abba" >&2; exit 2 ;; esac
 
 [ -x "$RBOT" ] || {
   echo "rbot tidak ditemukan/dieksekusi: $RBOT" >&2

@@ -28,15 +28,38 @@ mut_hedit() {
   sed -i "s/^#define WS_SHARED_VALUE [0-9][0-9]*$/#define WS_SHARED_VALUE $((v + 1))/" "$f"
 }
 
+# Urutan ABBA per repetisi (untuk 2 tool): A B B A A B ...
+# Setiap run cold memanggil gen_ws sehingga output/state dibersihkan.
+scenario_order() {
+  local r=$1
+  if [ "$RUN_ORDER" = abba ] && [ "${#TOOLS[@]}" -eq 2 ] && (( r % 2 == 1 )); then
+    printf '%s\n' "${TOOLS[1]}" "${TOOLS[0]}"
+  else
+    printf '%s\n' "${TOOLS[@]}"
+  fi
+}
+wait_run() { [ "$RUN_DELAY" = 0 ] || sleep "$RUN_DELAY"; }
+
 s_cold() {
   have_scenario cold || return 0
   local k r
-  for k in "${TOOLS[@]}"; do
-    for ((r = 1; r <= NRUN; r++)); do
-      gen_ws # true cold, including .rbot cache/state
-      run_once "$k" cold build_full "$k"
+  if [ "$RUN_ORDER" = grouped ]; then
+    for k in "${TOOLS[@]}"; do
+      for ((r = 1; r <= NRUN; r++)); do
+        gen_ws
+        wait_run
+        run_once "$k" cold build_full "$k"
+      done
     done
-  done
+  else
+    for ((r = 0; r < NRUN; r++)); do
+      while IFS= read -r k; do
+        gen_ws
+        wait_run
+        run_once "$k" cold build_full "$k"
+      done < <(scenario_order "$r")
+    done
+  fi
 }
 
 s_strace() {
@@ -85,18 +108,40 @@ s_strace() {
 
 run_scenario() {
   have_scenario "$1" || return 0
-  local k r
-  for k in "${TOOLS[@]}"; do
-    if ! prime_cached "$k"; then
-      record_fail "$k" "$1"
-      continue
-    fi
-    for ((r = 1; r <= NRUN; r++)); do
-      [ "$MUT_DELAY" != 0 ] && sleep "$MUT_DELAY"
-      "$2" "$r" "$k"
-      run_once "$k" "$1" "${3:-tool_cmd}" "$k"
+  local k r snap
+  if [ "$RUN_ORDER" = grouped ]; then
+    for k in "${TOOLS[@]}"; do
+      if ! prime_cached "$k"; then record_fail "$k" "$1"; continue; fi
+      for ((r = 1; r <= NRUN; r++)); do
+        [ "$MUT_DELAY" = 0 ] || sleep "$MUT_DELAY"
+        "$2" "$r" "$k"
+        wait_run
+        run_once "$k" "$1" "${3:-tool_cmd}" "$k"
+      done
     done
-  done
+  else
+    # Simpan workspace masing-masing tool antar giliran. Salinan dilakukan
+    # DI LUAR pengukuran; tidak menghapus state incremental yang sedang diuji.
+    for ((r = 0; r < NRUN; r++)); do
+      while IFS= read -r k; do
+        snap="$OUTDIR/.order-state/$1/$k"
+        if [ "$r" -eq 0 ]; then
+          if ! prime_cached "$k"; then record_fail "$k" "$1"; continue; fi
+        else
+          [ -d "$snap" ] || continue
+          rm -rf "$WS"
+          cp -a "$snap" "$WS" || return 1
+        fi
+        [ "$MUT_DELAY" = 0 ] || sleep "$MUT_DELAY"
+        "$2" "$((r + 1))" "$k"
+        wait_run
+        run_once "$k" "$1" "${3:-tool_cmd}" "$k"
+        mkdir -p "$(dirname "$snap")"
+        rm -rf "$snap"
+        cp -a "$WS" "$snap" || return 1
+      done < <(scenario_order "$r")
+    done
+    rm -rf "$OUTDIR/.order-state/$1"
+  fi
 }
 mut_none() { :; }
-
