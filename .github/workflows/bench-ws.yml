@@ -4,60 +4,115 @@ on:
   workflow_dispatch:
     inputs:
       sources:
-        description: "Sources per project"
+        description: "C sources per project (core and bade)"
         type: number
         required: true
-        default: 1000
+        default: 100
       repeats:
-        description: "Benchmark repetitions"
+        description: "Measured repetitions per scenario"
         type: number
         required: true
-        default: 3
+        default: 5
+      headers:
+        description: "Header chain length per project"
+        type: number
+        required: true
+        default: 20
+      delay:
+        description: "Seconds between measurements (-D)"
+        type: number
+        required: true
+        default: 2
+      mutation_delay:
+        description: "Seconds before edits (-d)"
+        type: number
+        required: true
+        default: 0
+      modules:
+        description: "Number of .rp modules"
+        type: number
+        required: true
+        default: 20
+
+permissions:
+  contents: read
 
 jobs:
-  benchmark:
-    runs-on: ubuntu-latest
+  workspace:
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
+    env:
+      BENCH_SOURCES: ${{ inputs.sources }}
+      BENCH_REPEATS: ${{ inputs.repeats }}
+      BENCH_HEADERS: ${{ inputs.headers }}
+      BENCH_MODULES: ${{ inputs.modules }}
+      BENCH_DELAY: ${{ inputs.delay }}
+      BENCH_MUTATION_DELAY: ${{ inputs.mutation_delay }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install benchmark dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential ninja-build make
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential ninja-build make time
 
-      - name: Build rbot
+      - name: Bootstrap rbot
         run: |
           ./install.sh --dev
+          test -x build/bin/rbot
 
-      - name: System information
-        run: |
-          uname -a
-          lscpu
-          free -h
-          df -h
-          gcc --version
-          ninja --version
-
-      - name: Workspace benchmark
+      - name: Capture runner environment
         run: |
           mkdir -p benchmark-results
+          {
+            date -u
+            uname -a
+            lscpu
+            free -h
+            df -h .
+            gcc --version | head -1
+            ninja --version
+            make --version | head -1
+            build/bin/rbot version || true
+          } | tee benchmark-results/runner.txt
 
+      # The first measured run must not also be the first ever invocation of
+      # rbot, GCC, the archiver, or Ninja on this runner. Warm up BOTH tools
+      # with an independent workspace, preserving the real cold-build work in
+      # every subsequent measured repetition.
+      - name: Warm up rbot and Ninja (not measured)
+        run: |
           bash bench/ws.sh \
             -b "$PWD/build/bin/rbot" \
-            -n "${{ inputs.sources }}" \
-            -H 100 \
-            -m 100 \
-            -r "${{ inputs.repeats }}" \
-            -t rbot,ninja \
-            -o benchmark-results
+            -n "$BENCH_SOURCES" \
+            -H "$BENCH_HEADERS" \
+            -m "$BENCH_MODULES" \
+            -r 1 -t rbot,ninja \
+            -o "$PWD/benchmark-results/warmup" \
+            2>&1 | tee benchmark-results/warmup.log
+          exit "${PIPESTATUS[0]}"
 
-      - name: Upload results
+      - name: Measure workspace benchmark
+        run: |
+          bash bench/ws.sh \
+            -b "$PWD/build/bin/rbot" \
+            -n "$BENCH_SOURCES" \
+            -H "$BENCH_HEADERS" \
+            -m "$BENCH_MODULES" \
+            -r "$BENCH_REPEATS" \
+            -t rbot,ninja \
+            -D "$BENCH_DELAY" \
+            -d "$BENCH_MUTATION_DELAY" \
+            -O abba \
+            -o "$PWD/benchmark-results/measured" \
+            2>&1 | tee benchmark-results/measured.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: workspace-benchmark
+          name: workspace-n${{ inputs.sources }}-r${{ inputs.repeats }}
           path: benchmark-results/
+          if-no-files-found: warn
