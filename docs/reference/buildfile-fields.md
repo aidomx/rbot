@@ -54,14 +54,14 @@ and then referenced as `c.*` or `o.*`.
 
 ## Defaults for standard projects
 
-Undeclared fields follow rbot conventions, so a standard project (folders
+Undeclared fields follow satria conventions, so a standard project (folders
 `src/` and optional `include/`) needs only `use project`:
 
 | Field | Default when undeclared |
 |---|---|
 | `sources` | `src` |
 | `headers` | `include` (only when the folder exists) |
-| `output.binaryName` | project folder name, sanitized (fallback `rbot`) |
+| `output.binaryName` | project folder name, sanitized (fallback `satria`) |
 | `std` | `gnu11` — or `c++17` when sources contain `.cpp` (compiler then defaults to `g++`/`clang++`) |
 | `output.binaryDir` | `bin` |
 | `output.buildDir` | `build` |

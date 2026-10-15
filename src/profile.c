@@ -12,19 +12,19 @@
 #include "embed.h"
 #include "portability.h"
 #include "prof/prof.h"
-#include "rbot.h"
+#include "satria.h"
 #include "uses/workspace.h"
 #include "util.h"
 
 /*
- * profile — antarmuka diagnostik `rbot profile <context> [opsi]`.
+ * profile — antarmuka diagnostik `satria profile <context> [opsi]`.
  * Lihat profile.h dan design/profile.md.
  *
  * Aturan yang dijaga di sini:
  *  - Profil apa yang ada: context langsung ke direktori; hanya context
  *    binary yang membaca Buildfile (sumber cc/flags) dan TANPA menulis
  *    cache (loadConfigEx cacheWrite=false).
- *  - Non-mutating: tidak menulis .rbot (state build), Buildfile, atau
+ *  - Non-mutating: tidak menulis .satria (state build), Buildfile, atau
  *    artefak build normal. Semua keluaran operasi masuk direktori sementara
  *    terisolasi (TMPDIR lalu /tmp) dan dihapus di SEMUA jalur keluar.
  *  - Memakai ulang mesin timing prof (profPhaseBegin/End) — bukan
@@ -121,7 +121,7 @@ static const char *compTool(CompBackend b) {
 
 /* Expand tilde awal path: "~" atau "~/..." -> home pengguna. Shell hanya
    meng-expand `~` di AWAL kata, sedangkan token profile `archive=~/rupa`
-   memilikinya di tengah (setelah '=') — jadi rbot harus melakukannya
+   memilikinya di tengah (setelah '=') — jadi satria harus melakukannya
    sendiri. Windows memakai USERPROFILE. Diskonsioner: '~user' tidak
    didukung (butuh lookup passwd yang tidak portabel). */
 static bool expandTilde(const char *in, char *out, size_t n) {
@@ -167,7 +167,7 @@ static bool absPath(const char *in, char *out, size_t n) {
 
 /*
  * Direktori kerja sementara DI LUAR pohon build (TMPDIR, fallback /tmp —
- * Windows pakai TEMP). Tidak menyentuh .rbot/ agar state build normal
+ * Windows pakai TEMP). Tidak menyentuh .satria/ agar state build normal
  * benar-benar tak tersentuh. Unik lewat jam monotonic; gagal 64x = error.
  */
 static bool tmpDirMake(ProfCtx *p) {
@@ -177,7 +177,7 @@ static bool tmpDirMake(ProfCtx *p) {
 #endif
   if (!base || !*base) base = "/tmp";
   for (int i = 0; i < 64; i++) {
-    snprintf(p->tmp, sizeof(p->tmp), "%s/rbot-profile-%ld-%d", base,
+    snprintf(p->tmp, sizeof(p->tmp), "%s/satria-profile-%ld-%d", base,
              (long)(monotonicSeconds() * 1e6), i);
     if (!fsDirExists(p->tmp) && !fsFileExists(p->tmp)) {
       fsMakeDir(p->tmp);
@@ -206,7 +206,7 @@ static void platformString(char *out, size_t n) {
 }
 
 /* Fase discover + collect umum: daftar file/direktori (walkDir) lalu stat
-   ukuran tiap file — biaya nyata jalur arsip rbot (freshness scan + daftar
+   ukuran tiap file — biaya nyata jalur arsip satria (freshness scan + daftar
    tar), layak diatribusikan (design: "batas fase eksplisit"). */
 static void measureInput(ProfCtx *p) {
   List files = {0}, dirs = {0};
@@ -234,7 +234,7 @@ static int tarStep(ProfCtx *p, const char *tarPath) {
   size_t n = strlen(p->dir) + strlen(tarPath) + 48;
   char *cmd = malloc(n);
   if (!cmd) {
-    fprintf(stderr, "rbot: profile: kehabisan memori\n");
+    fprintf(stderr, "satria: profile: kehabisan memori\n");
     return 1;
   }
   snprintf(cmd, n, "tar cf %s -C %s .", tarPath, p->dir);
@@ -243,7 +243,7 @@ static int tarStep(ProfCtx *p, const char *tarPath) {
   profPhaseEnd(p->bytes, ok ? sizeOf(tarPath) : 0);
   free(cmd);
   if (!ok) {
-    fprintf(stderr, "rbot: profile: tar gagal untuk %s\n", p->dir);
+    fprintf(stderr, "satria: profile: tar gagal untuk %s\n", p->dir);
     return 1;
   }
   return 0;
@@ -254,7 +254,7 @@ static int tarStep(ProfCtx *p, const char *tarPath) {
 static int compressStep(ProfCtx *p, const char *tarPath) {
   const char *tool = compTool(p->comp);
   if (!probeAvailable(tool)) {
-    fprintf(stderr, "rbot: profile: '%s' tidak ditemukan di PATH\n", tool);
+    fprintf(stderr, "satria: profile: '%s' tidak ditemukan di PATH\n", tool);
     return 1;
   }
   char outPath[MAX_PATH * 2 + 32];
@@ -262,7 +262,7 @@ static int compressStep(ProfCtx *p, const char *tarPath) {
   size_t n = strlen(tarPath) + strlen(outPath) + strlen(tool) + 32;
   char *cmd = malloc(n);
   if (!cmd) {
-    fprintf(stderr, "rbot: profile: kehabisan memori\n");
+    fprintf(stderr, "satria: profile: kehabisan memori\n");
     return 1;
   }
   snprintf(cmd, n, "%s -c %s > %s", tool, tarPath, outPath);
@@ -272,7 +272,7 @@ static int compressStep(ProfCtx *p, const char *tarPath) {
   profPhaseEnd(tin, ok ? sizeOf(outPath) : 0);
   free(cmd);
   if (!ok) {
-    fprintf(stderr, "rbot: profile: %s gagal\n", tool);
+    fprintf(stderr, "satria: profile: %s gagal\n", tool);
     return 1;
   }
   return 0;
@@ -304,7 +304,7 @@ static int runEmbed(ProfCtx *p) {
     p->bytes = inBytes;
     copyStr(tarPath, sizeof(tarPath), p->dir);
   } else {
-    /* Direktori: rbot mengarsipkan sebelum embed (pola buildEmbeddedEntry). */
+    /* Direktori: satria mengarsipkan sebelum embed (pola buildEmbeddedEntry). */
     measureInput(p);
     snprintf(tarPath, sizeof(tarPath), "%s/profile.tar", p->tmp);
     int rc = tarStep(p, tarPath);
@@ -317,7 +317,7 @@ static int runEmbed(ProfCtx *p) {
   size_t n = strlen(objPath) + strlen(tarPath) + 64;
   char *cmd = malloc(n);
   if (!cmd) {
-    fprintf(stderr, "rbot: profile: kehabisan memori\n");
+    fprintf(stderr, "satria: profile: kehabisan memori\n");
     return 1;
   }
   /* Flag identik dengan buildEmbeddedEntry: representasi biaya embed nyata. */
@@ -327,7 +327,7 @@ static int runEmbed(ProfCtx *p) {
   profPhaseEnd(inBytes, ok ? sizeOf(objPath) : 0);
   free(cmd);
   if (!ok) {
-    fprintf(stderr, "rbot: profile: ld gagal untuk %s\n", tarPath);
+    fprintf(stderr, "satria: profile: ld gagal untuk %s\n", tarPath);
     return 1;
   }
   return 0;
@@ -343,8 +343,8 @@ static int runLibrary(ProfCtx *p) {
   profPhaseEnd(0, 0);
   if (objs.count == 0) {
     fprintf(stderr,
-            "rbot: profile library=%s: tidak ada object .o di direktori "
-            "(build dulu dengan rbot biasa)\n",
+            "satria: profile library=%s: tidak ada object .o di direktori "
+            "(build dulu dengan satria biasa)\n",
             p->target);
     return 1;
   }
@@ -367,7 +367,7 @@ static int runLibrary(ProfCtx *p) {
     const char *libTool = "ar";
 #endif
     if (!probeAvailable(libTool)) {
-      fprintf(stderr, "rbot: profile: '%s' tidak ditemukan di PATH\n", libTool);
+      fprintf(stderr, "satria: profile: '%s' tidak ditemukan di PATH\n", libTool);
       rc = 1;
     } else {
 #ifdef _WIN32
@@ -386,7 +386,7 @@ static int runLibrary(ProfCtx *p) {
       if (cmd) snprintf(cmd, n, "ar rcs %s", outPath);
 #endif
       if (!cmd) {
-        fprintf(stderr, "rbot: profile: kehabisan memori\n");
+        fprintf(stderr, "satria: profile: kehabisan memori\n");
         rc = 1;
       } else {
         for (int i = 0; i < objs.count; i++) {
@@ -398,7 +398,7 @@ static int runLibrary(ProfCtx *p) {
         profPhaseEnd(bytes, ok ? sizeOf(outPath) : 0);
         free(cmd);
         if (!ok) {
-          fprintf(stderr, "rbot: profile: gagal membuat static library\n");
+          fprintf(stderr, "satria: profile: gagal membuat static library\n");
           rc = 1;
         }
       }
@@ -412,14 +412,14 @@ static int runLibrary(ProfCtx *p) {
     snprintf(bf, sizeof(bf), "%s/Buildfile", p->dir);
     if (!fsFileExists(bf)) {
       fprintf(stderr,
-              "rbot: profile: with=shared memerlukan Buildfile di %s "
+              "satria: profile: with=shared memerlukan Buildfile di %s "
               "(sumber compiler/flags)\n",
               p->target);
       rc = 1;
     } else {
       Config c = configDefaults();
       if (!loadConfigEx(&c, bf, false) || !resolveCompiler(&c)) {
-        fprintf(stderr, "rbot: profile: Buildfile di %s tidak bisa dimuat\n", p->target);
+        fprintf(stderr, "satria: profile: Buildfile di %s tidak bisa dimuat\n", p->target);
         rc = 1;
       } else {
         p->compiler = c.cc;
@@ -431,7 +431,7 @@ static int runLibrary(ProfCtx *p) {
         if (c.langCpp) n += 16;
         char *cmd = malloc(n);
         if (!cmd) {
-          fprintf(stderr, "rbot: profile: kehabisan memori\n");
+          fprintf(stderr, "satria: profile: kehabisan memori\n");
           rc = 1;
         } else {
           snprintf(cmd, n, "%s -shared -o %s", c.cc, outPath);
@@ -445,7 +445,7 @@ static int runLibrary(ProfCtx *p) {
           profPhaseEnd(bytes, ok ? sizeOf(outPath) : 0);
           free(cmd);
           if (!ok) {
-            fprintf(stderr, "rbot: profile: gagal link shared library\n");
+            fprintf(stderr, "satria: profile: gagal link shared library\n");
             rc = 1;
           }
         }
@@ -462,7 +462,7 @@ static int runLibrary(ProfCtx *p) {
  * incremental nyata: config, fingerprint, decide, compile, link.
  *
  * Berbeda dari binary= (yang mengukur cold build murni, semua object
- * dikompilasi ulang), project= mengukur seperti `rbot` biasa: decide
+ * dikompilasi ulang), project= mengukur seperti `satria` biasa: decide
  * membandingkan mtime object vs source via deps (header dua lapis), jadi
  * run kedua harus menunjukkan biaya no-op (compilasi 0). Semua state
  * yang dibutuhkan decide (deps.cache) HIDUP DI direktori sementara
@@ -497,33 +497,33 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
   bool haveBf = fsFileExists(bf);
 
   if (!fsSetCwd(p->dir)) {
-    fprintf(stderr, "rbot: profile %s=%s: cannot enter directory\n", passKind, p->target);
+    fprintf(stderr, "satria: profile %s=%s: cannot enter directory\n", passKind, p->target);
     return 1;
   }
 
   profPhaseBegin("config");
   if (haveBf && !loadConfigEx(&c, bf, false)) {
     profPhaseEnd(0, 0);
-    fprintf(stderr, "rbot: profile %s=%s: Buildfile tidak bisa dimuat\n", passKind, p->target);
+    fprintf(stderr, "satria: profile %s=%s: Buildfile tidak bisa dimuat\n", passKind, p->target);
     return 1;
   }
   if (!haveBf) configFinalize(&c); /* konvensi proyek standar */
   bool ccOk = resolveCompiler(&c);
   profPhaseEnd(0, 0);
   if (!ccOk) {
-    fprintf(stderr, "rbot: profile %s=%s: compiler tidak ditemukan\n", passKind, p->target);
+    fprintf(stderr, "satria: profile %s=%s: compiler tidak ditemukan\n", passKind, p->target);
     return 1;
   }
   p->compiler = c.cc;
 
   if (!c.binary) {
-    fprintf(stderr, "rbot: profile %s=%s: output.binary = false (tidak ada binary)\n", passKind,
+    fprintf(stderr, "satria: profile %s=%s: output.binary = false (tidak ada binary)\n", passKind,
             p->target);
     return 1;
   }
   if (c.embCount > 0) {
     fprintf(stderr,
-            "rbot: profile %s=%s: proyek ber-embedded tidak didukung "
+            "satria: profile %s=%s: proyek ber-embedded tidak didukung "
             "(arsip embedded harus ditulis ke lokasi asli)\n",
             passKind, p->target);
     return 1;
@@ -539,12 +539,12 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
   copyStr(c.outCompileCommands, sizeof(c.outCompileCommands), "false");
 
   if (!fsDirExists(c.root)) {
-    fprintf(stderr, "rbot: profile %s=%s: root '%s' bukan direktori\n", passKind, p->target,
+    fprintf(stderr, "satria: profile %s=%s: root '%s' bukan direktori\n", passKind, p->target,
             c.root);
     return 1;
   }
   if (!fsSetCwd(c.root)) {
-    fprintf(stderr, "rbot: profile %s=%s: cannot enter root '%s'\n", passKind, p->target, c.root);
+    fprintf(stderr, "satria: profile %s=%s: cannot enter root '%s'\n", passKind, p->target, c.root);
     return 1;
   }
   procSetForeground(p->jobs > 1 ? false : c.foreground);
@@ -567,7 +567,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
   listSort(&srcs);
   profPhaseEnd(0, 0);
   if (srcs.count == 0) {
-    fprintf(stderr, "rbot: profile %s=%s: tidak ada source .c/.cpp di sources\n", passKind,
+    fprintf(stderr, "satria: profile %s=%s: tidak ada source .c/.cpp di sources\n", passKind,
             p->target);
     listFree(&srcs);
     return 1;
@@ -629,7 +629,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
   free(inc);
   listFree(&pending);
   if (!okc) {
-    fprintf(stderr, "rbot: profile %s=%s: kompilasi gagal (%d)\n", passKind, p->target,
+    fprintf(stderr, "satria: profile %s=%s: kompilasi gagal (%d)\n", passKind, p->target,
             failed + interrupted);
     listFree(&srcs);
     return 1;
@@ -664,7 +664,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
   }
   char *cmd = malloc(n);
   if (!cmd) {
-    fprintf(stderr, "rbot: profile: kehabisan memori\n");
+    fprintf(stderr, "satria: profile: kehabisan memori\n");
     listFree(&srcs);
     return 1;
   }
@@ -713,7 +713,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
   free(cmd);
   listFree(&srcs);
   if (!ok) {
-    fprintf(stderr, "rbot: profile %s=%s: link gagal\n", passKind, p->target);
+    fprintf(stderr, "satria: profile %s=%s: link gagal\n", passKind, p->target);
     return 1;
   }
   return 0;
@@ -724,7 +724,7 @@ static int buildSandboxed(ProfCtx *p, const char *passKind) {
  * parse (baca Buildfile.ws), dependency (topo sort), library, binary.
  *
  * Keterbatasan nyata yang TIDAK dikarang: fase library/binary di sini
- * mengeksekusi build proyek via jalur yang sama dengan `rbot -w`, yang
+ * mengeksekusi build proyek via jalur yang sama dengan `satria -w`, yang
  * menulis state/output ke root proyek — tidak bisa diisolasi ke tmp
  * tanpa menyalin seluruh tree proyek. Pendekatan desain: ukur fase yang
  * aman di-tempat (parse, dependency/synthesis) langsung, lalu fase
@@ -767,7 +767,7 @@ static int runWorkspace(ProfCtx *p) {
     char projDir[MAX_PATH * 3];
     snprintf(projDir, sizeof(projDir), "%s/%s", p->dir, names[i]);
     if (!fsDirExists(projDir)) {
-      fprintf(stderr, "rbot: profile workspace=%s: proyek '%s' bukan direktori\n", p->target,
+      fprintf(stderr, "satria: profile workspace=%s: proyek '%s' bukan direktori\n", p->target,
               names[i]);
       return 1;
     }
@@ -840,7 +840,7 @@ static void printSummary(const ProfCtx *p) {
    mengikuti context, tetap manusiawi. */
 static void printReport(const ProfCtx *p, FILE *out) {
   char nb[32];
-  fprintf(out, "rbot profile report\n===================\n\n");
+  fprintf(out, "satria profile report\n===================\n\n");
 
   fprintf(out, "context\n\n---\n\n");
   fprintf(out, "type       : %s\n", p->type);
@@ -852,7 +852,7 @@ static void printReport(const ProfCtx *p, FILE *out) {
   fprintf(out, "backend    : %s\n", withEq ? withEq + 6 : "default");
 
   fprintf(out, "\nenvironment\n\n---\n\n");
-  fprintf(out, "rbot       : %s\n", rbotVersion());
+  fprintf(out, "satria       : %s\n", satriaVersion());
   char plat[128];
   platformString(plat, sizeof(plat));
   fprintf(out, "platform   : %s\n", plat);
@@ -929,14 +929,14 @@ static int parseArchiveWith(ProfCtx *p, const char *val) {
       p->comp = COMP_BZ2;
     } else {
       fprintf(stderr,
-              "rbot: profile: nilai 'with' tidak dikenal: '%s' "
+              "satria: profile: nilai 'with' tidak dikenal: '%s' "
               "(pakai: tar | tar,gz | tar,xz | tar,bz2)\n",
               tok);
       return 2;
     }
   }
   if (!p->doTar && p->comp != COMP_NONE) {
-    fprintf(stderr, "rbot: profile: 'with=gz/xz/bz2' tidak bermakna tanpa tar\n");
+    fprintf(stderr, "satria: profile: 'with=gz/xz/bz2' tidak bermakna tanpa tar\n");
     return 2;
   }
   return 0;
@@ -957,13 +957,13 @@ static int parseLibraryWith(ProfCtx *p, const char *val) {
     } else if (strcmp(tok, "shared") == 0) {
       p->libShared = true;
     } else {
-      fprintf(stderr, "rbot: profile: nilai 'with' tidak dikenal: '%s' (pakai: static | shared)\n",
+      fprintf(stderr, "satria: profile: nilai 'with' tidak dikenal: '%s' (pakai: static | shared)\n",
               tok);
       return 2;
     }
   }
   if (!p->libStatic && !p->libShared) {
-    fprintf(stderr, "rbot: profile: 'with' kosong (pakai: static | shared)\n");
+    fprintf(stderr, "satria: profile: 'with' kosong (pakai: static | shared)\n");
     return 2;
   }
   return 0;
@@ -978,13 +978,13 @@ static int parseLibraryWith(ProfCtx *p, const char *val) {
  */
 int cmdProfile(const char *const *args, int nargs) {
   if (nargs < 1 || !args[0] || !args[0][0]) {
-    fprintf(stderr, "rbot: profile memerlukan context (mis. 'rbot profile archive=<dir>')\n");
+    fprintf(stderr, "satria: profile memerlukan context (mis. 'satria profile archive=<dir>')\n");
     return 2;
   }
 
   const char *eq = strchr(args[0], '=');
   if (!eq || eq == args[0]) {
-    fprintf(stderr, "rbot: profile context harus berbentuk name=value (mis. archive=rupamod)\n");
+    fprintf(stderr, "satria: profile context harus berbentuk name=value (mis. archive=rupamod)\n");
     return 2;
   }
   char name[16];
@@ -994,12 +994,12 @@ int cmdProfile(const char *const *args, int nargs) {
   name[nl] = '\0';
   const char *value = eq + 1;
   if (!*value) {
-    fprintf(stderr, "rbot: profile context '%s' memerlukan direktori\n", name);
+    fprintf(stderr, "satria: profile context '%s' memerlukan direktori\n", name);
     return 2;
   }
   if (!knownContext(name)) {
     fprintf(stderr,
-            "rbot: unknown profile context '%s' (yang dikenal: project, workspace, "
+            "satria: unknown profile context '%s' (yang dikenal: project, workspace, "
             "archive, library, embed, binary)\n",
             name);
     return 2;
@@ -1034,7 +1034,7 @@ int cmdProfile(const char *const *args, int nargs) {
     if (strncmp(a, "--", 2) == 0) {
       if (strcmp(a, "--report") == 0) {
         if (i + 1 >= nargs || !args[i + 1][0]) {
-          fprintf(stderr, "rbot: --report requires a file argument\n");
+          fprintf(stderr, "satria: --report requires a file argument\n");
           return 2;
         }
         p.reportFile = args[++i];
@@ -1042,25 +1042,25 @@ int cmdProfile(const char *const *args, int nargs) {
       }
       if (strcmp(a, "--repeat") == 0) {
         if (i + 1 >= nargs || !args[i + 1][0]) {
-          fprintf(stderr, "rbot: --repeat requires a count (mis. --repeat 3)\n");
+          fprintf(stderr, "satria: --repeat requires a count (mis. --repeat 3)\n");
           return 2;
         }
         char *end = NULL;
         long n = strtol(args[++i], &end, 10);
         if (!args[i][0] || *end || n < 1 || n > 100) {
-          fprintf(stderr, "rbot: profile: --repeat tidak valid: '%s' (1..100)\n", args[i]);
+          fprintf(stderr, "satria: profile: --repeat tidak valid: '%s' (1..100)\n", args[i]);
           return 2;
         }
         p.repeat = (int)n;
         continue;
       }
-      fprintf(stderr, "rbot: profile: opsi tidak dikenal: '%s'\n", a);
+      fprintf(stderr, "satria: profile: opsi tidak dikenal: '%s'\n", a);
       return 2;
     }
 
     const char *e = strchr(a, '=');
     if (!e || e == a) {
-      fprintf(stderr, "rbot: profile option harus berbentuk key=value: '%s'\n", a);
+      fprintf(stderr, "satria: profile option harus berbentuk key=value: '%s'\n", a);
       return 2;
     }
     char key[16];
@@ -1081,49 +1081,49 @@ int cmdProfile(const char *const *args, int nargs) {
       char *end = NULL;
       long n = strtol(val, &end, 10);
       if (!*val || *end || n < 1) {
-        fprintf(stderr, "rbot: profile: jobs tidak valid: '%s'\n", val);
+        fprintf(stderr, "satria: profile: jobs tidak valid: '%s'\n", val);
         return 2;
       }
       p.jobs = (int)n;
     } else {
-      fprintf(stderr, "rbot: profile option '%s' is not valid for context '%s'\n", key, p.type);
+      fprintf(stderr, "satria: profile option '%s' is not valid for context '%s'\n", key, p.type);
       return 2;
     }
   }
 
   /* Target: cukup ada; tidak perlu Buildfile (prinsip utama design). */
   if (!absPath(p.target, p.dir, sizeof(p.dir))) {
-    fprintf(stderr, "rbot: profile: cannot resolve directory '%s'\n", p.target);
+    fprintf(stderr, "satria: profile: cannot resolve directory '%s'\n", p.target);
     return 2;
   }
   if (strcmp(p.type, "embed") == 0 && fsFileExists(p.dir)) {
     p.dirIsFile = true; /* embed arsip jadi: tanpa fase tar */
   } else if (!fsDirExists(p.dir)) {
-    fprintf(stderr, "rbot: profile %s=%s: direktori tidak ada\n", name, p.target);
+    fprintf(stderr, "satria: profile %s=%s: direktori tidak ada\n", name, p.target);
     return 2;
   }
 
   /* Alat eksternal diperiksa SEBELUM pengukuran agar kegagalan tool tidak
      tercatat sebagai fase. */
   if ((strcmp(p.type, "archive") == 0 || strcmp(p.type, "embed") == 0) && !probeAvailable("tar")) {
-    fprintf(stderr, "rbot: profile: 'tar' tidak ditemukan di PATH\n");
+    fprintf(stderr, "satria: profile: 'tar' tidak ditemukan di PATH\n");
     return 1;
   }
   if (strcmp(p.type, "archive") == 0 && p.comp != COMP_NONE) {
     const char *tool = compTool(p.comp);
     if (!probeAvailable(tool)) {
-      fprintf(stderr, "rbot: profile: '%s' tidak ditemukan di PATH\n", tool);
+      fprintf(stderr, "satria: profile: '%s' tidak ditemukan di PATH\n", tool);
       return 1;
     }
   }
   if (strcmp(p.type, "embed") == 0 && !embedProbeGnuLd()) {
-    fprintf(stderr, "rbot: profile embed=: GNU ld tidak tersedia "
+    fprintf(stderr, "satria: profile embed=: GNU ld tidak tersedia "
                     "(jalur fallback C-array tidak diprofilkan)\n");
     return 1;
   }
 
   if (!tmpDirMake(&p)) {
-    fprintf(stderr, "rbot: profile: cannot create temp directory\n");
+    fprintf(stderr, "satria: profile: cannot create temp directory\n");
     return 1;
   }
 
@@ -1163,7 +1163,7 @@ int cmdProfile(const char *const *args, int nargs) {
   if (p.reportFile) {
     FILE *rf = fopen(p.reportFile, "w");
     if (!rf) {
-      fprintf(stderr, "rbot: profile: cannot write %s\n", p.reportFile);
+      fprintf(stderr, "satria: profile: cannot write %s\n", p.reportFile);
       return 1;
     }
     printReport(&p, rf);

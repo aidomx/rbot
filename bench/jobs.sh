@@ -11,17 +11,17 @@ printf 'jobs,real,user,sys\n' > "$OUT"
 for j in $JOBS; do
     echo
     echo "========================================"
-    echo "  rbot -j$j"
+    echo "  satria -j$j"
     echo "========================================"
 
     rm -rf ruka/bin ruka/build
     rm -rf rupamod/build
     rm -rf rupa/bin rupa/build
-    rm -rf .rbot
+    rm -rf .satria
 
     START=$(date +%s%N)
 
-    rbot -j"$j"
+    satria -j"$j"
 
     RC=$?
 

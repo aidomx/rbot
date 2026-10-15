@@ -15,7 +15,7 @@ output.buildDir = build
 output.compileCommands = auto
 ```
 
-for every standard project, rbot can infer conventional values and let the Buildfile override only exceptions.
+for every standard project, satria can infer conventional values and let the Buildfile override only exceptions.
 
 ## `output.binary` and scope
 

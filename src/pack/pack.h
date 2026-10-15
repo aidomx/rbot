@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_PACK_H
-#define RBOT_V0_1_0_PACK_H
+#ifndef SATRIA_V0_1_0_PACK_H
+#define SATRIA_V0_1_0_PACK_H
 
 #include "../config.h"
 
@@ -34,4 +34,4 @@ bool packLastRebuilt(void);
  */
 bool packRunAt(const Config *c);
 
-#endif /* RBOT_V0_1_0_PACK_H */
+#endif /* SATRIA_V0_1_0_PACK_H */

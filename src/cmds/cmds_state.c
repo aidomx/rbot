@@ -3,8 +3,8 @@
  * (dipindah apa adanya dari commands.c).
  *
  *   - Fingerprint konfigurasi compile/link + set source
- *     (.rbot/build.fingerprint): berubah -> rebuild penuh.
- *   - Fast no-op snapshot (.rbot/build.state): mtime+size seluruh input;
+ *     (.satria/build.fingerprint): berubah -> rebuild penuh.
+ *   - Fast no-op snapshot (.satria/build.state): mtime+size seluruh input;
  *     persis sama -> summary diulang dari cache, build dilewati total.
  *   - cmdClean: hapus artefak build (build dir, file library,
  *     compile_commands.json, deps.cache).
@@ -26,8 +26,8 @@
 /* ==================== Lokasi file state (state_path) ====================
  *
  * Definisi & semantik ada di cmds_internal.h (bagian cmds_state.c).
- * Mode workspace: file per proyek di .rbot/workspace/<proyek>.<leaf>;
- * mode single: .rbot/<leaf> relatif cwd. */
+ * Mode workspace: file per proyek di .satria/workspace/<proyek>.<leaf>;
+ * mode single: .satria/<leaf> relatif cwd. */
 static char g_stateWsProj[80] = "";
 
 void cmdsStateSetWsProject(const char *name) {
@@ -42,9 +42,9 @@ const char *cmdsStateWsProject(void) { return g_stateWsProj[0] ? g_stateWsProj :
 
 void cmdsStatePath(char *out, size_t n, const char *leaf) {
   if (g_stateWsProj[0])
-    snprintf(out, n, ".rbot/workspace/%s.%s", g_stateWsProj, leaf);
+    snprintf(out, n, ".satria/workspace/%s.%s", g_stateWsProj, leaf);
   else
-    snprintf(out, n, ".rbot/%s", leaf);
+    snprintf(out, n, ".satria/%s", leaf);
 }
 
 void cmdsStateMkdirFor(const char *path) {
@@ -52,7 +52,7 @@ void cmdsStateMkdirFor(const char *path) {
   snprintf(dir, sizeof(dir), "%s", path);
   char *slash = strrchr(dir, '/');
   if (slash) *slash = '\0';
-  mkdirs(dir[0] ? dir : ".rbot");
+  mkdirs(dir[0] ? dir : ".satria");
 }
 
 /* ==================== Fingerprint build state ==================== */
@@ -178,15 +178,15 @@ void cmdsFingerprintInvalidate(void) {
 
 /* ==================== Fast no-op snapshot ==================== */
 /* Dua file state per fase build:
-   - build.state     : fase binary (rbot / -w fase 2) — target = binary.
+   - build.state     : fase binary (satria / -w fase 2) — target = binary.
    - build.lib.state : fase library workspace (cmdBuildEx libOnly) —
      target = library proyek (atau tanpa target bila proyek tak meminta
      library; state-nya murni "semua input & object masih sama").
-   Dengan state fase library, no-op `rbot -w` tidak membayar loadConfig +
+   Dengan state fase library, no-op `satria -w` tidak membayar loadConfig +
    scan fingerprint + decide penuh per proyek (miniws: jalur ringan). */
-#define BUILD_STATE_FILE ".rbot/build.state"
-#define BUILD_STATE_FILE_LIB ".rbot/build.lib.state"
-#define BUILD_STATE_MAGIC "RBOTFAST4"
+#define BUILD_STATE_FILE ".satria/build.state"
+#define BUILD_STATE_FILE_LIB ".satria/build.lib.state"
+#define BUILD_STATE_MAGIC "SATRIAFAST4"
 
 typedef struct {
   char kind;
@@ -561,11 +561,11 @@ bool cmdsFastStateValid(const char *buildfilePath, bool libOnly) {
     int64_t currentMtime = -1;
     long long currentSize = -1;
     if (st->kind == 'L') {
-      /* RBOT_NO_LD sengaja memaksa jalur normal/fallback; jangan biarkan
+      /* SATRIA_NO_LD sengaja memaksa jalur normal/fallback; jangan biarkan
          fastState menelan override itu. */
       char ldPath[MAX_PATH];
       bool cached = false;
-      if (getenv("RBOT_NO_LD") || !ldCacheResolve("ld", ldPath, sizeof(ldPath)) ||
+      if (getenv("SATRIA_NO_LD") || !ldCacheResolve("ld", ldPath, sizeof(ldPath)) ||
           !cacheCheckLD(ldPath, &cached)) {
         ok = false;
         break;
@@ -715,7 +715,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
   }
   /* Include file inputs that are not necessarily inside source/header roots. */
   fastStampAdd(&paths, bf);
-  fastStampAdd(&paths, ".rbot-version");
+  fastStampAdd(&paths, ".satria-version");
   if (compdbEnabled(c) && fsFileExists("compile_commands.json"))
     fastStampAdd(&paths, "compile_commands.json");
   for (int i = 0; i < srcs->count; i++) {
@@ -788,7 +788,7 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
     return;
   }
   listFree(&paths);
-  mkdirs(".rbot");
+  mkdirs(".satria");
   char stateTmp[MAX_PATH + 16];
   snprintf(stateTmp, sizeof(stateTmp), "%s.tmp", stateFile);
   FILE *f = fopen(stateTmp, "w");
@@ -893,7 +893,7 @@ int cmdsCleanRun(const Config *c) {
     printf("> Removed   : %s\n", BUILD_STATE_FILE_LIB);
     any = true;
   }
-  /* Cache verdict deteksi GNU ld (.rbot/ld.cache) ikut dibuang: clean
+  /* Cache verdict deteksi GNU ld (.satria/ld.cache) ikut dibuang: clean
      berarti mulai dari nol, run berikutnya mem-probe ulang `ld --version`
      sekali lalu merekamnya lagi. */
   const char *ldCache = ldCacheFile(); /* satu sumber nama file: embed_ld_cache */
@@ -902,11 +902,11 @@ int cmdsCleanRun(const Config *c) {
     printf("> Removed   : %s\n", ldCache);
     any = true;
   }
-  /* Staging packaging (.rbot/pack) adalah cache — artefak final di dist/
+  /* Staging packaging (.satria/pack) adalah cache — artefak final di dist/
      TIDAK disentuh (bisa jadi dirujuk embedded.* proyek lain). */
-  if (fsDirExists(".rbot/pack")) {
-    fsRemoveTree(".rbot/pack");
-    printf("> Removed   : .rbot/pack\n");
+  if (fsDirExists(".satria/pack")) {
+    fsRemoveTree(".satria/pack");
+    printf("> Removed   : .satria/pack\n");
     any = true;
   }
   if (!any) printf("> Nothing to clean (see Buildfile: clean)\n");

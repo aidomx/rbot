@@ -8,7 +8,7 @@
  * (mtime >= source) dipakai sebagai sumber edges node source: flat tapi
  * lengkap, karena compiler yang meresolusi rekursi itu sendiri.
  *
- * Cache edges ("!e"/"!k" di .rbot/deps.cache): run sebelumnya menyimpan
+ * Cache edges ("!e"/"!k" di .satria/deps.cache): run sebelumnya menyimpan
  * edges dari file .d yang dipakai. Run berikutnya memvalidasi satu stat
  * mtime .d: sama -> edges dipasang langsung, file .d tidak dibuka.
  * Berbeda/hilang -> entry diabaikan, edges dibangun ulang dari .d (atau

@@ -31,9 +31,9 @@
 
 /* MSVC tidak (selalu) menyediakan typedef mode_t — itu POSIX-only.
    struct _stat memakai unsigned short untuk st_mode. */
-#ifndef RBOT_MODE_T_DEFINED
+#ifndef SATRIA_MODE_T_DEFINED
 typedef unsigned short mode_t;
-#define RBOT_MODE_T_DEFINED
+#define SATRIA_MODE_T_DEFINED
 #endif
 
 #include <sys/stat.h>
@@ -333,7 +333,7 @@ unsigned fsGetMode(const char *path) {
 
 bool fsRemoveTree(const char *path) {
   /* lstat prevents following symlinks while removing package archives or
-     ~/.rbot; otherwise a symlink to a directory could delete external data. */
+     ~/.satria; otherwise a symlink to a directory could delete external data. */
   struct stat rootStat;
   if (lstat(path, &rootStat) != 0) return true;
   if (S_ISLNK(rootStat.st_mode) || !S_ISDIR(rootStat.st_mode)) return unlink(path) == 0;

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# graph.sh — generate a synthetic C dependency graph for rbot scaling tests.
+# graph.sh — generate a synthetic C dependency graph for satria scaling tests.
 #
 # The graph is bipartite: N source nodes depend on generated header nodes.
 # E controls the number of source -> header dependency edges.  The generated
 # Buildfile is intentionally small; the expensive part is the dependency graph
-# seen by the compiler/rbot, not shell bookkeeping.
+# seen by the compiler/satria, not shell bookkeeping.
 #
 # Usage:
 #   ./bench/graph.sh -n 1000 -e 5000 -o ws.tmp/graph

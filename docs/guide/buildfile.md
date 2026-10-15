@@ -1,6 +1,6 @@
 # Buildfile
 
-rbot uses a declarative `Buildfile` with `key = value` assignments and `use` declarations.
+satria uses a declarative `Buildfile` with `key = value` assignments and `use` declarations.
 
 A representative v0.2.0 Buildfile is:
 
@@ -21,7 +21,7 @@ compiler = cl, gcc, clang
 c.build = false
 c.compdb = false
 
-o.binaryName = rbot
+o.binaryName = satria
 o.binaryDir = bin
 o.buildDir = build
 o.compileCommands = auto
@@ -57,7 +57,7 @@ free to declare `sources`, `headers`, and output names explicitly.
 Notes:
 
 - The binary name is the cwd folder's base name, sanitized: characters
-  outside letters, digits, `_`, `-`, `.` become `_` (fallback `rbot` if
+  outside letters, digits, `_`, `-`, `.` become `_` (fallback `satria` if
   the name is unusable).
 - `-Iinclude` reaches the compiler and `compile_commands.json` through
   the `headers` convention.
@@ -194,7 +194,7 @@ resolves to `-Wall -Wextra -D_REENTRANT -O2`.
 
 ## Defines
 
-Preprocessor macros are declared without any `-D`/`/D` prefix — rbot
+Preprocessor macros are declared without any `-D`/`/D` prefix — satria
 translates them for the active compiler (GCC/Clang: `-DDEBUG`, MSVC:
 `/DDEBUG`):
 
@@ -206,7 +206,7 @@ defines.windows = UNICODE, WIN32_LEAN_AND_MEAN
 
 ## Process behavior
 
-`foreground` controls process-group/SIGINT behavior. rbot can own SIGINT handling and forward interruption to child build processes.
+`foreground` controls process-group/SIGINT behavior. satria can own SIGINT handling and forward interruption to child build processes.
 
 ## Progress
 

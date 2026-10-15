@@ -2,7 +2,7 @@
  * deps_snapshot — snapshot hash+mtime lintas-run & API publik deps
  * (dipindah apa adanya dari deps.c).
  *
- * Snapshot (.rbot/deps.cache) merekam hash konten seluruh file yang
+ * Snapshot (.satria/deps.cache) merekam hash konten seluruh file yang
  * terlibat build sukses terakhir: mtime dipakai sebagai shortcut (file
  * dengan mtime sama tidak dibaca ulang), hash memverifikasi `touch`
  * tanpa perubahan isi. Juga memuat section cache edges (!e/!k) dalam

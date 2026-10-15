@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_UTIL_H
-#define RBOT_V0_1_0_UTIL_H
+#ifndef SATRIA_V0_1_0_UTIL_H
+#define SATRIA_V0_1_0_UTIL_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -52,7 +52,7 @@ void mkparent(const char *path);
    Pemanggil yang urutannya menentukan output (link, listfile tar, staging
    pack) memanggil listSort(out) SETELAH walkDir selesai. */
 void walkDir(const char *dir, const char *ext, List *out);
-/* Sama dengan walkDir; di mode workspace hasilnya di-cache (.rbot/ws.src).
+/* Sama dengan walkDir; di mode workspace hasilnya di-cache (.satria/ws.src).
    Implementasi di cmds/cmds_wsstate.c. */
 void wsWalkDirCached(const char *dir, const char *ext, List *out);
 bool newerThan(const char *a, const char *b);
@@ -70,4 +70,4 @@ double nowSeconds(void);
    -> LANG; Windows menambah cek codepage konsol (CP_UTF8). */
 const char *repPrefix(void);
 
-#endif /* RBOT_V0_1_0_UTIL_H */
+#endif /* SATRIA_V0_1_0_UTIL_H */

@@ -37,7 +37,7 @@ desc["sel"]   = "edit core+bade, build selektif cakupan -w core"
 desc["dep"]   = "edit .rp+core, build selektif cakupan -w bade"
 desc["libtouch"] = "touch include/ext.h (header internal), konten sama"
 desc["libhdr"]   = "edit isi include/ext.h (header internal, include relatif)"
-desc["rel"]   = "release tar+sha256 (rbot-only, diukur terpisah)"
+desc["rel"]   = "release tar+sha256 (satria-only, diukur terpisah)"
 for (si = 1; si <= nsc; si++) {
 s = SC[si]; k = 0; nf = 0
 for (i = 1; i <= ng; i++) {
@@ -102,11 +102,11 @@ rules_header() {
   printf '  %-10s: %s\n' "cold" "obj penuh, arc 1, lib 4, bin 2 · noop: semua nol"
   printf '  %-10s: %s\n' "leaf/bade" "cc 1 — dependensi compile terbukti via shim"
   printf '  %-10s: %s\n' "mod" "cc 0 — arsip berubah, kompilasi tidak perlu ulang"
-  printf '  %-10s: %s\n' "touch" "rbot 0 (content-hash); ninja/make 6 (mtime, dependen a.h)"
+  printf '  %-10s: %s\n' "touch" "satria 0 (content-hash); ninja/make 6 (mtime, dependen a.h)"
   printf '  %-10s: %s\n' "hedit" "SEMUA tool obj cc 6 (edit konten header pusat), lib 4, bin 2"
   printf '  %-10s: %s\n' "sel" "cakupan disamakan (SEL_TARGETS) — obj cc 2, lib 4, bin 2"
   printf '  %-10s: %s\n' "dep" "cakupan disamakan — obj cc 1, lib 4, bin 2"
-  printf '  %-10s: %s\n' "rel" "artefak tar + sha256 dicek sha256sum -c (rbot-only)"
+  printf '  %-10s: %s\n' "rel" "artefak tar + sha256 dicek sha256sum -c (satria-only)"
 }
 
 # ---------------------------- [Detailed Validation Log] --------------------

@@ -1,6 +1,6 @@
 # Architecture Notes
 
-rbot's implementation is organized around several concerns rather than a monolithic compiler loop.
+satria's implementation is organized around several concerns rather than a monolithic compiler loop.
 
 ## Configuration
 
@@ -12,7 +12,7 @@ The dependency subsystem reads `.d` files and can scan includes when necessary. 
 
 ## Compilation
 
-The compiler layer selects the platform/compiler command and builds individual objects. Parallel execution is coordinated by rbot.
+The compiler layer selects the platform/compiler command and builds individual objects. Parallel execution is coordinated by satria.
 
 ## Workspace
 

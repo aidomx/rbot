@@ -1,8 +1,8 @@
-# rbot Documentation
+# satria Documentation
 
 **A simple builder for you.**
 
-Documentation package for rbot. This archive contains documentation only; it does not contain rbot source code.
+Documentation package for satria. This archive contains documentation only; it does not contain satria source code.
 
 ## Contents
 
@@ -13,4 +13,4 @@ Documentation package for rbot. This archive contains documentation only; it doe
 
 ## Version scope
 
-The implementation reference in this package is based on **rbot v0.2.0**. Later design discussions are explicitly marked as proposed direction and should not be read as features guaranteed by v0.2.0.
+The implementation reference in this package is based on **satria v0.2.0**. Later design discussions are explicitly marked as proposed direction and should not be read as features guaranteed by v0.2.0.

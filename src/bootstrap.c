@@ -81,14 +81,14 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
     const char *a = argv[i];
     const char *err = NULL;
 
-    /* -w: mode workspace (Buildfile.ws). `rbot -w` = semua proyek;
-       `rbot -w <nama>` = hanya proyek itu. OPSI, bukan command — argumen
+    /* -w: mode workspace (Buildfile.ws). `satria -w` = semua proyek;
+       `satria -w <nama>` = hanya proyek itu. OPSI, bukan command — argumen
        setelahnya TIDAK diperlakukan sebagai command (kecuali command yang
        dikenal, lihat di bawah). */
     if (strcmp(a, "-w") == 0) {
       bs->want_workspace = true;
       /* Kata berikutnya = nama proyek KECUALI command yang dikenal
-         (rbot -w clean harus tetap berarti clean, bukan proyek "clean"). */
+         (satria -w clean harus tetap berarti clean, bukan proyek "clean"). */
       if (i + 1 < argc && argv[i + 1][0] && argv[i + 1][0] != '-' &&
           strcmp(argv[i + 1], "build") != 0 && strcmp(argv[i + 1], "clean") != 0 &&
           strcmp(argv[i + 1], "init") != 0 && strcmp(argv[i + 1], "help") != 0 &&
@@ -97,7 +97,7 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       continue;
     }
 
-    if (strcmp(a, "-p") == 0) { /* rbot init -p: mode interaktif */
+    if (strcmp(a, "-p") == 0) { /* satria init -p: mode interaktif */
       bs->interactive = true;
       continue;
     }
@@ -105,12 +105,12 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
     /* -g compdb: hasilkan compile_commands.json tanpa build (query-only). */
     if (strcmp(a, "-g") == 0) {
       if (i + 1 >= argc || !argv[i + 1][0] || argv[i + 1][0] == '-') {
-        fprintf(stderr, "rbot: -g requires a target (mis. 'rbot -g compdb')\n");
+        fprintf(stderr, "satria: -g requires a target (mis. 'satria -g compdb')\n");
         return 2;
       }
       const char *gt = argv[++i];
       if (strcmp(gt, "compdb") != 0) {
-        fprintf(stderr, "rbot: unknown -g target '%s' (yang tersedia: compdb)\n", gt);
+        fprintf(stderr, "satria: unknown -g target '%s' (yang tersedia: compdb)\n", gt);
         return 2;
       }
       bs->generate_compdb = true;
@@ -120,7 +120,7 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
     if (strcmp(a, "-xf") == 0 || strcmp(a, "-xcf") == 0) {
       bs->conv_keep = (a[2] == 'c');
       if (i + 1 >= argc || !argv[i + 1][0]) {
-        fprintf(stderr, "rbot: %s requires a build.ninja or 'make' argument\n", a);
+        fprintf(stderr, "satria: %s requires a build.ninja or 'make' argument\n", a);
         return 2;
       }
       bs->conv_file = argv[++i];
@@ -134,7 +134,7 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
 
     if (strcmp(a, "-f") == 0) {
       if (i + 1 >= argc || !argv[i + 1][0]) {
-        fprintf(stderr, "rbot: -f requires a file argument\n");
+        fprintf(stderr, "satria: -f requires a file argument\n");
         return 2;
       }
       bs->buildfile = argv[++i];
@@ -149,21 +149,21 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
 
     if (strcmp(a, "-j") == 0 || strcmp(a, "--jobs") == 0) {
       if (!parseJobsArg(NULL, false, &bs->jobs, &err)) {
-        fprintf(stderr, "rbot: invalid job count '%s'\n", err ? err : a);
+        fprintf(stderr, "satria: invalid job count '%s'\n", err ? err : a);
         return 2;
       }
       continue;
     }
     if (strncmp(a, "-j", 2) == 0 && a[2] != '\0') { /* -j4 */
       if (!parseJobsArg(a + 2, true, &bs->jobs, &err)) {
-        fprintf(stderr, "rbot: invalid job count '%s'\n", err ? err : a + 2);
+        fprintf(stderr, "satria: invalid job count '%s'\n", err ? err : a + 2);
         return 2;
       }
       continue;
     }
     if (strncmp(a, "--jobs=", 7) == 0) { /* --jobs=4 */
       if (!parseJobsArg(a + 7, true, &bs->jobs, &err)) {
-        fprintf(stderr, "rbot: invalid job count '%s'\n", err ? err : a + 7);
+        fprintf(stderr, "satria: invalid job count '%s'\n", err ? err : a + 7);
         return 2;
       }
       continue;
@@ -175,7 +175,7 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
        Parse tetap bebas alokasi berat. Diterima sebelum/sesudah command. */
     if (strcmp(a, "--") == 0) {
       if (i + 1 >= argc || !argv[i + 1][0]) {
-        fprintf(stderr, "rbot: -- requires key=value (mis. name=rupa)\n");
+        fprintf(stderr, "satria: -- requires key=value (mis. name=rupa)\n");
         return 2;
       }
       int n = 0;
@@ -187,7 +187,7 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
          argv[0..n-1] milik caller; array kecil malloc -> di-clean. */
       const char **sel = malloc((size_t)(n + 1) * sizeof(*sel));
       if (!sel) {
-        fprintf(stderr, "rbot: out of memory\n");
+        fprintf(stderr, "satria: out of memory\n");
         return 2;
       }
       for (int k = 0; k < n; k++) sel[k] = argv[i - n + 1 + k];
@@ -201,7 +201,7 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       /* `profile` diagnostik berdiri sendiri (design/profile.md): SEMUA
          argumen setelahnya adalah context/opsi milik profile — berhenti
          parse opsi global agar tidak salah makna (mis. with=tar bukan
-         opsi -f/-w rbot). */
+         opsi -f/-w satria). */
       if (strcmp(a, "profile") == 0) {
         bs->cmd = CMD_PROFILE;
         bs->profile_argv = argv + i + 1;
@@ -217,7 +217,7 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
      enum terpisah — hanya berlaku dengan -w. */
   if (!brokeAtProfile) {
     if (!cmd || !*cmd) {
-      bs->cmd = CMD_BUILD; /* `rbot` polos = build */
+      bs->cmd = CMD_BUILD; /* `satria` polos = build */
     } else if (strcmp(cmd, "build") == 0) {
       bs->cmd = CMD_BUILD;
     } else if (strcmp(cmd, "init") == 0) {
@@ -229,12 +229,12 @@ int bootstrapParse(int argc, const char *argv[], Bootstrap *bs) {
       bs->cmd = CMD_HELP;
     } else    if (strcmp(cmd, "release") == 0) {
       /* release di workspace = build + release; di mode satu-proyek, ini
-         dianggap command asing — ditolak di rbot.c agar jelas. */
+         dianggap command asing — ditolak di satria.c agar jelas. */
       bs->cmd = CMD_RELEASE;
     } else if (strcmp(cmd, "version") == 0) {
       bs->cmd = CMD_VERSION;
     } else {
-      fprintf(stderr, "rbot: unknown command %s\n\n", cmd);
+      fprintf(stderr, "satria: unknown command %s\n\n", cmd);
       showHelp();
       return 1;
     }
@@ -268,7 +268,7 @@ int bootstrapApply(Bootstrap *bs) {
     bs->conv_abs = convAbs;
   }
 
-  /* -f menunjuk file di luar cwd (mis. `rbot -f ../proj/Buildfile.example`):
+  /* -f menunjuk file di luar cwd (mis. `satria -f ../proj/Buildfile.example`):
      masuk ke direktori file itu dulu — sources/headers/output di Buildfile
      relatif terhadap lokasinya, bukan cwd pemanggil (gaya make -C /
      ninja -C). File polos tanpa direktori berarti cwd sudah benar. */
@@ -284,7 +284,7 @@ int bootstrapApply(Bootstrap *bs) {
     if (slash) {
       *slash = '\0';
       if (!fsSetCwd(dir[0] ? dir : "/")) {
-        fprintf(stderr, "rbot: cannot enter directory '%s'\n", dir[0] ? dir : "/");
+        fprintf(stderr, "satria: cannot enter directory '%s'\n", dir[0] ? dir : "/");
         return 2;
       }
       bs->buildfile = slash + 1; /* lanjut sebagai nama file polos */
@@ -317,10 +317,10 @@ int bootstrapApply(Bootstrap *bs) {
       }
       if (!src) {
         fprintf(stderr,
-                "rbot: tidak menemukan Makefile/makefile/GNUmakefile di direktori saat ini\n");
+                "satria: tidak menemukan Makefile/makefile/GNUmakefile di direktori saat ini\n");
         return 1;
       }
-      bs->conv_abs = src; /* dipakai pesan "Removed" di rbot.c */
+      bs->conv_abs = src; /* dipakai pesan "Removed" di satria.c */
     }
     if (bs->conv_keep && fsFileExists(dst)) {
       printf("> '%s' sudah ada. Timpa dengan hasil konversi %s? [y/N] ", dst, src);
@@ -336,7 +336,7 @@ int bootstrapApply(Bootstrap *bs) {
     bool ok = bs->conv_make ? makeToBuildfile(src, dst, err, sizeof(err))
                             : ninjaToBuildfile(src, dst, err, sizeof(err));
     if (!ok) {
-      fprintf(stderr, "rbot: %s\n", err);
+      fprintf(stderr, "satria: %s\n", err);
       return 1;
     }
     if (!bs->conv_keep)
@@ -347,18 +347,18 @@ int bootstrapApply(Bootstrap *bs) {
   /* Evaluasi state build (design fase 2 + design/workspace.md): cold bila
      tidak ada state sebelumnya; noop/dirty ditentukan oleh mesin build
      sendiri saat dispatch (command lain tidak butuh implicit evaluate).
-     Mode workspace memakai .rbot/workspace.state — root workspace tidak
-     punya .rbot/build.state (itu file per-proyek), jadi cek lama selalu
-     melaporkan cold pada tiap run `rbot -w`. */
+     Mode workspace memakai .satria/workspace.state — root workspace tidak
+     punya .satria/build.state (itu file per-proyek), jadi cek lama selalu
+     melaporkan cold pada tiap run `satria -w`. */
   bool wsMode = bs->want_workspace || (bs->cmd == CMD_BUILD && workspaceFileExists());
   /* Mode workspace: cold kasar dari keberadaan file gate — validasi stamp
      gate kini per-closure di workspaceRun (murah untuk `-w <nama>`).
-     Status di sini hanya untuk RBOT_STATUS/evaluasi; mesin build
+     Status di sini hanya untuk SATRIA_STATUS/evaluasi; mesin build
      menentukan noop/dirty sendiri saat dispatch. */
-  bs->status.cold = wsMode ? !wsStateFileExists() : !fsFileExists(".rbot/build.state");
+  bs->status.cold = wsMode ? !wsStateFileExists() : !fsFileExists(".satria/build.state");
   bs->status.has_state = !bs->status.cold;
-  if (getenv("RBOT_STATUS") && *getenv("RBOT_STATUS") && strcmp(getenv("RBOT_STATUS"), "0") != 0)
-    fprintf(stderr, "rbot status: mode=%s cold=%d\n", wsMode ? "workspace" : "project",
+  if (getenv("SATRIA_STATUS") && *getenv("SATRIA_STATUS") && strcmp(getenv("SATRIA_STATUS"), "0") != 0)
+    fprintf(stderr, "satria status: mode=%s cold=%d\n", wsMode ? "workspace" : "project",
             bs->status.cold ? 1 : 0);
   return 0;
 }
@@ -374,7 +374,7 @@ char *bootstrapJoinSelector(const Bootstrap *bs) {
   }
   char *sel = malloc(cap + WS_SEL_MAX);
   if (!sel) {
-    fprintf(stderr, "rbot: out of memory\n");
+    fprintf(stderr, "satria: out of memory\n");
     return NULL;
   }
   size_t off = 0;
@@ -383,7 +383,7 @@ char *bootstrapJoinSelector(const Bootstrap *bs) {
     size_t tl = strlen(tok);
     if (off + tl + 2 >= cap + WS_SEL_MAX) {
       free(sel);
-      fprintf(stderr, "rbot: --: terlalu banyak pasangan key=value\n");
+      fprintf(stderr, "satria: --: terlalu banyak pasangan key=value\n");
       return NULL;
     }
     if (off) sel[off++] = ',';

@@ -36,7 +36,7 @@ Status: **selesai diimplementasi & teruji** (2 Okt 2026).
 | `pack.checksum` | `sha256` | — |
 | `pack.format` | `tar\|none\|deb` (lain → error) | `tar` |
 | `pack.files` | entri yang dikemas (dir/file) | — |
-| `pack.deb.*` | `maintainer`, `description`, `prefix`, `architecture` | `rbot <rbot@localhost>`, pack.name, `/usr/local`, host-derived |
+| `pack.deb.*` | `maintainer`, `description`, `prefix`, `architecture` | `satria <satria@localhost>`, pack.name, `/usr/local`, host-derived |
 
 ## Deb
 
@@ -49,7 +49,7 @@ Status: **selesai diimplementasi & teruji** (2 Okt 2026).
 - Layout ar: `!<arch>\n` + member `debian-binary` (`"2.0\n"`),
   `control.tar.gz`, `data.tar.gz`; header member 60 byte
   `%-16.16s%-12ld%-6s%-6s%-8s%-10lld\`\n`; member ganjil di-pad `\n`.
-- Staging di `.rbot/pack/` — bukan `/tmp`, aman di Termux
+- Staging di `.satria/pack/` — bukan `/tmp`, aman di Termux
   (lihat architecture.md § Lingkungan khusus).
 
 ## Freshness & checksum
@@ -63,7 +63,7 @@ Status: **selesai diimplementasi & teruji** (2 Okt 2026).
 
 ## clean
 
-Menghapus staging `.rbot/pack`; **tidak** menyentuh `dist/` (bisa dirujuk
+Menghapus staging `.satria/pack`; **tidak** menyentuh `dist/` (bisa dirujuk
 `embedded.*` proyek lain).
 
 ## Hasil uji (2 Okt 2026)

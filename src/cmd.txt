@@ -1,7 +1,7 @@
 ---help
-Rbot - A simple builder for you
+Satria - A simple builder for you
 
-> usage: rbot [-f <file>] [-jN] <command>
+> usage: satria [-f <file>] [-jN] <command>
 
 (no command)           Build project from Buildfile
 -f <file>              Use <file> as Buildfile (default: Buildfile)
@@ -10,19 +10,19 @@ Rbot - A simple builder for you
 -j[N]                  Parallel build with N jobs (default: CPU core count)
 -g compdb              Generate compile_commands.json without building
 
-rbot init              Create a minimal Buildfile (use project)
-rbot init -p           Interactive scaffold (name, language, workspace)
-rbot init -w           Create Buildfile.ws (workspace template)
-rbot clean             Remove build artifacts
-rbot profile <ctx>     Measure operation costs (see: help profile)
-rbot -w                Build all projects in workspace (Buildfile.ws)
-rbot -w <name>         Build <name> and its dependencies
-rbot -w release -- name=<p>[,key=value]  Package one release
-rbot help              Show this help
-rbot help <topic>      Show topic help
-rbot version           Show version
-rbot self-upgrade      Upgrade rbot itself
-rbot self-uninstall    Remove rbot and global state (requires confirmation)
+satria init              Create a minimal Buildfile (use project)
+satria init -p           Interactive scaffold (name, language, workspace)
+satria init -w           Create Buildfile.ws (workspace template)
+satria clean             Remove build artifacts
+satria profile <ctx>     Measure operation costs (see: help profile)
+satria -w                Build all projects in workspace (Buildfile.ws)
+satria -w <name>         Build <name> and its dependencies
+satria -w release -- name=<p>[,key=value]  Package one release
+satria help              Show this help
+satria help <topic>      Show topic help
+satria version           Show version
+satria self-upgrade      Upgrade satria itself
+satria self-uninstall    Remove satria and global state (requires confirmation)
 
 Topics: build, profile, workspace, init, clean, release, compdb, ninja, install
 ---endhelp
@@ -30,11 +30,11 @@ Topics: build, profile, workspace, init, clean, release, compdb, ninja, install
 ---build
 Build commands
 
-rbot                   Build project from Buildfile
-rbot build             Same as above (explicit)
-rbot -f <file>         Build using <file> as the Buildfile
-rbot -j[N]             Parallel build, N jobs (-j1 = serial; no -j = cores)
-rbot -g compdb         Generate compile_commands.json only (no build)
+satria                   Build project from Buildfile
+satria build             Same as above (explicit)
+satria -f <file>         Build using <file> as the Buildfile
+satria -j[N]             Parallel build, N jobs (-j1 = serial; no -j = cores)
+satria -g compdb         Generate compile_commands.json only (no build)
 
 Conventions for a standard project (src/ + optional include/):
   a one-line Buildfile is enough: `use project`
@@ -50,43 +50,43 @@ the global value applies first, matching suffix values are appended
 with dedup; std.<target> overrides std.
 
 Build is incremental: header tracking (mtime + content hash),
-dependency cache (.rbot/deps.cache), and a fast no-op snapshot
-(.rbot/build.state) skip work when nothing changed.
+dependency cache (.satria/deps.cache), and a fast no-op snapshot
+(.satria/build.state) skip work when nothing changed.
 ---endbuild
 
 ---install
-Rbot Lifecycle CLI
+Satria Lifecycle CLI
 
-rbot self-upgrade          Upgrade rbot through its distribution mechanism
-rbot self-uninstall [--yes] Remove global rbot state; confirmation required
+satria self-upgrade          Upgrade satria through its distribution mechanism
+satria self-uninstall [--yes] Remove global satria state; confirmation required
 
 ---endinstall
 
 ---profile
 Profile commands — measure costs without a normal build.
-Profiling never touches build state (.rbot/, Buildfile, artifacts).
+Profiling never touches build state (.satria/, Buildfile, artifacts).
 
-rbot profile archive=<dir> [with=tar|none|tar,gz|tar,xz|tar,bz2]
+satria profile archive=<dir> [with=tar|none|tar,gz|tar,xz|tar,bz2]
                        Measure tar + compression of a directory.
-rbot profile embed=<dir|file>
+satria profile embed=<dir|file>
                        Measure embedded-asset pipeline.
-rbot profile library=<dir> [with=static|shared|static,shared]
+satria profile library=<dir> [with=static|shared|static,shared]
                        Measure .o collection + ar rcs / cc -shared.
-rbot profile binary=<dir> [jobs=N] [--report <file>]
+satria profile binary=<dir> [jobs=N] [--report <file>]
                        Measure full cold compile + link in isolation.
-rbot profile project=<dir> [jobs=N]
+satria profile project=<dir> [jobs=N]
                        Measure the incremental project cycle:
                        config, fingerprint, decide, compile, link.
                        With --repeat 2 the second run shows the warm
                        path: decide > 0, compile = 0.
-rbot profile workspace=<dir>
+satria profile workspace=<dir>
                        Measure workspace model cost: parse,
                        dependency/topo, library-declaration checks.
                        Projects are validated but not built.
 
 Options:
   with=<backend>       Context-specific; invalid combos are rejected:
-                       "rbot: profile option 'with' is not valid for
+                       "satria: profile option 'with' is not valid for
                        context '<ctx>'"
   jobs=N               (binary/project) parallel compile jobs
                        (default: cores)
@@ -97,25 +97,25 @@ Options:
                        warm path. Phases aggregate over all runs.
 
 Output: terminal shows a short summary; piped output shows the
-detailed report, so `rbot profile archive=<dir> > profile.md` is
-enough. Paths accept `~/...` (expanded by rbot itself).
+detailed report, so `satria profile archive=<dir> > profile.md` is
+enough. Paths accept `~/...` (expanded by satria itself).
 
 Examples:
-  rbot profile archive=rupamod with=tar,gz
-  rbot profile library=rupamod with=static,shared
-  rbot profile binary=. --report profile.md
-  rbot profile project=. --repeat 3
+  satria profile archive=rupamod with=tar,gz
+  satria profile library=rupamod with=static,shared
+  satria profile binary=. --report profile.md
+  satria profile project=. --repeat 3
 ---endprofile
 
 ---workspace
 Workspace commands (Buildfile.ws)
 
-rbot -w                Build (and release) every declared project
-rbot -w <name>         Build <name> and its dependency closure
-rbot -w clean          Clean the entire workspace
-rbot -w release -- name=<p>[,key=value]
+satria -w                Build (and release) every declared project
+satria -w <name>         Build <name> and its dependency closure
+satria -w clean          Clean the entire workspace
+satria -w release -- name=<p>[,key=value]
                        Package one release to dist/release/<name>/
-rbot init -w           Create a workspace Buildfile (Buildfile.ws)
+satria init -w           Create a workspace Buildfile (Buildfile.ws)
 
 A minimal workspace Buildfile.ws:
   use workspace
@@ -131,12 +131,12 @@ after — so cross-project library references resolve correctly.
 ---init
 Init commands
 
-rbot init              Create a minimal Buildfile (just `use project`)
-rbot init -p           Interactive scaffold: project name, language
+satria init              Create a minimal Buildfile (just `use project`)
+satria init -p           Interactive scaffold: project name, language
                        (c/cpp), std, compiler, flags, include/,
                        workspace membership, depends_on. Enter accepts
                        the default; the scaffold builds out of the box.
-rbot init -w           Write a workspace template (Buildfile.ws)
+satria init -w           Write a workspace template (Buildfile.ws)
 
 init never overwrites existing files: any existing target aborts
 before writing. Ctrl+C or EOF cancels.
@@ -145,26 +145,26 @@ before writing. Ctrl+C or EOF cancels.
 ---clean
 Clean commands
 
-rbot clean             Remove build artifacts:
+satria clean             Remove build artifacts:
                          build directory (o.buildDir, default build/)
                          bin directory (o.binaryDir, default bin/)
                          lib directory (o.libDir, default lib/)
                          compile_commands.json
-                         .rbot cache (deps.cache, build state)
+                         .satria cache (deps.cache, build state)
 
 Clean follows the active project configuration; in workspace mode
-(`rbot -w clean`) it cleans every member project.
+(`satria -w clean`) it cleans every member project.
 ---endclean
 
 ---release
 Release commands (workspace)
 
-rbot -w release -- name=<project>[,key=value...]
+satria -w release -- name=<project>[,key=value...]
                        Package one project release from the CLI.
                        name= is required; target=deb|tar overrides the
                        packaging format for this run. Artifacts go to
                        dist/release/<name>/ (or dist/release/ for a
-                       full `rbot -w` run).
+                       full `satria -w` run).
 
 Releases can also be declared in Buildfile.ws:
   releases = rupa, ruka
@@ -179,7 +179,7 @@ sha256 is written next to the artifact when enabled.
 ---compdb
 Compile commands
 
-rbot -g compdb         Generate/refresh compile_commands.json without
+satria -g compdb         Generate/refresh compile_commands.json without
                        building. Query-only: safe to run any time
                        (editor/clangd integration).
 
@@ -190,25 +190,25 @@ rewriting the file when configuration is unchanged.
 ---ninja
 Ninja conversion
 
-rbot -xf <build.ninja>
+satria -xf <build.ninja>
                        Convert a Ninja build file to a Buildfile and
                        write it to Buildfile.xf.tmp (temporary; the
                        existing Buildfile is never touched). The temp
                        file is used for this command and removed
                        afterwards.
-rbot -xcf <build.ninja>
+satria -xcf <build.ninja>
                        Same conversion, but writes the result to
                        Buildfile — with a confirmation prompt first if
                        one already exists.
 
 Makefile conversion
 
-rbot -xf make          Search Makefile/makefile/GNUmakefile in the
+satria -xf make          Search Makefile/makefile/GNUmakefile in the
                        current directory, extract declarative config
                        (compiler, std, flags, defines, headers,
                        library, sources, target) and write
                        Buildfile.xf.tmp.
-rbot -xcf make         Same, but writes to Buildfile (confirmation
+satria -xcf make         Same, but writes to Buildfile (confirmation
                        prompt if one exists).
 
 Makefile conversion is declarative extraction: only static config is

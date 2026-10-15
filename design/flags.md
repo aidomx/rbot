@@ -4,7 +4,7 @@
 
 Saat ini, konfigurasi di `Buildfile` bersifat global. Jika sebuah proyek membutuhkan _flag_ compiler, _library_, atau _header_ yang berbeda tergantung pada sistem operasi (OS) atau compiler yang digunakan, developer terpaksa menulis logika skrip eksternal atau membuat file `Buildfile` terpisah.
 
-Desain ini memperkenalkan **Suffix Spesifik** (`.platform` dan `.compiler`) pada properti di `Buildfile`. Ini memungkinkan `rbot` secara otomatis memilih dan menggabungkan konfigurasi yang tepat berdasarkan lingkungan _host_ saat ini, tanpa memerlukan blok kondisional (seperti `ifeq` di Makefile atau `if (WIN32)` di CMake).
+Desain ini memperkenalkan **Suffix Spesifik** (`.platform` dan `.compiler`) pada properti di `Buildfile`. Ini memungkinkan `satria` secara otomatis memilih dan menggabungkan konfigurasi yang tepat berdasarkan lingkungan _host_ saat ini, tanpa memerlukan blok kondisional (seperti `ifeq` di Makefile atau `if (WIN32)` di CMake).
 
 ---
 
@@ -21,7 +21,7 @@ Format penulisan:
 
 ### Target yang Didukung
 
-`rbot` akan mengenali target berikut secara _native_:
+`satria` akan mengenali target berikut secara _native_:
 
 **Berdasarkan Platform (OS):**
 
@@ -41,14 +41,14 @@ Format penulisan:
 
 ## 3. Aturan Resolusi & Merging (Penggabungan)
 
-Ketika `rbot` memproses `Buildfile`, dia akan menerapkan aturan **Append & Merge** (Global ditambahkan dengan Spesifik).
+Ketika `satria` memproses `Buildfile`, dia akan menerapkan aturan **Append & Merge** (Global ditambahkan dengan Spesifik).
 
 1. **Prioritas:**
    Nilai Global selalu dimuat pertama kali.
 2. **Penggabungan (Merging):**
    Jika target spesifik (misal `flags.linux`) didefinisikan, nilainya akan **ditambahkan (append)** ke nilai global.
 3. **Deduplikasi:**
-   Untuk properti berbasis array (seperti `flags` dan `library`), `rbot` akan otomatis menghapus nilai duplikat untuk menjaga baris perintah compiler tetap bersih.
+   Untuk properti berbasis array (seperti `flags` dan `library`), `satria` akan otomatis menghapus nilai duplikat untuk menjaga baris perintah compiler tetap bersih.
 
 **Contoh Logika Resolusi:**
 Jika `Buildfile` berisi:
@@ -59,7 +59,7 @@ flags.linux = D_REENTRANT
 flags.gcc = O2
 ```
 
-Dan user menjalankan `rbot` di **Linux menggunakan GCC**, maka array `flags` final yang dikirim ke compiler adalah:
+Dan user menjalankan `satria` di **Linux menggunakan GCC**, maka array `flags` final yang dikirim ke compiler adalah:
 `-Wall -Wextra -D_REENTRANT -O2`
 
 ---
@@ -106,17 +106,17 @@ flags.gcc = fdiagnostics-color=always
 
 ---
 
-## 6. Catatan Implementasi (Untuk Core C `rbot`)
+## 6. Catatan Implementasi (Untuk Core C `satria`)
 
 - Deteksi platform saat ini harus dilakukan di awal fase `Parse` atau `Apply` (menggunakan `#ifdef _WIN32`, `uname()`, dll).
 - Parser `Buildfile` perlu dimodifikasi untuk memisahkan _key_ dan _suffix_ saat menemukan tanda titik (`.`).
-- Jika user mendefinisikan `flags.android` tetapi `rbot` berjalan di Android, sistem harus cukup cerdas untuk memetakannya ke `flags.linux` (karena Android adalah turunan Linux), atau secara eksplisit mendukung `android` sebagai target.
+- Jika user mendefinisikan `flags.android` tetapi `satria` berjalan di Android, sistem harus cukup cerdas untuk memetakannya ke `flags.linux` (karena Android adalah turunan Linux), atau secara eksplisit mendukung `android` sebagai target.
 
 ---
 
 ## 2.1 Preprocessor Defines (`defines`)
 
-Selain `flags`, `rbot` menyediakan properti khusus `defines` untuk menangani makro preprocessor (seperti `-DFOO` atau `-DVERSION="1.0"`). Memisahkan `defines` dari `flags` membuat `Buildfile` jauh lebih bersih dan mudah untuk dibaca.
+Selain `flags`, `satria` menyediakan properti khusus `defines` untuk menangani makro preprocessor (seperti `-DFOO` atau `-DVERSION="1.0"`). Memisahkan `defines` dari `flags` membuat `Buildfile` jauh lebih bersih dan mudah untuk dibaca.
 
 **Sintaks:**
 
@@ -126,7 +126,7 @@ defines.<platform> = MACRO_SPESIFIK
 ```
 
 **Aturan Translasi Otomatis (Compiler Abstraction):**
-User tidak perlu menulis prefix `-D` atau `/D`. `rbot` akan secara otomatis menerjemahkannya berdasarkan compiler yang terdeteksi:
+User tidak perlu menulis prefix `-D` atau `/D`. `satria` akan secara otomatis menerjemahkannya berdasarkan compiler yang terdeteksi:
 
 - **GCC / Clang:** `defines = DEBUG` akan diterjemahkan menjadi `-DDEBUG`.
 - **MSVC (cl):** `defines = DEBUG` akan diterjemahkan menjadi `/DDEBUG`.
@@ -148,4 +148,4 @@ defines.clang = __STDC_CONSTANT_MACROS
 **Keuntungan Desain Ini:**
 
 1. **Zero Boilerplate:** User tidak perlu menulis `-D` berulang-ulang.
-2. **Cross-Compiler Safe:** Tidak ada lagi error `cl: Command line warning D9002: ignoring unknown option '-D'` saat build di Windows menggunakan MSVC, karena `rbot` yang mengurus konversinya.
+2. **Cross-Compiler Safe:** Tidak ada lagi error `cl: Command line warning D9002: ignoring unknown option '-D'` saat build di Windows menggunakan MSVC, karena `satria` yang mengurus konversinya.

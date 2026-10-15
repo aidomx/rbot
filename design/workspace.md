@@ -1,12 +1,12 @@
 # Workspace
 
-Dokumen ini mencatat aturan, desain, dan target implementasi workspace `rbot` v0.2.3+. Workspace adalah jalur build tersendiri; perubahan di sini tidak mengubah perilaku maupun performa single-project.
+Dokumen ini mencatat aturan, desain, dan target implementasi workspace `satria` v0.2.3+. Workspace adalah jalur build tersendiri; perubahan di sini tidak mengubah perilaku maupun performa single-project.
 
 ---
 
 ## Filosofi
 
-Workspace di `rbot` dirancang dengan prinsip:
+Workspace di `satria` dirancang dengan prinsip:
 - **Convention over Configuration** — proyek anggota tidak butuh `Buildfile` lokal kecuali memang ingin berdiri sendiri.
 - **Root-Centric Output** — semua artefak build (biner, objek, library, arsip, state, CompDB) dipusatkan di root workspace. Direktori anggota hanya berisi sumber.
 - **Single Source of Truth** — `Buildfile.ws` di root adalah satu-satunya konfigurasi untuk seluruh workspace.
@@ -16,8 +16,8 @@ Workspace di `rbot` dirancang dengan prinsip:
 
 ## Aturan Pengguna
 
-1. **Build hanya dari root workspace.** Pemanggilan `rbot` atau `rbot -g compdb` dari direktori proyek anggota ditolak dengan pesan yang menunjuk ke root workspace dan `rbot -w <project>`.
-2. **Build selektif** menggunakan `rbot -w <project>` dan membangun dependency closure yang diperlukan. Build penuh tetap `rbot -w`.
+1. **Build hanya dari root workspace.** Pemanggilan `satria` atau `satria -g compdb` dari direktori proyek anggota ditolak dengan pesan yang menunjuk ke root workspace dan `satria -w <project>`.
+2. **Build selektif** menggunakan `satria -w <project>` dan membangun dependency closure yang diperlukan. Build penuh tetap `satria -w`.
 3. **Editor sebaiknya membuka root workspace** agar source seluruh proyek dan satu `compile_commands.json` dapat diakses bersama.
 4. **Direktori anggota adalah penyedia source/config**, bukan tempat output build.
 5. **Deteksi anggota workspace** harus memvalidasi keanggotaan pada `Buildfile.ws` induk; keberadaan file workspace pada parent saja tidak cukup. Jalur single-project di luar workspace tidak berubah.
@@ -33,7 +33,7 @@ workspace/
  ├── compile_commands.json        # CompDB global (seluruh workspace)
  ├── library/                     # Shared headers (nama bebas, tidak harus 'include')
  │   └── ext.h
- ├── .rbot/                       # State & cache terpusat
+ ├── .satria/                       # State & cache terpusat
  │   ├── workspace.state          # State global (untuk no-op check)
  │   ├── workspace/               # State per-proyek (prefiks nama proyek)
  │   │   ├── rupa.ws.state            # fase binary
@@ -56,7 +56,7 @@ workspace/
  │   └── rupa_v0.2.2.deb
  ├── modules/                     # Arsip sumber (archive.dir, nama bebas)
  │   └── rupa_modules.tar
- ├── rupa/                        # Source proyek (BERSIH, tanpa .rbot)
+ ├── rupa/                        # Source proyek (BERSIH, tanpa .satria)
  ├── bade/                        # Source proyek (BERSIH)
  └── rupamod/                     # Source proyek (BERSIH)
 ```
@@ -64,7 +64,7 @@ workspace/
 **Aturan penting:**
 - Binary di root adalah **file**: `bin/bade`, bukan `bin/bade/bade`. Object memakai `build/<project>/...` agar nama source antar-proyek tidak bertabrakan.
 - Nama output binary/library/archive yang bentrok **harus dideteksi**, bukan ditimpa diam-diam.
-- Jika `rbot` mendeteksi folder `.rbot/` di dalam direktori proyek anggota saat mode workspace aktif, dia harus mengabaikannya atau memberikan peringatan, dan tetap menggunakan state di root workspace.
+- Jika `satria` mendeteksi folder `.satria/` di dalam direktori proyek anggota saat mode workspace aktif, dia harus mengabaikannya atau memberikan peringatan, dan tetap menggunakan state di root workspace.
 - Nama folder shared headers bebas (tidak harus 'include'). Inilah alasan `headers.internal = library` — karena nama folder yang dipilih user adalah `library`.
 
 ---
@@ -116,7 +116,7 @@ flags.windows = D_CRT_SECURE_NO_WARNINGS, DWIN32_LEAN_AND_MEAN
 flags.clang = fcolor-diagnostics
 flags.gcc = fdiagnostics-color=always
 
-# Defines (rbot otomatis translasi -D untuk GCC/Clang, /D untuk MSVC)
+# Defines (satria otomatis translasi -D untuk GCC/Clang, /D untuk MSVC)
 defines = DEBUG, VERSION=\\\"1.0.0\\\"
 defines.linux = _POSIX_C_SOURCE=200809L
 defines.windows = UNICODE, _UNICODE
@@ -132,7 +132,7 @@ headers.internal = library
 **Aturan Resolusi:**
 - Nilai global dimuat pertama, lalu nilai spesifik platform/compiler di-append.
 - Untuk array (`flags`, `library`), duplikat dihapus otomatis.
-- User tidak perlu menulis prefix `-D` atau `/D` di `defines`; `rbot` menerjemahkan berdasarkan compiler yang terdeteksi.
+- User tidak perlu menulis prefix `-D` atau `/D` di `defines`; `satria` menerjemahkan berdasarkan compiler yang terdeteksi.
 - Fallback `unix` berlaku untuk semua OS berbasis POSIX jika tidak ada definisi spesifik.
 
 ### Proyek Anggota
@@ -193,7 +193,7 @@ release.deb.install_prefix = /usr/local
 
 Release bisa dipicu murni dari CLI tanpa deklarasi:
 ```bash
-rbot -w release -- name=rupamod target=deb
+satria -w release -- name=rupamod target=deb
 ```
 
 **`pack.*` per proyek di luar scope v1:** jalur workspace hanya mendukung **build + release workspace** (`release.*`). Properti `pack.*` per proyek diabaikan dengan peringatan singkat (tidak menggagalkan build); dukungan menyusul di iterasi terpisah.
@@ -204,7 +204,7 @@ rbot -w release -- name=rupamod target=deb
 
 ### Path
 
-1. **CWD Tetap di Root:** `rbot` tidak pernah mengubah CWD ke direktori proyek anggota saat build. CWD selalu di root workspace; `fsSetCwd()` per-proyek dilarang di jalur workspace.
+1. **CWD Tetap di Root:** `satria` tidak pernah mengubah CWD ke direktori proyek anggota saat build. CWD selalu di root workspace; `fsSetCwd()` per-proyek dilarang di jalur workspace.
 2. **Root Proyek:** default `<root>/<nama>`; override eksplisit `projects.<nama>.root`. Semua path yang ditafsirkan relatif proyek memakai root ini.
 3. **Default Output Path (Root-Centric):**
    - Binary: `<root>/bin/<binaryName>` — **file**, bukan direktori; default `binaryName` = nama proyek sehingga menghasilkan `bin/bade` (bukan `bin/bade/bade`).
@@ -217,9 +217,9 @@ rbot -w release -- name=rupamod target=deb
 ### State & Cache
 
 1. **Global State:** `workspace.state` dan `compile_commands.json` selalu di root workspace.
-2. **Per-Project State:** file state spesifik proyek (`ws.state`, `ws.lib.state`, `build.fingerprint`, `build.state`, `deps.cache`, snapshot source) dipindah dari `<project>/.rbot/` ke `<root>/.rbot/workspace/<nama_proyek>.<nama_file>` — misal `rupa.ws.state`, `rupa.build.fingerprint`, `rupa.deps.cache`.
-3. **Implementasi C:** fungsi penentu path state harus menerima argumen `root_dir` dan `project_name`, lalu menyusun path ke `<root>/.rbot/workspace/` alih-alih `project_dir/.rbot/`.
-4. **No-Op Check:** `src/bootstrap.c` membaca `.rbot/workspace.state` (bukan `.rbot/build.state`) untuk mode workspace. Jika fingerprint workspace tidak berubah dan tidak ada flag `--force`, langsung exit.
+2. **Per-Project State:** file state spesifik proyek (`ws.state`, `ws.lib.state`, `build.fingerprint`, `build.state`, `deps.cache`, snapshot source) dipindah dari `<project>/.satria/` ke `<root>/.satria/workspace/<nama_proyek>.<nama_file>` — misal `rupa.ws.state`, `rupa.build.fingerprint`, `rupa.deps.cache`.
+3. **Implementasi C:** fungsi penentu path state harus menerima argumen `root_dir` dan `project_name`, lalu menyusun path ke `<root>/.satria/workspace/` alih-alih `project_dir/.satria/`.
+4. **No-Op Check:** `src/bootstrap.c` membaca `.satria/workspace.state` (bukan `.satria/build.state`) untuk mode workspace. Jika fingerprint workspace tidak berubah dan tidak ada flag `--force`, langsung exit.
 
 ---
 
@@ -231,7 +231,7 @@ rbot -w release -- name=rupamod target=deb
 4. **Periksa incremental state**, source/header dependencies, command/fingerprint, dan output.
 5. **Compile secara paralel** ke `build/<project>/...` serta hasilkan dependency files (path `.d` dibuat relatif root — aman karena CWD tidak berubah).
 6. **Kerjakan library, archive/embed, dan linking** sesuai dependensi nyata, termasuk dependensi siklik yang didukung. Binary di `bin/<name>` (file), library di `lib/`, arsip member ke `archive.dir` (mis. `modules/`), release ke `dist/`.
-7. **Perbarui `workspace.state`**, `.rbot/workspace_log`, dan CompDB bila memang berubah.
+7. **Perbarui `workspace.state`**, `.satria/workspace_log`, dan CompDB bila memang berubah.
 
 ### Pemisahan Jalur Build
 
@@ -245,7 +245,7 @@ rbot -w release -- name=rupamod target=deb
 
 ## No-op dan CompDB
 
-- **`.rbot/workspace_log` — indeks no-op & CompDB.** Format: berkas teks, satu blok per proyek, berisi:
+- **`.satria/workspace_log` — indeks no-op & CompDB.** Format: berkas teks, satu blok per proyek, berisi:
   1. nama proyek,
   2. hash konfigurasinya dari `Buildfile.ws` (baris yang memengaruhinya),
   3. fingerprint daftar source terakhir (dari snapshot `<nama>.src`),
@@ -253,7 +253,7 @@ rbot -w release -- name=rupamod target=deb
 
   File ini hanya dipakai untuk dua keputusan: **(a) no-op cepat** — proyek dengan (2)+(3) identik dilewati tanpa re-scan source-nya; **(b) skip-write CompDB** — `compile_commands.json` hanya ditulis ulang bila hash-nya berbeda dari (4). `workspace_log` **tidak** menyimpan mtime/size/artefak — domain itu milik `workspace.state` (global) dan `<nama>.build.state` per proyek; jangan menduplikasinya.
 - `compile_commands.json` **hanya ada di root workspace** dan selalu merepresentasikan seluruh workspace, sekalipun build terakhir selektif.
-- `rbot -g compdb` dari root workspace bersifat **query-only**: tidak menjalankan build atau mengubah build state.
+- `satria -g compdb` dari root workspace bersifat **query-only**: tidak menjalankan build atau mengubah build state.
 - Jangan tulis ulang CompDB yang identik. Perubahan daftar source atau command harus terdeteksi meski `Buildfile.ws` tidak berubah.
 - No-op tidak boleh memicu kompilasi, link, archive, atau penulisan artefak yang tidak diperlukan.
 
@@ -263,11 +263,11 @@ rbot -w release -- name=rupamod target=deb
 
 *Catatan: Ini adalah desain konseptual, tidak dieksekusi secara default.*
 
-Untuk mempercepat cold build, `rbot` dapat menerapkan **Source Flattening & Batch Compilation**:
+Untuk mempercepat cold build, `satria` dapat menerapkan **Source Flattening & Batch Compilation**:
 
-1. **Fase 0 (Flatten):** `rbot` membaca `Buildfile.ws` sekali, meratakan semua daftar source dari semua proyek menjadi satu daftar raksasa di memori.
+1. **Fase 0 (Flatten):** `satria` membaca `Buildfile.ws` sekali, meratakan semua daftar source dari semua proyek menjadi satu daftar raksasa di memori.
 2. **Fase 1 (Batch Compile):** Antrian raksasa dilempar ke compiler pool secara bersamaan. Tidak ada sekat antar proyek. Kecepatan setara Ninja.
-3. **Fase 2 (Reverse Map):** Setelah `.o` terbentuk, `rbot` melakukan pencocokan path (`src_a/a.c` → `build/a.o`) untuk mengembalikan object files ke proyek masing-masing.
+3. **Fase 2 (Reverse Map):** Setelah `.o` terbentuk, `satria` melakukan pencocokan path (`src_a/a.c` → `build/a.o`) untuk mengembalikan object files ke proyek masing-masing.
 4. **Fase 3 (Library & Binary Pass):** Berjalan seperti biasa menggunakan object files yang sudah siap.
 
 **Dampak:** Mengurangi overhead konteks antar-proyek saat fase kompilasi, membuat cold build jauh lebih cepat tanpa mengubah arsitektur fase build.
@@ -276,7 +276,7 @@ Untuk mempercepat cold build, `rbot` dapat menerapkan **Source Flattening & Batc
 
 ## Kriteria Selesai
 
-- [ ] Bootstrap berhasil; build penuh dan `rbot -w <project>` berhasil dari root workspace.
+- [ ] Bootstrap berhasil; build penuh dan `satria -w <project>` berhasil dari root workspace.
 - [ ] **Tidak ada build state, object, binary, atau CompDB baru di direktori anggota proyek.** (Semua harus di root workspace).
 - [ ] Compile, link, archive/embed, dan dependensi lintas proyek benar-benar dijalankan; tidak ada fase yang dilewati hanya untuk mempercepat benchmark.
 - [ ] No-op dan incremental (edit source/header, penambahan/penghapusan source, perubahan config) diuji; CompDB lengkap dan valid tanpa rewrite pada no-op.

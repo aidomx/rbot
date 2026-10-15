@@ -4,10 +4,10 @@
 #include <stddef.h>
 
 /*
- * design/bootstrap.md — Bootstrap & Dispatching CLI rbot.
+ * design/bootstrap.md — Bootstrap & Dispatching CLI satria.
  *
  * Alur: bootstrapParse (murni argv) -> bootstrapApply (mutasi env) ->
- *       rbotRun (dispatcher switch murni) -> bootstrapCleanup.
+ *       satriaRun (dispatcher switch murni) -> bootstrapCleanup.
  *
  * Kepemilikan memori: kecuali bidang yang diberi catatan "malloc" di bawah,
  * semua const char* menunjuk argv caller atau buffer statis di bootstrap.c
@@ -30,7 +30,7 @@ typedef struct {
   bool cold;      // True jika ini adalah cold build (tidak ada state sebelumnya)
   bool noop;      // True jika tidak ada yang perlu di-build (fingerprint cocok)
   bool dirty;     // True jika ada perubahan pada Buildfile atau source
-  bool has_state; // True jika file state (.rbot/build.state) berhasil dibaca
+  bool has_state; // True jika file state (.satria/build.state) berhasil dibaca
 
   // Pointer ke memory-mapped state (jika mmap diaktifkan)
   void *state_map;
@@ -45,7 +45,7 @@ typedef struct {
   const char *buildfile; // Default: "Buildfile"
   bool have_f;           // -f diberikan eksplisit (cmdInitWorkspace pakai ini)
   const char *cmd_token; // token command asli (untuk pesan error); NULL bila build polos
-  const char *help_topic; // rbot help <topic>: nama section di src/cmd.txt
+  const char *help_topic; // satria help <topic>: nama section di src/cmd.txt
   int jobs;              // Default: cpuCount()
 
   // Flags
@@ -54,7 +54,7 @@ typedef struct {
   bool generate_compdb; // -g compdb
 
   // Workspace specific
-  bool ws_auto;             // auto-detect Buildfile.ws (rbot polos di root ws)
+  bool ws_auto;             // auto-detect Buildfile.ws (satria polos di root ws)
   const char *ws_only;      // -w <nama>
   const char **ws_sel_argv; // [malloc] token `-- key=value ...`, NULL-terminasi
 

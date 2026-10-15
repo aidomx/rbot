@@ -55,9 +55,9 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     touch)
-      # Konten header sama: rbot wajib 0 (content-hash); ninja/make (mtime)
+      # Konten header sama: satria wajib 0 (content-hash); ninja/make (mtime)
       # wajib membangun ulang seluruh dependen library/a.h.
-      if [ "$k" = rbot ]; then
+      if [ "$k" = satria ]; then
         EXP_OBJ=0 EXP_ARC=0 EXP_LIB=0 EXP_BIN=0 EXP_CC=0
         exp_chk obj "$o" "$EXP_OBJ"
         exp_chk arc "$a" "$EXP_ARC"
@@ -83,7 +83,7 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     sel)
-      # Kesetaraan selektif: rbot -w core dan ninja/make <SEL_TARGETS> wajib
+      # Kesetaraan selektif: satria -w core dan ninja/make <SEL_TARGETS> wajib
       # mengerjakan pekerjaan yang sama — compile r1.c + k1.c, 4 library,
       # 2 binary, nol arsip.
       EXP_OBJ=2 EXP_ARC=0 EXP_LIB=4 EXP_BIN=2 EXP_CC=2
@@ -104,9 +104,9 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     libtouch)
-      # Header internal (library/ext.h) dengan konten sama: rbot wajib 0
+      # Header internal (library/ext.h) dengan konten sama: satria wajib 0
       # (content-hash). ninja/make (mtime) membangun ulang 2 TU yang meng-include-nya.
-      if [ "$k" = rbot ]; then
+      if [ "$k" = satria ]; then
         EXP_OBJ=0 EXP_ARC=0 EXP_LIB=0 EXP_BIN=0 EXP_CC=0
         exp_chk obj "$o" "$EXP_OBJ"
         exp_chk arc "$a" "$EXP_ARC"

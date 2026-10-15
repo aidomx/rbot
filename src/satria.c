@@ -1,4 +1,4 @@
-#include "rbot.h"
+#include "satria.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,34 +14,34 @@
 #include "uses/workspace.h"
 
 #if __has_include("version.h")
-#include "version.h" /* build/version.h — dihasilkan dari .rbot-version */
+#include "version.h" /* build/version.h — dihasilkan dari .satria-version */
 #endif
 
 /*
- * Versi rbot. Sumber kebenaran: .rbot-version di root — saat build rbot
- * menuliskannya ke build/version.h (RBOT_VERSION_EMBEDDED) sehingga versi
- * ter-embed ke binary dan `rbot version` tetap benar di mana pun dijalankan.
- * Fallback literal hanya untuk build tanpa .rbot-version (mis. CMake murni).
+ * Versi satria. Sumber kebenaran: .satria-version di root — saat build satria
+ * menuliskannya ke build/version.h (SATRIA_VERSION_EMBEDDED) sehingga versi
+ * ter-embed ke binary dan `satria version` tetap benar di mana pun dijalankan.
+ * Fallback literal hanya untuk build tanpa .satria-version (mis. CMake murni).
  */
-const char *rbotVersion(void) {
-#ifdef RBOT_VERSION_EMBEDDED
-  return RBOT_VERSION_EMBEDDED;
+const char *satriaVersion(void) {
+#ifdef SATRIA_VERSION_EMBEDDED
+  return SATRIA_VERSION_EMBEDDED;
 #else
   return "v0.2.0";
 #endif
 }
 
 /*
- * design/bootstrap.md fase 3 — rbotRun adalah CONSUMER MURNI: tidak ada
+ * design/bootstrap.md fase 3 — satriaRun adalah CONSUMER MURNI: tidak ada
  * parsing argv, strcmp bercabang atas argv, atau mutasi filesystem di sini.
  * Ia membaca Bootstrap hasil parse+apply lalu dispatch lewat switch enum.
  * Semua logika parsing ada di bootstrap.c; logika per-command ada di
  * commands.c / workspace.c / profile.c (sama seperti sebelum refactor).
  */
-int rbotRun(int argc, const char *argv[]) {
+int satriaRun(int argc, const char *argv[]) {
   int packageStatus = 0;
   if (packageCliRun(argc, argv, &packageStatus)) return packageStatus;
-  profInit(); /* profil fase aktif bila RBOT_PROFILE=1 (stderr, tanpa syscall) */
+  profInit(); /* profil fase aktif bila SATRIA_PROFILE=1 (stderr, tanpa syscall) */
 
   Bootstrap bs;
   int rc = bootstrapParse(argc, argv, &bs);
@@ -63,7 +63,7 @@ int rbotRun(int argc, const char *argv[]) {
   /* version hanya cetak string — tanpa chdir/apply agar aman dari -f yang
      salah (perilaku sama dengan main.c lama yang memotong lebih awal). */
   if (bs.cmd == CMD_VERSION) {
-    printf("rbot %s\n", rbotVersion());
+    printf("satria %s\n", satriaVersion());
     bootstrapCleanup(&bs);
     return 0;
   }
@@ -78,13 +78,13 @@ int rbotRun(int argc, const char *argv[]) {
     return 0;
   }
 
-  /* rbot profile <context> [key=value ...] — non-mutating, standalone. */
+  /* satria profile <context> [key=value ...] — non-mutating, standalone. */
   if (bs.cmd == CMD_PROFILE) {
     bootstrapCleanup(&bs);
     return cmdProfile(bs.profile_argv, bs.profile_argc);
   }
 
-  /* Mode workspace: -w eksplisit, atau auto-detect Buildfile.ws saat rbot
+  /* Mode workspace: -w eksplisit, atau auto-detect Buildfile.ws saat satria
      polos di root workspace. init tetap jalur satu-project kecuali `init -w`
      yang menulis template workspace (Buildfile.ws). */
   bs.ws_auto = !bs.want_workspace && (bs.cmd == CMD_BUILD) && workspaceFileExists();
@@ -103,7 +103,7 @@ int rbotRun(int argc, const char *argv[]) {
     }
     if (bs.cmd != CMD_BUILD && bs.cmd != CMD_CLEAN && bs.cmd != CMD_RELEASE) {
       fprintf(stderr,
-              "rbot: command '%s' tidak berlaku di mode workspace (pakai build/clean/release)\n",
+              "satria: command '%s' tidak berlaku di mode workspace (pakai build/clean/release)\n",
               bs.cmd_token ? bs.cmd_token : "");
       rc = 2;
       goto done;
@@ -142,8 +142,8 @@ int rbotRun(int argc, const char *argv[]) {
     char wsRoot[MAX_PATH], member[64];
     if (wsMemberCwdDetect(wsRoot, sizeof(wsRoot), member, sizeof(member))) {
       fprintf(stderr,
-              "rbot: direktori ini adalah anggota workspace '%s' (proyek '%s')\n"
-              "        build hanya dari root workspace — build selektif: rbot -w %s\n",
+              "satria: direktori ini adalah anggota workspace '%s' (proyek '%s')\n"
+              "        build hanya dari root workspace — build selektif: satria -w %s\n",
               wsRoot, member, member);
       rc = 2;
       goto done;
@@ -174,7 +174,7 @@ int rbotRun(int argc, const char *argv[]) {
         if (cmdHelpSection(bs.help_topic)) {
           rc = 0;
         } else {
-          fprintf(stderr, "rbot: unknown help topic '%s'\n", bs.help_topic);
+          fprintf(stderr, "satria: unknown help topic '%s'\n", bs.help_topic);
           showHelp();
           rc = 1;
         }
@@ -185,7 +185,7 @@ int rbotRun(int argc, const char *argv[]) {
       break;
 
     case CMD_RELEASE: /* tanpa -w ditolak di bawah */
-      fprintf(stderr, "rbot: release memerlukan mode workspace (pakai 'rbot -w release -- name=rupa')\n");
+      fprintf(stderr, "satria: release memerlukan mode workspace (pakai 'satria -w release -- name=rupa')\n");
       rc = 2;
       break;
 

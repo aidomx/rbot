@@ -27,7 +27,7 @@ phase runs the pack engine:
 release.name = rupa
 release.version = 0.2.2
 release.files = bin/rupa, ../bade/bin/bade, share/rupa/cmd.txt
-release.exclude = .git, .rbot, build, node_modules
+release.exclude = .git, .satria, build, node_modules
 release.output = dist/{name}-v{version}.tar.gz
 release.format = deb
 release.compress = gzip
@@ -60,12 +60,12 @@ projects contribute nothing.
 ## CLI
 
 ```bash
-rbot -w                                   # build + release (when release.* exists)
-rbot -w clean                             # clean, no release
-rbot -w <project>                         # build closure; release stays full-workspace
-rbot -w release                           # same as rbot -w (release name), kept for clarity
-rbot -w release -- version=0.2.3          # override release settings for this run
-rbot -w release -- format=tar,version=1.0 # multiple overrides, comma separated
+satria -w                                   # build + release (when release.* exists)
+satria -w clean                             # clean, no release
+satria -w <project>                         # build closure; release stays full-workspace
+satria -w release                           # same as satria -w (release name), kept for clarity
+satria -w release -- version=0.2.3          # override release settings for this run
+satria -w release -- format=tar,version=1.0 # multiple overrides, comma separated
 ```
 
 `-- key=value` pairs override release settings for the run (`name`,

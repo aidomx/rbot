@@ -1,11 +1,11 @@
 <div align="center">
- <img src="rbot_logo.webp" alt="rbot logo" width="auto" height="auto">
+ <img src="satria_logo.webp" alt="satria logo" width="auto" height="auto">
 </div>
 
-# rbot
+# satria
 **A simple builder for you.**
 
-`rbot` is a simple build tool for C projects, driven by a declarative `Buildfile`. No Makefile or CMake project is required — define the project once and let rbot handle compilation, dependencies, libraries, workspace projects, embedded assets, packaging, and releases.
+`satria` is a simple build tool for C projects, driven by a declarative `Buildfile`. No Makefile or CMake project is required — define the project once and let satria handle compilation, dependencies, libraries, workspace projects, embedded assets, packaging, and releases.
 
 Cross-platform: Linux, macOS, and Windows (MSVC + MinGW).
 
@@ -15,43 +15,43 @@ Full documentation lives in [docs/](./docs/README.md): guides ([getting started]
 
 ### Linux/macOS
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/aidomx/satria/main/install.sh | sh
 ```
-The script installs the prebuilt `rbot` binary from the repository.
+The script installs the prebuilt `satria` binary from the repository.
 
 ### Bootstrap from source
 ```bash
 ./install.sh --dev
 ```
-Requires a C compiler such as `gcc` or `clang`. The resulting binary is `build/bin/rbot`.
+Requires a C compiler such as `gcc` or `clang`. The resulting binary is `build/bin/satria`.
 
 ### Windows
 From a source tree, use MSVC (`cl.exe`) or MinGW (`gcc`) without CMake:
 ```powershell
 .\install.ps1 --dev
 ```
-The resulting binary is `build\bin\rbot.exe`.
+The resulting binary is `build\bin\satria.exe`.
 
 ## Usage
 ```bash
-rbot            # build project from Buildfile
-rbot -f FILE    # use a different Buildfile
-rbot init       # create a new Buildfile
-rbot init -w    # create a new Buildfile.ws
-rbot -w         # build all projects in the workspace
-rbot -w NAME    # build project NAME and its dependencies
-rbot -w release -- name=NAME    # release a single project via CLI
-rbot clean      # clean build artifacts
-rbot profile archive=DIR [with=tar,gz|tar,xz|tar,bz2]  # measure operations
-rbot profile library=DIR [with=static|shared|static,shared]
-rbot profile binary=DIR [jobs=N] [--report FILE]
-rbot version    # display rbot version
-rbot help       # display help
+satria            # build project from Buildfile
+satria -f FILE    # use a different Buildfile
+satria init       # create a new Buildfile
+satria init -w    # create a new Buildfile.ws
+satria -w         # build all projects in the workspace
+satria -w NAME    # build project NAME and its dependencies
+satria -w release -- name=NAME    # release a single project via CLI
+satria clean      # clean build artifacts
+satria profile archive=DIR [with=tar,gz|tar,xz|tar,bz2]  # measure operations
+satria profile library=DIR [with=static|shared|static,shared]
+satria profile binary=DIR [jobs=N] [--report FILE]
+satria version    # display satria version
+satria help       # display help
 ```
-Without arguments, `rbot` looks for a `Buildfile`. At the workspace root, `Buildfile.ws` can be used to manage multiple projects.
+Without arguments, `satria` looks for a `Buildfile`. At the workspace root, `Buildfile.ws` can be used to manage multiple projects.
 
 ## Buildfile
-For a standard project — a `src/` folder (and an optional `include/` folder) — a single line is enough; the rest follows rbot conventions:
+For a standard project — a `src/` folder (and an optional `include/` folder) — a single line is enough; the rest follows satria conventions:
 ```text
 use project
 ```
@@ -89,11 +89,11 @@ rupalib.linux = ruka
 ```
 Commands:
 ```bash
-rbot -w          # build + release all projects
-rbot -w rupa     # build rupa and its dependencies
-rbot -w clean    # clean the entire workspace
+satria -w          # build + release all projects
+satria -w rupa     # build rupa and its dependencies
+satria -w clean    # clean the entire workspace
 ```
-rbot builds the workspace in two phases — the library pass creates `lib<name>.a`/`.so` without linking, and the binary pass links the final binaries after all libraries are available — so cross-library dependencies (`rupa <-> ruka`) can still be built. Details in [docs/guide/workspace.md](./docs/guide/workspace.md).
+satria builds the workspace in two phases — the library pass creates `lib<name>.a`/`.so` without linking, and the binary pass links the final binaries after all libraries are available — so cross-library dependencies (`rupa <-> ruka`) can still be built. Details in [docs/guide/workspace.md](./docs/guide/workspace.md).
 
 ## Release
 The workspace separates `projects` (build units) and `releases` (distribution units):
@@ -104,8 +104,8 @@ rrupa.name = rupa
 rrupa.target = deb
 ```
 ```bash
-rbot -w                          # build + release all -> dist/release/
-rbot -w release -- name=rupa     # release a single project via CLI
+satria -w                          # build + release all -> dist/release/
+satria -w release -- name=rupa     # release a single project via CLI
 ```
 Releases can be fully triggered from the CLI without declaration in `Buildfile.ws`. Details in [docs/guide/releases.md](./docs/guide/releases.md).
 
@@ -117,9 +117,9 @@ Releases can be fully triggered from the CLI without declaration in `Buildfile.w
 - **Embedded files** — archives become binary objects and are embedded into binaries/libraries; see [docs/guide/embedded-and-archives.md](./docs/guide/embedded-and-archives.md).
 - **Packaging** — `pack.*`: tarball, `.deb` (file mapping, merging across projects, sha256 checksum); see [docs/guide/packaging.md](./docs/guide/packaging.md).
 - **Library output** — static + shared from the same objects (`output.libraryName`, `output.libraryShared`).
-- **build.ninja conversion** — `rbot -xf build.ninja` (temporary) or `-xcf` (kept); see [docs/reference/rbot-ninja-import.md](./docs/reference/rbot-ninja-import.md).
+- **build.ninja conversion** — `satria -xf build.ninja` (temporary) or `-xcf` (kept); see [docs/reference/satria-ninja-import.md](./docs/reference/satria-ninja-import.md).
 - **Interrupt (Ctrl+C)** — SIGINT is forwarded to compiler jobs; a canceled build does not record a success snapshot. Details in [docs/reference/errors-and-interrupts.md](./docs/reference/errors-and-interrupts.md).
-- **Profiling** — `rbot profile` measures archive/library/binary costs without touching build state; see [docs/guide/profile.md](./docs/guide/profile.md).
+- **Profiling** — `satria profile` measures archive/library/binary costs without touching build state; see [docs/guide/profile.md](./docs/guide/profile.md).
 
 ## License
 MIT — see [LICENSE](./LICENSE).

@@ -17,9 +17,9 @@
 #include "../portability.h"
 #include "../util.h"
 
-#define CONFIG_CACHE_MAGIC "RBOTCFG1"
+#define CONFIG_CACHE_MAGIC "SATRIACFG1"
 #define CONFIG_CACHE_VERSION 10u /* 10: defines + suffix flags/library/headers/std (design/flags.md) */
-#define CONFIG_CACHE_DIR ".rbot"
+#define CONFIG_CACHE_DIR ".satria"
 #define CONFIG_CACHE_FILE "buildfile.cache"
 
 static bool cacheWriteBytes(FILE *fp, const void *p, size_t n) {
@@ -230,7 +230,7 @@ void cfgCachePathFor(const char *path, char *out, size_t n) {
 
   /* Nama cache per-file konfigurasi: "Buildfile" memakai nama lama
      (kompatibel dengan cache yang sudah ada), selain itu <basename>.cache
-     agar `rbot -f lain` tidak berbagi cache dengan default. */
+     agar `satria -f lain` tidak berbagi cache dengan default. */
   const char *cacheName = strcmp(base, "Buildfile") == 0 ? CONFIG_CACHE_FILE : NULL;
   char nameBuf[64];
   if (!cacheName) {

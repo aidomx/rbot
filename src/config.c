@@ -59,7 +59,7 @@ Config configDefaults(void) {
   c.progressErrorAlways = true;
   c.foreground = true;
   /* outBinaryName sengaja kosong: konvensi proyek standar memakai nama
-     folder proyek (diisi configFinalize; fallback "rbot"). */
+     folder proyek (diisi configFinalize; fallback "satria"). */
   copyStr(c.outBinaryDir, sizeof(c.outBinaryDir), "bin");
   copyStr(c.outBuildDir, sizeof(c.outBuildDir), "build");
   copyStr(c.outCompileCommands, sizeof(c.outCompileCommands), "auto");
@@ -225,7 +225,7 @@ void configApplyCompilerSuffix(Config *c) {
 
 /*
  * configFinalize — terapkan konvensi proyek standar pada Config hasil parse
- * (dipanggil loadConfig; juga dipakai jalur TANPA Buildfile — `rbot profile
+ * (dipanggil loadConfig; juga dipakai jalur TANPA Buildfile — `satria profile
  * binary=<dir>` — sehingga konvensi sources=src dst. tetap berlaku).
  * MURNI derivasi in-memory + stat direktori; tidak menulis file apa pun.
  */
@@ -278,7 +278,7 @@ void configFinalize(Config *c) {
         copyStr(c->outBinaryName, sizeof(c->outBinaryName), name);
     }
   }
-  if (!c->outBinaryName[0]) copyStr(c->outBinaryName, sizeof(c->outBinaryName), "rbot");
+  if (!c->outBinaryName[0]) copyStr(c->outBinaryName, sizeof(c->outBinaryName), "satria");
 
   /* pack: nilai default + penanda proyek pengemasan. Key yang hanya
      mengisi metadata (name/version/deb.*) tidak mengaktifkan pack —
@@ -308,7 +308,7 @@ void configFinalize(Config *c) {
 
 /*
  * Buildfile sengaja berupa file konfigurasi YAML-like kecil. Kita hanya
- * mem-parse subset yang dimiliki rbot: section, dua level nesting, dan
+ * mem-parse subset yang dimiliki satria: section, dua level nesting, dan
  * pasangan key/value skalar (mis. embedded -> archive -> with). Opsi yang
  * tidak dikenal tetap aman diabaikan.
  */
@@ -412,10 +412,10 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       copyStr(e->archiveName, sizeof(e->archiveName), sub);
       copyStr(e->ext, sizeof(e->ext), "gz");
       listAdd(&e->excludes, ".git");
-      /* State/cache rbot bukan aset: tanpa exclude ini scan freshness
-         menganggap arsip basi setiap run (folder .rbot berubah) dan
+      /* State/cache satria bukan aset: tanpa exclude ini scan freshness
+         menganggap arsip basi setiap run (folder .satria berubah) dan
          tar diulang percuma — biaya no-op workspace membesar. */
-      listAdd(&e->excludes, ".rbot");
+      listAdd(&e->excludes, ".satria");
     }
 
     if (subsub && strcmp(subsub, "with") == 0) {
@@ -501,7 +501,7 @@ static void configApply(Config *c, const char *section, const char *sub, const c
       copyStr(e->ext, sizeof(e->ext), "gz");
       copyStr(e->pattern, sizeof(e->pattern), "");
       listAdd(&e->excludes, ".git");
-      listAdd(&e->excludes, ".rbot"); /* state/cache rbot bukan aset */
+      listAdd(&e->excludes, ".satria"); /* state/cache satria bukan aset */
     }
     EmbeddedEntry *e = &c->emb[0];
 
@@ -750,7 +750,7 @@ bool loadConfigEx(Config *c, const char *path, bool cacheWrite) {
 
   FILE *fp = fopen(path, "rb");
   if (!fp) {
-    fprintf(stderr, "rbot: cannot open %s\n", path);
+    fprintf(stderr, "satria: cannot open %s\n", path);
     return false;
   }
 

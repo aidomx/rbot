@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# compare.sh — benchmark build tool: ninja vs make vs bear+make vs rbot
+# compare.sh — benchmark build tool: ninja vs make vs bear+make vs satria
 #                vs cmake-ninja vs meson-ninja vs xmake vs tup
 #
 # Membuat project sintetis (N source berantai header H, gaya /tmp/bench),
@@ -11,7 +11,7 @@
 # Skenario:
 #   cold   : build dari nol (cmake/meson TERMASUK langkah configure)
 #   noop   : build tanpa perubahan apa pun (metrik utama overhead)
-#   touch  : touch 1 header (konten sama) — rbot: 0 recompile (content-based)
+#   touch  : touch 1 header (konten sama) — satria: 0 recompile (content-based)
 #   edit   : edit isi 1 source — tepat 1 recompile + relink
 #            + baris "gcc-floor" (gcc -c 1 file + link langsung, tanpa build
 #              tool) sebagai lantai; selisih tool vs lantai = overhead tool
@@ -24,7 +24,7 @@
 #     state (.d, .ninja_log, objek) pada direktori build bersama.
 #   - Tabel akhir memakai MEDIAN + min-max, bukan rerata.
 #   - Kolom "obj" = jumlah .o yang benar-benar dikompilasi ulang (sanity check).
-#   - results.csv memuat versi tiap tool (kolom "version"; rbot = git/hash biner).
+#   - results.csv memuat versi tiap tool (kolom "version"; satria = git/hash biner).
 #   - syscalls.csv memuat rincian syscall per tool (tool,syscall,calls,errors).
 #
 # Pemakaian:
@@ -34,7 +34,7 @@
 #   NO_COLOR=1 ./bench/compare.sh     # tanpa warna / progress bar
 #
 # Catatan kejujuran: semua tool menghasilkan artefak yang setara, tapi
-# fiturnya beda. Angka ini untuk melacak REGRESI rbot — bukan klaim
+# fiturnya beda. Angka ini untuk melacak REGRESI satria — bukan klaim
 # bahwa satu tool "lebih baik" secara umum.
 # ============================================================================
 set -u
@@ -45,7 +45,7 @@ set -u
 NSRC=150      # -n : jumlah source t1..tN.c
 NHEAD=30      # -H : jumlah header berantai h1->hH
 NRUN=5        # -r : pengulangan per skenario (ambil median)
-RBOT=bin/rbot # -b : binary rbot yang dipakai
+SATRIA=bin/satria # -b : binary satria yang dipakai
 KEEP=0        # -k : 1 = jangan hapus sys.tmp di akhir
 ONLY=""       # -s : hanya skenario ini (comma-separated)
 OUTDIR=""     # -o : direktori kerja benchmark (default sys.tmp di cwd)
@@ -57,7 +57,7 @@ while getopts "n:H:r:b:t:ko:s:h" opt; do
     n) NSRC=$OPTARG ;;
     H) NHEAD=$OPTARG ;;
     r) NRUN=$OPTARG ;;
-    b) RBOT=$OPTARG ;;
+    b) SATRIA=$OPTARG ;;
     t) TARGETS=$OPTARG ;;
     k) KEEP=1 ;;
     o) OUTDIR=$OPTARG ;;
@@ -67,8 +67,8 @@ while getopts "n:H:r:b:t:ko:s:h" opt; do
   esac
 done
 
-[ -x "$RBOT" ] || { echo "rbot tidak ditemukan/dieksekusi: $RBOT" >&2; exit 1; }
-RBOT=$(cd "$(dirname "$RBOT")" && pwd)/$(basename "$RBOT")
+[ -x "$SATRIA" ] || { echo "satria tidak ditemukan/dieksekusi: $SATRIA" >&2; exit 1; }
+SATRIA=$(cd "$(dirname "$SATRIA")" && pwd)/$(basename "$SATRIA")
 
 for t in ninja make gcc; do
   command -v "$t" >/dev/null 2>&1 || { echo "tool wajib tidak ada: $t" >&2; exit 1; }
@@ -85,7 +85,7 @@ HAVE_TUP=0;     command -v tup    >/dev/null 2>&1 && HAVE_TUP=1
 # Daftar tool aktif (kunci internal); label tampilan lewat label_of()
 TOOLS=(ninja make)
 [ "$HAVE_BEAR"  = 1 ] && TOOLS+=(bear)
-TOOLS+=(rbot)
+TOOLS+=(satria)
 [ "$HAVE_CMAKE" = 1 ] && TOOLS+=(cmake)
 [ "$HAVE_MESON" = 1 ] && TOOLS+=(meson)
 [ "$HAVE_XMAKE" = 1 ] && TOOLS+=(xmake)
@@ -120,7 +120,7 @@ label_of() {
   case $1 in
     ninja) echo ninja ;;       make)  echo make ;;
     floor) echo gcc-floor ;;
-    bear)  echo bear-make ;;   rbot)  echo rbot ;;
+    bear)  echo bear-make ;;   satria)  echo satria ;;
     cmake) echo cmake-ninja ;; meson) echo meson-ninja ;;
     xmake) echo xmake ;;       tup)   echo tup ;;
   esac
@@ -128,9 +128,9 @@ label_of() {
 
 # ---------------------------- versi tool -----------------------------------
 first_ver() { grep -oE '[0-9]+(\.[0-9]+)+' | head -1; }
-rbot_id() {
+satria_id() {
     local d c h v_bin
-    d=$(dirname "$RBOT")
+    d=$(dirname "$SATRIA")
 
     # 1. PRIORITAS: Cek apakah ini persis di Git Tag (Release Resmi)
     c=$(git -C "$d" describe --tags --exact-match 2>/dev/null)
@@ -144,16 +144,16 @@ rbot_id() {
         else
             # 3. FALLBACK 2: Binary sudah di-install (tidak ada folder .git)
             # Coba ambil versi dari output binary itu sendiri, atau dari strings
-            v_bin=$($RBOT version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+            v_bin=$($SATRIA version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
             if [ -z "$v_bin" ]; then
-                v_bin=$(strings "$RBOT" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+                v_bin=$(strings "$SATRIA" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
             fi
             c="release ${v_bin:-unknown}"
         fi
     fi
 
     # Hash unik untuk file binary (tetap berguna untuk melacak build yang sama)
-    h=$(sha1sum "$RBOT" 2>/dev/null | cut -c1-6)
+    h=$(sha1sum "$SATRIA" 2>/dev/null | cut -c1-6)
     
     echo "${c} bin:${h:-n/a}"
 }
@@ -161,7 +161,7 @@ declare -A VER
 VER_GCC=$(gcc -dumpfullversion 2>/dev/null || gcc -dumpversion 2>/dev/null)
 VER[ninja]=$(ninja --version 2>&1 | first_ver)
 VER[make]=$(make --version 2>&1 | first_ver)
-VER[rbot]=$(rbot_id)
+VER[satria]=$(satria_id)
 VER[gcc-floor]="gcc $VER_GCC"
 [ "$HAVE_BEAR"  = 1 ] && VER[bear-make]="bear $(bear --version 2>&1 | first_ver) + make ${VER[make]}"
 [ "$HAVE_CMAKE" = 1 ] && VER[cmake-ninja]="cmake $(cmake --version 2>&1 | first_ver) + ninja ${VER[ninja]}"
@@ -296,7 +296,7 @@ gen_project() {
     echo "-include \$(OBJS:.o=.d)"
   } >"$PROJ/Makefile"
 
-  # ---- Buildfile (rbot) ----
+  # ---- Buildfile (satria) ----
   {
     echo "use alias"
     echo
@@ -318,7 +318,7 @@ gen_project() {
     echo "o.buildDir = build"
     echo "o.compileCommands = false"
   } >"$PROJ/Buildfile"
-  ( cd "$PROJ" && "$RBOT" init >/dev/null 2>&1 )
+  ( cd "$PROJ" && "$SATRIA" init >/dev/null 2>&1 )
 
   # ---- CMakeLists.txt (untuk CMake + Ninja) ----
   {
@@ -400,7 +400,7 @@ tool_argv() {
     ninja) ARGV=(ninja) ;;
     make)  ARGV=(make -j"$NPROC") ;;
     bear)  ARGV=(bear -- make -j"$NPROC") ;;
-    rbot)  ARGV=("$RBOT") ;;
+    satria)  ARGV=("$SATRIA") ;;
     cmake) ARGV=(ninja -C build-cmake) ;;
     meson) ARGV=(ninja -C build-meson) ;;
     xmake) ARGV=(xmake -y) ;;
@@ -412,7 +412,7 @@ tool_cmd() { tool_argv "$1"; "${ARGV[@]}"; }
 # Build dari nol termasuk langkah configure (dipakai cold & prime).
 build_full() {
   case $1 in
-    rbot)  "$RBOT" -j"$NPROC" ;;
+    satria)  "$SATRIA" -j"$NPROC" ;;
     cmake) cmake -G Ninja -B build-cmake -DCMAKE_BUILD_TYPE=Release && ninja -C build-cmake ;;
     meson) meson setup build-meson --buildtype=release && ninja -C build-meson ;;
     xmake) xmake -y -j"$NPROC" ;;
@@ -503,7 +503,7 @@ report() {
           printf "  %s%s %-12s %s %6d ms %5.2f×%s", col, mark, L[i], br, M[i], M[i] / best, Z
           if (WIDE) printf "  %s(%d–%d) obj:%d%s", D, LO[i], HI[i], RB[i] + 0.5, Z
           if (WIDE && hasfl) printf " %s%+dms%s", D, M[i] - FL, Z
-          if (s == "touch" && RB[i] < 0.5 && L[i] != "rbot") printf " %s⚠ header?%s", Y, Z
+          if (s == "touch" && RB[i] < 0.5 && L[i] != "satria") printf " %s⚠ header?%s", Y, Z
           if (BD[i] > 0) printf " %s✗%d%s", R, BD[i], Z
           printf "\n"
         }
@@ -515,7 +515,7 @@ report() {
   echo
   echo "${C_DIM}angka = median ms · ★ tercepat · × = rasio vs tercepat${C_RST}"
   echo "${C_DIM}obj = rata-rata .o yang dikompilasi ulang. touch: obj 0 pada tool${C_RST}"
-  echo "${C_DIM}selain rbot (⚠) = header tidak terlacak; rbot 0 = content-hash.${C_RST}"
+  echo "${C_DIM}selain satria (⚠) = header tidak terlacak; satria 0 = content-hash.${C_RST}"
 }
 
 # ---------------------------- skenario -------------------------------------
@@ -613,7 +613,7 @@ compdb_run() {
   case $1 in
     ninja) ninja -t compdb cc >compile_commands.json ;;
     bear)  bear -- make -j"$NPROC" ;;
-    rbot)  "$RBOT" -g compdb ;;
+    satria)  "$SATRIA" -g compdb ;;
     cmake) cmake -G Ninja -B build-cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ;;
     meson) meson setup --reconfigure build-meson --buildtype=release ;;
     xmake) xmake project -k compile_commands ;;
@@ -626,13 +626,13 @@ s_compdb() {
   for k in "${CDB_TOOLS[@]}"; do
     # bear hanya merekam compile yang benar-benar jalan => butuh build bersih
     [ "$k" = bear ] || prime_tool "$k"
-    [ "$k" = rbot ] && ( cd "$PROJ" && sed -i 's/^o.compileCommands = false/o.compileCommands = auto/' Buildfile )
+    [ "$k" = satria ] && ( cd "$PROJ" && sed -i 's/^o.compileCommands = false/o.compileCommands = auto/' Buildfile )
     for ((r = 1; r <= NRUN; r++)); do
       ( cd "$PROJ" && rm -f compile_commands.json build-cmake/compile_commands.json build-meson/compile_commands.json )
       [ "$k" = bear ] && reset_all
       CHECK_COMPDB=1 run_once "$(label_of "$k")" compdb compdb_run "$k"
     done
-    [ "$k" = rbot ] && ( cd "$PROJ" && sed -i 's/^o.compileCommands = auto/o.compileCommands = false/' Buildfile )
+    [ "$k" = satria ] && ( cd "$PROJ" && sed -i 's/^o.compileCommands = auto/o.compileCommands = false/' Buildfile )
   done
 }
 
@@ -675,7 +675,7 @@ SKIPPED=""
 [ "$HAVE_XMAKE" = 0 ] && SKIPPED+=" xmake"
 [ "$HAVE_TUP"   = 0 ] && SKIPPED+=" tup"
 
-echo "${C_BLD}${C_CYN}▌ rbot benchmark${C_RST} ${C_DIM}· ${#TOOLS[@]} tool · $NRUN run · median${C_RST}"
+echo "${C_BLD}${C_CYN}▌ satria benchmark${C_RST} ${C_DIM}· ${#TOOLS[@]} tool · $NRUN run · median${C_RST}"
 echo "  project : $NSRC source, $NHEAD header"
 echo "  versi   :"
 for k in "${TOOLS[@]}"; do

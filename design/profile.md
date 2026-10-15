@@ -1,8 +1,8 @@
-# Desain Profil rbot
+# Desain Profil satria
 
 ## Tujuan
 
-`rbot profile <context>` adalah antarmuka diagnostik untuk mengukur biaya nyata dari operasi rbot. Ini bukan mode build alternatif dan tidak boleh memerlukan override Buildfile hanya untuk memprofilkan direktori yang sudah ada.
+`satria profile <context>` adalah antarmuka diagnostik untuk mengukur biaya nyata dari operasi satria. Ini bukan mode build alternatif dan tidak boleh memerlukan override Buildfile hanya untuk memprofilkan direktori yang sudah ada.
 
 Output terminal harus tetap singkat dan berguna untuk eksperimen cepat. `profile.md` adalah desain/spesifikasi rinci untuk fitur profile dan juga dapat menjelaskan format laporan rinci yang dihasilkan oleh sebuah profile run.
 
@@ -13,9 +13,9 @@ Output terminal harus tetap singkat dan berguna untuk eksperimen cepat. `profile
 Contoh:
 
 ```
-rbot profile archive=rupamod
-rbot profile archive=rupamod with=tar
-rbot profile archive=rupamod with=tar,gz
+satria profile archive=rupamod
+satria profile archive=rupamod with=tar
+satria profile archive=rupamod with=tar,gz
 ```
 
 Direktori target hanya perlu ada. Perintah tidak memerlukan override archive di Buildfile.
@@ -25,7 +25,7 @@ Direktori target hanya perlu ada. Perintah tidak memerlukan override archive di 
 Bentuk dasar:
 
 ```
-rbot profile <context> [options]
+satria profile <context> [options]
 ```
 
 Context dipilih dengan ekspresi `name=value`:
@@ -42,14 +42,14 @@ binary=<dir>
 Contoh:
 
 ```
-rbot profile project=.
-rbot profile workspace=.
-rbot profile archive=rupamod
-rbot profile archive=rupamod with=tar
-rbot profile archive=rupamod with=tar,gz
-rbot profile library=rupamod
-rbot profile embed=rupamod
-rbot profile binary=.
+satria profile project=.
+satria profile workspace=.
+satria profile archive=rupamod
+satria profile archive=rupamod with=tar
+satria profile archive=rupamod with=tar,gz
+satria profile library=rupamod
+satria profile embed=rupamod
+satria profile binary=.
 ```
 
 `with=` bersifat spesifik terhadap context. Ini hanya boleh diterima oleh context yang memiliki backend atau operasi yang dapat dipilih secara bermakna.
@@ -64,7 +64,7 @@ Tidak ada keharusan untuk memodifikasi atau meng-override konfigurasi Buildfile.
 
 ## Mesin Profil (Profile Engine)
 
-Perintah profile harus menggunakan kembali mesin profiling/timing ringan yang sudah ada di rbot, bukan memperkenalkan subsistem timing kedua.
+Perintah profile harus menggunakan kembali mesin profiling/timing ringan yang sudah ada di satria, bukan memperkenalkan subsistem timing kedua.
 
 Secara konseptual:
 
@@ -100,11 +100,11 @@ Mesin bertanggung jawab atas pengukuran. Context handler bertanggung jawab untuk
 
 ## Aturan Tidak Mengubah State (Non-mutating Rule)
 
-`rbot profile ...` tidak boleh memodifikasi state build normal.
+`satria profile ...` tidak boleh memodifikasi state build normal.
 
 Secara khusus, profiling tidak boleh:
 
-- memodifikasi `.rbot/build.state`
+- memodifikasi `.satria/build.state`
 - memodifikasi fingerprint build
 - memodifikasi Buildfile
 - membuat objek build normal
@@ -158,7 +158,7 @@ Laporan profil rinci ditujukan untuk `profile.md` atau file laporan lainnya. Lap
 Contoh:
 
 ```
-rbot profile report
+satria profile report
 ===================
 
 context
@@ -174,7 +174,7 @@ environment
 
 ---
 
-rbot       : 0.2.2
+satria       : 0.2.2
 platform   : linux/aarch64
 compiler   : gcc
 cwd        : /path/to/workspace
@@ -221,13 +221,13 @@ Perintah profile tidak boleh secara otomatis membuat file `profile.md` yang pers
 Untuk laporan rinci, opsi eksplisit di masa depan dapat digunakan:
 
 ```
-rbot profile archive=rupamod --report profile.md
+satria profile archive=rupamod --report profile.md
 ```
 
 Sampai opsi tersebut ada, redirection shell normal sudah cukup:
 
 ```
-rbot profile archive=rupamod > profile.md
+satria profile archive=rupamod > profile.md
 ```
 
 Implementasi harus membedakan output profil normal dari file internal sementara apa pun sehingga pembuatan laporan tidak menjadi bagian dari operasi yang diukur.
@@ -299,13 +299,13 @@ Opsi tidak harus valid secara global.
 Misalnya:
 
 ```
-rbot profile archive=rupamod with=tar,gz
+satria profile archive=rupamod with=tar,gz
 ```
 
 bermakna, sedangkan:
 
 ```
-rbot profile project=. with=tar
+satria profile project=. with=tar
 ```
 
 harus ditolak jika `project` tidak mendefinisikan backend `with`.
@@ -313,7 +313,7 @@ harus ditolak jika `project` tidak mendefinisikan backend `with`.
 Parser harus melaporkan kombinasi context/opsi yang tidak valid dengan jelas, misalnya:
 
 ```
-rbot: profile option 'with' is not valid for context 'project'
+satria: profile option 'with' is not valid for context 'project'
 ```
 
 ## Opsi Masa Depan
@@ -332,7 +332,7 @@ Opsi berikut adalah kandidat, bukan persyaratan untuk implementasi pertama:
 Context agregat di masa depan dapat menyediakan:
 
 ```
-rbot profile workspace=.
+satria profile workspace=.
 ```
 
 dengan laporan yang memuat fase workspace yang relevan. Perintah `profile all` terpisah tidak diperlukan pada awalnya dan tidak boleh ditambahkan sampai context individual dapat diandalkan.
@@ -371,4 +371,4 @@ Alur kerja yang dimaksudkan adalah:
 3. Bandingkan biaya terukur dengan benchmark workspace lengkap.
 4. Baru setelah itu putuskan apakah optimasi implementasi dibenarkan.
 
-Ini menjaga `rbot profile` tetap berguna sebagai laboratorium untuk performa workspace tanpa mengubah profiling itu sendiri menjadi jalur build lain.
+Ini menjaga `satria profile` tetap berguna sebagai laboratorium untuk performa workspace tanpa mengubah profiling itu sendiri menjadi jalur build lain.

@@ -1,9 +1,9 @@
 # design/
 
-Dokumen desain rbot.
+Dokumen desain satria.
 
 > **Catatan provenance (3 Okt 2026):** direktori `design/` asli hilang bersama
-> penghapusan tak sengaja direktori rbot dan tidak ikut dalam backup. Isi di
+> penghapusan tak sengaja direktori satria dan tidak ikut dalam backup. Isi di
 > sini adalah **rekonstruksi** dari arsitektur kode aktif (`src/`) dan
 > keputusan yang tercatat pada sesi kerja — bukan salinan persis dokumen lama.
 > Bila ada perbedaan, kode adalah sumber kebenaran.

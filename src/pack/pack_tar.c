@@ -27,7 +27,7 @@ static const char *tarFlag(const char *compress) {
 bool packBuildTar(const Config *c, const PackArtifact *a) {
   fsRemoveFile(a->tmp);
   char stage[128];
-  snprintf(stage, sizeof(stage), ".rbot/pack/tar-data");
+  snprintf(stage, sizeof(stage), ".satria/pack/tar-data");
   if (!packStageEntries(c, stage)) return false;
 
   size_t n = strlen(a->tmp) + strlen(stage) + 64;
@@ -39,7 +39,7 @@ bool packBuildTar(const Config *c, const PackArtifact *a) {
   }
   char *cmd = malloc(n);
   if (!cmd) {
-    fprintf(stderr, "rbot: pack: kehabisan memori\n");
+    fprintf(stderr, "satria: pack: kehabisan memori\n");
     fsRemoveTree(stage);
     return false;
   }
@@ -59,7 +59,7 @@ bool packBuildTar(const Config *c, const PackArtifact *a) {
   fsRemoveTree(stage);
   if (!ok) {
     fsRemoveFile(a->tmp);
-    fprintf(stderr, "rbot: pack: tar gagal untuk %s\n", a->path);
+    fprintf(stderr, "satria: pack: tar gagal untuk %s\n", a->path);
     return false;
   }
 
@@ -67,7 +67,7 @@ bool packBuildTar(const Config *c, const PackArtifact *a) {
   fsRemoveFile(a->path);
   if (rename(a->tmp, a->path) != 0) {
     fsRemoveFile(a->tmp);
-    fprintf(stderr, "rbot: pack: tidak bisa menempatkan %s\n", a->path);
+    fprintf(stderr, "satria: pack: tidak bisa menempatkan %s\n", a->path);
     return false;
   }
   return true;

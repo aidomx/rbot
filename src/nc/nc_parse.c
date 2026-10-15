@@ -1,5 +1,5 @@
 /*
- * nc_parse — pembaca build.ninja untuk konverter rbot.
+ * nc_parse — pembaca build.ninja untuk konverter satria.
  *
  * Dipindah apa adanya dari ninjaconv.c: path helper (normalisasi,
  * relativisasi terhadap cwd, fix token -I), pembaca baris logis

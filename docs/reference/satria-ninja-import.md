@@ -1,50 +1,50 @@
 # Ninja Buildfile Import
 
-rbot can import an existing Ninja build file (`build.ninja`) and convert it
-into a rbot `Buildfile`.
+satria can import an existing Ninja build file (`build.ninja`) and convert it
+into a satria `Buildfile`.
 
 There are two modes:
 
 - `-xf` — convert and use temporarily, without saving the generated Buildfile.
 - `-xcf` — convert and save the generated Buildfile.
 
-## `rbot -xf`
+## `satria -xf`
 
 Use `-xf` when the Ninja build file should only be used for the current
 command.
 
 ```sh
-rbot -xf nbuild/build.ninja
+satria -xf nbuild/build.ninja
 ```
 
-rbot converts the Ninja file to a temporary Buildfile, uses it for the
+satria converts the Ninja file to a temporary Buildfile, uses it for the
 requested operation, and removes the temporary file afterward.
 
 The existing `Buildfile` is not modified.
 
 This is useful when:
 
-- testing an existing Ninja project with rbot;
-- comparing rbot against another build system;
+- testing an existing Ninja project with satria;
+- comparing satria against another build system;
 - running a one-off build without changing the project;
-- using `clean` or another rbot command with an imported Ninja file.
+- using `clean` or another satria command with an imported Ninja file.
 
 For example:
 
 ```sh
-rbot -xf nbuild/build.ninja clean
+satria -xf nbuild/build.ninja clean
 ```
 
 The conversion is temporary and the generated Buildfile is removed after
 the command finishes.
 
-## `rbot -xcf`
+## `satria -xcf`
 
-Use `-xcf` when the Ninja build file should become the project's rbot
+Use `-xcf` when the Ninja build file should become the project's satria
 Buildfile.
 
 ```sh
-rbot -xcf nbuild/build.ninja
+satria -xcf nbuild/build.ninja
 ```
 
 The generated configuration is saved as:
@@ -53,21 +53,21 @@ The generated configuration is saved as:
 Buildfile
 ```
 
-If a `Buildfile` already exists, rbot asks for confirmation before replacing
+If a `Buildfile` already exists, satria asks for confirmation before replacing
 it. Declining the confirmation leaves the existing Buildfile unchanged.
 
 After saving, the generated Buildfile can be used normally:
 
 ```sh
-rbot
+satria
 ```
 
 ## Difference
 
 | Command | Convert | Use converted config | Save `Buildfile` |
 |---|---:|---:|---:|
-| `rbot -xf nbuild/build.ninja` | yes | yes | no |
-| `rbot -xcf nbuild/build.ninja` | yes | yes | yes |
+| `satria -xf nbuild/build.ninja` | yes | yes | no |
+| `satria -xcf nbuild/build.ninja` | yes | yes | yes |
 
 Conceptually:
 
@@ -80,7 +80,7 @@ build.ninja
 temporary Buildfile
     |
     v
-rbot operation
+satria operation
     |
     v
 temporary Buildfile removed
@@ -95,7 +95,7 @@ build.ninja
 Buildfile
     |
     v
-rbot operation
+satria operation
 ```
 
 The `-xf` mode is therefore the non-destructive import path, while `-xcf`

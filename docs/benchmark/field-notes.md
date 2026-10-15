@@ -1,10 +1,10 @@
-# Field Notes from rbot Development
+# Field Notes from satria Development
 
 These notes summarize observed behavior during development and testing. They are not normative benchmark guarantees.
 
 ## Native vs proot
 
-Build performance can fluctuate between native Termux, Debian/proot-distro, and conventional desktop Linux. Filesystem and process overhead can change the relative ordering between rbot and Ninja.
+Build performance can fluctuate between native Termux, Debian/proot-distro, and conventional desktop Linux. Filesystem and process overhead can change the relative ordering between satria and Ninja.
 
 A practical observation from a larger real project was a cold build of roughly:
 
@@ -20,7 +20,7 @@ This is valuable evidence of robustness, but it should not be presented as a uni
 
 ## Relative performance
 
-Across repeated local measurements, Ninja sometimes leads and rbot sometimes leads. The important result is that rbot is often in the same performance class for the tested workloads while providing its own content-aware and configuration model.
+Across repeated local measurements, Ninja sometimes leads and satria sometimes leads. The important result is that satria is often in the same performance class for the tested workloads while providing its own content-aware and configuration model.
 
 ## Benchmark honesty
 

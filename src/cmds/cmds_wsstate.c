@@ -2,12 +2,12 @@
  * cmds_wsstate — fast-state khusus mode workspace. Terpisah dari
  * cmdsFastStateSave/cmdsFastStateValid (yang tetap untuk single project).
  *
- * File: .rbot/workspace/<proyek>.ws.state (fase binary) dan
- *       .rbot/workspace/<proyek>.ws.lib.state (fase library) — mode
+ * File: .satria/workspace/<proyek>.ws.state (fase binary) dan
+ *       .satria/workspace/<proyek>.ws.lib.state (fase library) — mode
  *       workspace root-centric (state_path, lihat cmds_internal.h);
- *       bila proyek belum ditetapkan, fallback ke .rbot/ws.state lama.
+ *       bila proyek belum ditetapkan, fallback ke .satria/ws.state lama.
  * Format (whitespace-delimited, path tanpa spasi):
- *   RBOTWS3 <cwd>
+ *   SATRIAWS3 <cwd>
  *   META <skipped> <target|-> <buildfile>
  *   LIB <path>                 library yang diminta (dicetak saat no-op)
  *   F <mtime_ns> <size> <path> input/output yang dipakai (source, object, closure header,
@@ -26,14 +26,14 @@
 #include "../util.h"
 #include "cmds_internal.h"
 
-#define WS_STATE_MAGIC "RBOTWS3"
+#define WS_STATE_MAGIC "SATRIAWS3"
 
 static bool wsModeOn = false;
 
 static void srcCacheReset(void); /* didefinisikan di bagian langkah 1 */
 
 /* Mode workspace kini memakai SATU cwd (root workspace) dan SATU
-   .rbot/ws.src untuk seluruh proyek — record sumber dipakai lintas proyek
+   .satria/ws.src untuk seluruh proyek — record sumber dipakai lintas proyek
    (direktori sumber berpath relatif root). wsModeSet(true) dipanggil
    sekali per run oleh wsCmdBuild; reset di sini tetap mengosongkan record
    lama saat run baru dimulai. */
@@ -79,7 +79,7 @@ static void wsStateFilePath(char *out, size_t n, bool libOnly) {
 }
 
 /* Snapshot daftar source per proyek (design/workspace_v1.md §State):
-   .rbot/workspace/<proyek>.src — dipakai workspace_log sebagai fingerprint
+   .satria/workspace/<proyek>.src — dipakai workspace_log sebagai fingerprint
    daftar source (keputusan no-op & skip-write CompDB). Ditulis hanya bila
    isinya berubah; tanpa proyek aktif (jalur lama) dilewati. */
 static void wsWriteSrcSnapshot(const List *srcs) {
@@ -90,7 +90,7 @@ static void wsWriteSrcSnapshot(const List *srcs) {
   cmdsStatePath(path, sizeof(path), "src");
   List lines = {0};
   char buf[WS_PATH_LEN + 32];
-  snprintf(buf, sizeof(buf), "RBOTWSLIST1 %s", cwd);
+  snprintf(buf, sizeof(buf), "SATRIAWSLIST1 %s", cwd);
   listAdd(&lines, buf);
   for (int i = 0; i < srcs->count; i++) {
     snprintf(buf, sizeof(buf), "S %s", srcs->items[i]);
@@ -328,10 +328,10 @@ bool wsFastStateValid(const char *buildfilePath, bool libOnly) {
 
 /* ==================== langkah 1: cache daftar sumber ====================
  * Penelusuran folder sumber (walkDir) dilakukan setiap fase. Di mode workspace
- * hasilnya disimpan di .rbot/ws.src bersama stamp mtime setiap folder yang
+ * hasilnya disimpan di .satria/ws.src bersama stamp mtime setiap folder yang
  * ditelusuri. Mtime dicatat SEBELUM folder dibaca, jadi bila ada perubahan
  * selama walk, run berikutnya melihat stamp berbeda dan menelusuri ulang.
- * Format: RBOTSRC1 <cwd>, lalu per entri: R <dir> <ext>, D <mtime_ns> <path>
+ * Format: SATRIASRC1 <cwd>, lalu per entri: R <dir> <ext>, D <mtime_ns> <path>
  * (-1 bila folder tidak ada), S <file>. */
 
 typedef struct {
@@ -371,12 +371,12 @@ static void srcLoad(void) {
   if (srcLoaded) return;
   srcLoaded = true;
   if (!fsGetCwd(srcCwd, sizeof(srcCwd))) return;
-  FILE *fp = fopen(".rbot/ws.src", "r");
+  FILE *fp = fopen(".satria/ws.src", "r");
   if (!fp) return;
   char line[MAX_PATH * 6];
   if (fgets(line, sizeof(line), fp)) {
     char magic[32], cwd[WS_PATH_LEN];
-    if (sscanf(line, "%31s %" WS_SCAN "s", magic, cwd) != 2 || strcmp(magic, "RBOTSRC1") != 0 ||
+    if (sscanf(line, "%31s %" WS_SCAN "s", magic, cwd) != 2 || strcmp(magic, "SATRIASRC1") != 0 ||
         strcmp(cwd, srcCwd) != 0) {
       fclose(fp);
       return; /* cache milik folder lain: abaikan */
@@ -443,20 +443,20 @@ static void srcWalk(SrcRec *r, const char *dir, List *out) {
     }
   }
   for (int i = 0; i < dirs.count; i++) {
-    /* .rbot adalah state: tidak pernah jadi input. Mencatatnya membuat cache
-       basi di setiap run, karena rbot sendiri menulis isi .rbot. */
+    /* .satria adalah state: tidak pernah jadi input. Mencatatnya membuat cache
+       basi di setiap run, karena satria sendiri menulis isi .satria. */
     const char *b = strrchr(dirs.items[i], '/');
     b = b ? b + 1 : dirs.items[i];
-    if (strcmp(b, ".rbot") == 0) continue;
+    if (strcmp(b, ".satria") == 0) continue;
     srcWalk(r, dirs.items[i], out);
   }
   listFree(&dirs);
   listFree(&files);
 }
 
-/* Bandingkan isi .rbot/ws.src dengan daftar baris yang akan ditulis. */
+/* Bandingkan isi .satria/ws.src dengan daftar baris yang akan ditulis. */
 static bool srcFileSame(const List *lines) {
-  FILE *fp = fopen(".rbot/ws.src", "r");
+  FILE *fp = fopen(".satria/ws.src", "r");
   if (!fp) return false;
   char line[WS_PATH_LEN * 2];
   bool same = true;
@@ -475,7 +475,7 @@ static bool srcFileSame(const List *lines) {
 static void srcSave(void) {
   List lines = {0};
   char buf[WS_PATH_LEN * 2];
-  snprintf(buf, sizeof(buf), "RBOTSRC1 %s", srcCwd);
+  snprintf(buf, sizeof(buf), "SATRIASRC1 %s", srcCwd);
   listAdd(&lines, buf);
   for (int i = 0; i < srcRecCount; i++) {
     SrcRec *r = &srcRecs[i];
@@ -488,12 +488,12 @@ static void srcSave(void) {
     }
   }
   if (!srcFileSame(&lines)) {
-    mkdirs(".rbot");
-    FILE *fp = fopen(".rbot/ws.src.tmp", "w");
+    mkdirs(".satria");
+    FILE *fp = fopen(".satria/ws.src.tmp", "w");
     if (fp) {
       for (int i = 0; i < lines.count; i++) fprintf(fp, "%s\n", lines.items[i]);
-      if (fclose(fp) == 0) rename(".rbot/ws.src.tmp", ".rbot/ws.src");
-      else fsRemoveFile(".rbot/ws.src.tmp");
+      if (fclose(fp) == 0) rename(".satria/ws.src.tmp", ".satria/ws.src");
+      else fsRemoveFile(".satria/ws.src.tmp");
     }
   }
   listFree(&lines);

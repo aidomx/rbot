@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_CONFIG_CACHE_H
-#define RBOT_V0_1_0_CONFIG_CACHE_H
+#ifndef SATRIA_V0_1_0_CONFIG_CACHE_H
+#define SATRIA_V0_1_0_CONFIG_CACHE_H
 
 #include <stddef.h>
 
@@ -9,7 +9,7 @@
  * config_cache — Persistent Buildfile cache.
  *
  * Dipindah apa adanya dari config.c: hasil parse Buildfile diserialisasi
- * ke .rbot/buildfile.cache (per-nama file konfigurasi) dan divalidasi
+ * ke .satria/buildfile.cache (per-nama file konfigurasi) dan divalidasi
  * lewat mtime+size. Format biner dibaca/ditulis lewat helper cache*()
  * internal di file .c-nya.
  *
@@ -23,4 +23,4 @@ void cfgCachePathFor(const char *path, char *out, size_t n);
 bool cfgCacheLoad(Config *c, const char *path, const char *cachePath);
 void cfgCacheSave(const Config *c, const char *path, const char *cachePath);
 
-#endif /* RBOT_V0_1_0_CONFIG_CACHE_H */
+#endif /* SATRIA_V0_1_0_CONFIG_CACHE_H */

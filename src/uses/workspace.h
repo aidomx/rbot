@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_USES_WORKSPACE_H
-#define RBOT_V0_1_0_USES_WORKSPACE_H
+#ifndef SATRIA_V0_1_0_USES_WORKSPACE_H
+#define SATRIA_V0_1_0_USES_WORKSPACE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -25,7 +25,7 @@
 
 /* Folder tempat Buildfile hasil sintesis disimpan (stabil, di root
    workspace) agar cache config & fast path tidak miss tiap run. */
-#define WORKSPACE_SYNTH_DIR ".rbot/workspace"
+#define WORKSPACE_SYNTH_DIR ".satria/workspace"
 
 /*
  * Jalankan mode workspace untuk command `cmd` ("build"/"clean").
@@ -45,7 +45,7 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
  * workspaceEnumerate — baca+validasi Buildfile.ws di `wsDir` (parse, topo
  * sort, validasi release) lalu ENUMErasikan saja: cekBuildfile menunjukkan
  * apakah Buildfile project `<wsDir>/<name>/Buildfile` atau file `.Buildfile`
- * hasil sintesis ada (dipakai `rbot profile workspace=` untuk menghitung
+ * hasil sintesis ada (dipakai `satria profile workspace=` untuk menghitung
  * proyek tanpa menjalankan build apa pun).
  * projectNames[count] diisi pointer ke buffer internal model (valid selama
  * panggilan; TIDAK perlu dibebaskan oleh pemanggil).
@@ -68,9 +68,9 @@ bool workspaceFileExists(void);
 bool wsMemberCwdDetect(char *wsRootOut, size_t wsRootN, char *memberOut, size_t memberN);
 
 /*
- * wsStateFileExists — true bila .rbot/workspace.state di root workspace ada
+ * wsStateFileExists — true bila .satria/workspace.state di root workspace ada
  * (tanpa validasi stamp). Dipakai bootstrap.c untuk status cold kasar mode
- * workspace: root workspace tidak punya .rbot/build.state (itu file
+ * workspace: root workspace tidak punya .satria/build.state (itu file
  * per-proyek). Validasi stamp gate (Buildfile.ws + stamp input per proyek)
  * kini berjalan di workspaceRun per-closure (wsStateValidFiltered) — `-w
  * <nama>` tidak memvalidasi seluruh workspace; sekaligus menyetel
@@ -84,4 +84,4 @@ bool wsStateFileExists(void);
    dipakai. */
 const char *workspaceFileName(void);
 
-#endif /* RBOT_V0_1_0_USES_WORKSPACE_H */
+#endif /* SATRIA_V0_1_0_USES_WORKSPACE_H */

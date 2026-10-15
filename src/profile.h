@@ -1,11 +1,11 @@
-#ifndef RBOT_PROFILE_H
-#define RBOT_PROFILE_H
+#ifndef SATRIA_PROFILE_H
+#define SATRIA_PROFILE_H
 
 /*
- * profile — `rbot profile <context> [key=value ...] [--report <file>]`
+ * profile — `satria profile <context> [key=value ...] [--report <file>]`
  * (design/profile.md).
  *
- * Antarmuka diagnostik: mengukur biaya nyata operasi rbot pada direktori
+ * Antarmuka diagnostik: mengukur biaya nyata operasi satria pada direktori
  * yang sudah ada, TANPA Buildfile dan TANPA menyentuh state build normal
  * (non-mutating; keluaran operasi ditulis ke direktori sementara yang
  * terisolasi dan dihapus setelah pengukuran).
@@ -29,10 +29,10 @@
  * (gzip vs xz vs bz2) — biaya & ukuran hasil terukur per fase.
  *
  * Output: stdout TTY = ringkasan singkat ("apa yang mahal?"); non-TTY
- * (pipe/redirect, mis. `rbot profile archive=. > profile.md`) = laporan
+ * (pipe/redirect, mis. `satria profile archive=. > profile.md`) = laporan
  * rinci. `--report <file>` menulis laporan rinci ke file, stdout tetap
  * ringkas (pembuatan file tidak ikut terukur).
  */
 int cmdProfile(const char *const *args, int nargs);
 
-#endif /* RBOT_PROFILE_H */
+#endif /* SATRIA_PROFILE_H */

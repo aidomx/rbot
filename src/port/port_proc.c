@@ -114,7 +114,7 @@ static void procUnregisterPid(DWORD pid) {
 static BOOL WINAPI procConsoleHandler(DWORD type) {
   if (type != CTRL_C_EVENT && type != CTRL_BREAK_EVENT) return FALSE;
   g_wantInterrupt = true;
-  /* CREATE_NEW_PROCESS_GROUP membuat compiler terpisah dari grup rbot,
+  /* CREATE_NEW_PROCESS_GROUP membuat compiler terpisah dari grup satria,
      jadi terminal tidak menghentikannya langsung; teruskan CTRL_BREAK
      eksplisit ke setiap process group child yang masih berjalan. */
   procEnsureCS();
@@ -369,16 +369,16 @@ bool probeAvailable(const char *exe) {
  * Ctrl+C, mode foreground, dan job paralel.
  *
  * foreground=true (default): child (shell/compiler) dibalikkan ke SIG_DFL
- *   untuk SIGINT/SIGQUIT lalu dibiarkan berbagi process group dengan rbot,
+ *   untuk SIGINT/SIGQUIT lalu dibiarkan berbagi process group dengan satria,
  *   sehingga Ctrl+C dari terminal menghentikan semuanya sekaligus.
  *
- * foreground=false: rbot memasang handler SIGINT sendiri (child tidak
+ * foreground=false: satria memasang handler SIGINT sendiri (child tidak
  *   ikut menerima Ctrl+C dari terminal). Ctrl+C ditandai, diteruskan ke
  *   process group child secara eksplisit, dan build dibatalkan dengan rapi
  *   (procRun mengembalikan PROC_RUN_INTERRUPTED).
  *
  * Job paralel (-jN): tiap child diletakkan di process group sendiri
- * (setpgid(0,0)), sehingga forward sinyal dari rbot terarah per proses.
+ * (setpgid(0,0)), sehingga forward sinyal dari satria terarah per proses.
  */
 
 #define JOB_MAX 4096
@@ -432,7 +432,7 @@ bool procInterrupted(void) { return g_wantInterrupt != 0; }
 /*
  * Jalankan command langsung (tanpa `/bin/sh -c`) bila command "polos": hanya
  * kata dipisah spasi, tanpa quote/variabel/glob/redirect/pipe — persis bentuk
- * command kompilasi & link yang disusun rbot. Menghemat SATU exec per job
+ * command kompilasi & link yang disusun satria. Menghemat SATU exec per job
  * (shell) dan memakai posix_spawn (vfork-style, tanpa menyalin page table
  * proses induk); keduanya mahal di proot/Termux. Return pid, atau -1 bila
  * command butuh shell / spawn gagal — pemanggil jatuh ke jalur fork+sh lama
@@ -526,7 +526,7 @@ bool procStart(const char *cmd, ProcHandle *out) {
     sigaction(SIGHUP, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 
-    setpgid(0, 0); /* grup sendiri: forward sinyal dari rbot terarah */
+    setpgid(0, 0); /* grup sendiri: forward sinyal dari satria terarah */
 
     execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
     _exit(127);
@@ -625,7 +625,7 @@ bool procRun(const char *cmd) {
   if (pid == 0) {
     /* system() membuat signal SIGINT/SIGQUIT diabaikan saat shell berjalan.
        Child build harus kembali ke default agar Ctrl+C — langsung dari
-       terminal saat foreground, atau forward dari rbot saat background —
+       terminal saat foreground, atau forward dari satria saat background —
        benar-benar menghentikan shell/compiler. */
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -652,7 +652,7 @@ bool procRun(const char *cmd) {
   sigemptyset(&ignoreInt.sa_mask);
 
   if (separateGroup) {
-    /* foreground=false: child di grup terpisah, rbot tetap hidup menerima
+    /* foreground=false: child di grup terpisah, satria tetap hidup menerima
        Ctrl+C lewat handler procSigintHandler. */
     ignoreInt.sa_handler = procSigintHandler;
     sigaction(SIGINT, &ignoreInt, &oldInt);

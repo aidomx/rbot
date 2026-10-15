@@ -1,16 +1,16 @@
 #pragma once
-#define RBOT_H
+#define SATRIA_H
 
 /*
  * Kontrak antara src/main.c (dispatcher/loader 
  */
-int rbotRun(int argc, const char *argv[]);
+int satriaRun(int argc, const char *argv[]);
 
 /* Versi implementasi aktif, dikompilasi tetap ke dalam binary (bukan
- * dibaca ulang dari .version saat runtime) — supaya `rbot version` selalu
+ * dibaca ulang dari .version saat runtime) — supaya `satria version` selalu
  * benar di mana pun dijalankan, tidak tergantung direktori kerja.
  */
-const char *rbotVersion(void);
+const char *satriaVersion(void);
 
 /* uji .d */
 

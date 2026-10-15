@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_DEPS_INTERNAL_H
-#define RBOT_V0_1_0_DEPS_INTERNAL_H
+#ifndef SATRIA_V0_1_0_DEPS_INTERNAL_H
+#define SATRIA_V0_1_0_DEPS_INTERNAL_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -20,7 +20,7 @@
 
 #define DEPS_MAX_NODES 8192
 #define DOTD_MAX_LINE 16384
-#define DEPS_SNAPSHOT_FILE ".rbot/deps.cache"
+#define DEPS_SNAPSHOT_FILE ".satria/deps.cache"
 
 typedef struct {
   char *path;    /* path ternormalisasi relatif root */
@@ -38,7 +38,7 @@ struct DepCache {
   DepNode *nodes;
   int count, cap;
   unsigned gen;
-  int semRoot; /* TU yang sedang diperiksa (RBOT_HDR_SEM) */
+  int semRoot; /* TU yang sedang diperiksa (SATRIA_HDR_SEM) */
   const Config *cfg;
   List incDirs;
 
@@ -120,7 +120,7 @@ char *depReadWhole(const char *path, size_t *outLen);
 /* Pastikan node sudah punya edges (dari .d bila layak, else pemindai). */
 void depParseNodeIfNeeded(DepCache *dc, int idx);
 
-/* Pemeriksaan semantik header (deps_semhdr.c, opt-in RBOT_HDR_SEM=1). */
+/* Pemeriksaan semantik header (deps_semhdr.c, opt-in SATRIA_HDR_SEM=1). */
 bool depsSemEnabled(void);
 void depsSemRecordNode(DepCache *dc, int idx);
 bool depsSemAcceptNode(DepCache *dc, int root, int idx);
@@ -142,7 +142,7 @@ void depEdgesSave(FILE *fp, const DepCache *dc);
 
 /* ==================== deps_snapshot.c ==================== */
 
-/* Muat .rbot/deps.cache sekali per run: snapshot hash + section edges. */
+/* Muat .satria/deps.cache sekali per run: snapshot hash + section edges. */
 void depSnapshotLoad(DepCache *dc);
 
-#endif /* RBOT_V0_1_0_DEPS_INTERNAL_H */
+#endif /* SATRIA_V0_1_0_DEPS_INTERNAL_H */

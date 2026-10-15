@@ -1,6 +1,6 @@
 # Incremental Builds and Dependency Tracking
 
-Incremental correctness is one of rbot's important design areas.
+Incremental correctness is one of satria's important design areas.
 
 ## `.d` dependency tracking
 
@@ -11,19 +11,19 @@ MMD
 MP
 ```
 
-A dependency file associates an object with the headers that affected it. rbot uses this information to decide which source files are stale.
+A dependency file associates an object with the headers that affected it. satria uses this information to decide which source files are stale.
 
-If a `.d` file is unavailable, rbot can fall back to scanning `#include` relationships.
+If a `.d` file is unavailable, satria can fall back to scanning `#include` relationships.
 
 ## Content-aware freshness
 
-rbot also tracks content/fingerprint state. A timestamp change does not automatically imply that the compiler must run when the relevant content is unchanged.
+satria also tracks content/fingerprint state. A timestamp change does not automatically imply that the compiler must run when the relevant content is unchanged.
 
 This makes cases such as:
 
 ```bash
 touch include/foo.h
-rbot
+satria
 ```
 
 potentially become a no-op instead of recompiling every source that includes `foo.h`.
@@ -32,6 +32,6 @@ Typical output can distinguish a touched-but-unchanged dependency from a genuine
 
 ## Why this matters
 
-The objective is not to claim that rbot is always faster than Ninja. The objective is predictable incremental behavior with low overhead across environments.
+The objective is not to claim that satria is always faster than Ninja. The objective is predictable incremental behavior with low overhead across environments.
 
 The benchmark methodology should therefore look at both elapsed time and actual object recompilation count.

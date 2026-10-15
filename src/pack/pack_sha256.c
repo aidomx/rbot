@@ -1,7 +1,7 @@
 /*
  * pack_sha256 — SHA-256 murni C (FIPS 180-4) + penulis file checksum.
  *
- * Diimplementasikan sendiri agar checksum jalan di semua platform rbot
+ * Diimplementasikan sendiri agar checksum jalan di semua platform satria
  * (Windows/MSVC tidak punya sha256sum). Format file mengikuti coreutils:
  *   "<hex>  <basename>\n"   (dua spasi = mode biner, valid `sha256sum -c`)
  */

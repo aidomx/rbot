@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_EMBED_H
-#define RBOT_V0_1_0_EMBED_H
+#ifndef SATRIA_V0_1_0_EMBED_H
+#define SATRIA_V0_1_0_EMBED_H
 
 #include <stdbool.h>
 
@@ -15,7 +15,7 @@
  * Dua jalur konversi arsip -> object:
  *   1. GNU ld (Linux/MinGW): `ld -r -b binary` -> simbol nyata
  *      _binary_<path>_start/_end; LEN = (end - start).
- *   2. Fallback portabel (MSVC/tanpa ld, atau RBOT_NO_LD=1): arsip diubah
+ *   2. Fallback portabel (MSVC/tanpa ld, atau SATRIA_NO_LD=1): arsip diubah
  *      jadi file C berisi array byte (build/<name>.embed.c) dengan simbol
  *      _binary_<path>_start[] + _binary_<path>_len; LEN = simbol _len.
  *   Keduanya diekspos lewat macro yang sama di build/embedded.h, lengkap
@@ -44,8 +44,8 @@ bool buildEmbedded(const Config *c);
 
 /*
  * embedProbeGnuLd — cek GNU ld dengan probe fisik sekali panggil, TANPA
- * membaca/menulis cache .rbot/ld.cache. Dipakai jalur non-mutating
- * (`rbot profile embed=`) yang tidak boleh menyentuh state build normal.
+ * membaca/menulis cache .satria/ld.cache. Dipakai jalur non-mutating
+ * (`satria profile embed=`) yang tidak boleh menyentuh state build normal.
  */
 bool embedProbeGnuLd(void);
 
@@ -55,4 +55,4 @@ bool embedProbeGnuLd(void);
    penamaan arsip tinggal di modul embed. */
 void configFinalizeEntry(EmbeddedEntry *e, const char *buildDir);
 
-#endif /* RBOT_V0_1_0_EMBED_H */
+#endif /* SATRIA_V0_1_0_EMBED_H */

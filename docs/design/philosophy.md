@@ -6,12 +6,12 @@ The central idea is deliberately simple:
 
 > **A simple builder for you.**
 
-This does not mean rbot has few features. It means the user should not have to describe implementation details that a build tool can determine reliably itself.
+This does not mean satria has few features. It means the user should not have to describe implementation details that a build tool can determine reliably itself.
 
 The desired direction is therefore:
 
 ```text
-more capability inside rbot
+more capability inside satria
 less boilerplate in Buildfile
 ```
 
@@ -46,7 +46,7 @@ These two forms are design direction discussed during development; they represen
 
 ## Complexity belongs in the tool
 
-A useful rule for rbot is:
+A useful rule for satria is:
 
 > If the same configuration appears in almost every project, it is probably a candidate for a default.
 
@@ -67,7 +67,7 @@ rather than forcing every normal project to repeat all of those fields.
 
 ## Performance without benchmark mythology
 
-rbot should not define its identity as "faster than Ninja". Build performance naturally fluctuates with OS, filesystem, CPU scheduling, cache state, compiler, and environment.
+satria should not define its identity as "faster than Ninja". Build performance naturally fluctuates with OS, filesystem, CPU scheduling, cache state, compiler, and environment.
 
 The more useful objective is:
 
@@ -77,7 +77,7 @@ The more useful objective is:
 - reasonable cold builds,
 - and strong behavior across environments.
 
-Sometimes Ninja should win. Sometimes rbot should win. The important thing is that rbot remains competitive without becoming fragile.
+Sometimes Ninja should win. Sometimes satria should win. The important thing is that satria remains competitive without becoming fragile.
 
 ## Tolerant environments
 

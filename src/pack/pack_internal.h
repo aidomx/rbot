@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_PACK_INTERNAL_H
-#define RBOT_V0_1_0_PACK_INTERNAL_H
+#ifndef SATRIA_V0_1_0_PACK_INTERNAL_H
+#define SATRIA_V0_1_0_PACK_INTERNAL_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -21,7 +21,7 @@
 
 /* packResolveSource — resolve path SUMBER entri pack.files. Entri boleh
    ditulis portabel tanpa akhiran .exe: di Windows binary link menghasilkan
-   <name>.exe, sehingga `bin/rbot:bin/rbot` menunjuk bin/rbot.exe. Path apa
+   <name>.exe, sehingga `bin/satria:bin/satria` menunjuk bin/satria.exe. Path apa
    adanya dicek dulu; bila tidak ada, coba dengan akhiran .exe (fallback
    lintas host, tanpa #ifdef, agar Buildfile yang sama jalan di mana pun).
    Return true bila path efektif (di out) ada; false bila keduanya tidak —
@@ -41,7 +41,7 @@ void packTemplate(const Config *c, const char *tpl, char *out, size_t n);
    .tar.bz2/.tar) diganti .deb; tanpa ekstensi dikenal -> <path>.deb. */
 void packDebName(const char *tarPath, char *out, size_t n);
 
-/* Direktori staging bersama: ".rbot/pack". */
+/* Direktori staging bersama: ".satria/pack". */
 void packStageDir(char *out, size_t n);
 
 /* checksum sha256 -> "<path>.sha256" berisi "<hex>  <basename>" (dua spasi,
@@ -74,4 +74,4 @@ void packApply(Config *c, const char *key, const char *value);
    memakai ulang Config (mis. fase release workspace). */
 void packFreeConfig(PackConfig *p);
 
-#endif /* RBOT_V0_1_0_PACK_INTERNAL_H */
+#endif /* SATRIA_V0_1_0_PACK_INTERNAL_H */

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# workspace.sh — benchmark mode workspace rbot (Buildfile.ws)
+# workspace.sh — benchmark mode workspace satria (Buildfile.ws)
 #
 # Meniru tests/wstest: 3 proyek dalam satu workspace
 #   rupamod : proyek kemasan (archive .rp -> modules/rupa_modules.tar)
@@ -8,7 +8,7 @@
 #   bade    : binary C + library (bade), depends_on rupamod, embed arsip
 #
 # PERBEDAAN PENTING:
-# Skrip ini memaksa ninja/make melakukan pekerjaan yang SAMA dengan rbot:
+# Skrip ini memaksa ninja/make melakukan pekerjaan yang SAMA dengan satria:
 # 1. Membangun static library (libcore.a, libbade.a).
 # 2. Menyelesaikan circular dependency (core <-> bade) menggunakan
 #    linker group (-Wl,--start-group ... -Wl,--end-group).
@@ -17,13 +17,13 @@
 # Skenario: cold, noop, leaf, bade, mod, touch, hedit, sel, dep, libtouch, libhdr, rel, strace.
 # Setiap run memakai shim gcc/ld (PATH) yang mencatat setiap kompilasi/link
 # ke work.log — bukti pekerjaan aktual, bukan sekadar timestamp artefak.
-#   touch : touch library/a.h tanpa ubah konten (rbot: skip; ninja/make: rebuild)
+#   touch : touch library/a.h tanpa ubah konten (satria: skip; ninja/make: rebuild)
 #   hedit : ubah ISI library/a.h -> semua tool wajib rebuild dependen header
 #   sel   : edit core+bade, cakupan -w core (target keluaran disamakan antar tool)
 #   dep   : edit .rp+core, cakupan -w bade (target keluaran disamakan antar tool)
 #   libtouch: touch library/ext.h (header internal via headers.internal), konten sama
 #   libhdr: edit ISI library/ext.h (header internal, diakses include relatif dari r2/k2)
-#   rel   : release terpisah (tar + sha256, rbot-only) sesuai docs/guide/releases.md
+#   rel   : release terpisah (tar + sha256, satria-only) sesuai docs/guide/releases.md
 #
 # Laporan (design/bench_ws_output.md): Legend/Metrics/Correctness di depan
 # (setelah versi), stream per run, tabel ringkas [Detailed Validation Log]
@@ -34,7 +34,7 @@
 # kerja konsep real workspace), BUKAN terhadap tool lain. Tool bebas memakai
 # strategi apa pun, asal pekerjaannya sesuai harapan. Bila tidak, verdict
 # "Not in accordance" dan skenario itu dihitung (failed) di benchmark report,
-# untuk tool mana pun termasuk rbot. Tidak ada perbandingan silang "vs rbot".
+# untuk tool mana pun termasuk satria. Tidak ada perbandingan silang "vs satria".
 # ============================================================================
 set -uo pipefail
 [ -n "${EPOCHREALTIME:-}" ] || {
@@ -47,12 +47,12 @@ NSRC=80                     # -n : jumlah source per proyek
 NHEAD=20                    # -H : jumlah header berantai per proyek
 NMOD=40                     # -m : jumlah file .rp di rupamod
 NRUN=5                      # -r : pengulangan per skenario (median)
-RBOT=bin/rbot               # -b : binary rbot
-RBOT_ARGS=""                # -a : argumen tambahan untuk rbot
+SATRIA=bin/satria               # -b : binary satria
+SATRIA_ARGS=""                # -a : argumen tambahan untuk satria
 COMPILERS="gcc"             # -c : nilai 'compiler =' di Buildfile.ws
 KEEP=0                      # -k : jangan hapus workspace di akhir
 ONLY=""                     # -s : subset skenario
-TOOLS_OPT="rbot,ninja,make" # -t : subset tool pembanding
+TOOLS_OPT="satria,ninja,make" # -t : subset tool pembanding
 OUTDIR=""                   # -o : direktori kerja
 NPROC=$(nproc 2> /dev/null || echo 4)
 MUT_DELAY=0 # -d : jeda (detik) sebelum tiap edit
@@ -66,20 +66,20 @@ usage() {
 while getopts "n:H:m:r:b:a:c:d:D:O:ko:s:t:h" opt; do
   case $opt in
     n) NSRC=$OPTARG ;; H) NHEAD=$OPTARG ;; m) NMOD=$OPTARG ;;
-    r) NRUN=$OPTARG ;; b) RBOT=$OPTARG ;; a) RBOT_ARGS=$OPTARG ;;
+    r) NRUN=$OPTARG ;; b) SATRIA=$OPTARG ;; a) SATRIA_ARGS=$OPTARG ;;
     c) COMPILERS=$OPTARG ;; k) KEEP=1 ;; o) OUTDIR=$OPTARG ;;
     s) ONLY=$OPTARG ;; t) TOOLS_OPT=$OPTARG ;; d) MUT_DELAY=$OPTARG ;; D) RUN_DELAY=$OPTARG ;; O) RUN_ORDER=$OPTARG ;; *) usage ;;
   esac
 done
 
 # Validasi argumen SEJAK DINI (problems/ws.md "Noted"): getopts mengambil
-# argv berikutnya apa adanya, jadi `-r -t ninja,rbot` membuat NRUN="-t" dan
+# argv berikutnya apa adanya, jadi `-r -t ninja,satria` membuat NRUN="-t" dan
 # gagal jauh setelah parse dengan pesan membingungkan. Contoh aman:
-#   bench/ws.sh -n 1 -r 1 -t ninja,make,rbot
+#   bench/ws.sh -n 1 -r 1 -t ninja,make,satria
 opt_uint() { # opt_uint <flag> <nilai> <min>
   case $2 in
     '' | *[!0-9]*)
-      echo "opsi -$1 butuh angka (nilai '$2') — '-$1 -t ...' salah baca -t sebagai argumen. Contoh aman: $0 -n 1 -r 1 -t ninja,make,rbot" >&2
+      echo "opsi -$1 butuh angka (nilai '$2') — '-$1 -t ...' salah baca -t sebagai argumen. Contoh aman: $0 -n 1 -r 1 -t ninja,make,satria" >&2
       exit 2
       ;;
   esac
@@ -101,20 +101,20 @@ case ${BENCH_EMBED:-} in ""|ld|carray) ;; *) echo "BENCH_EMBED harus ld atau car
 [[ $RUN_DELAY =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "opsi -D butuh detik non-negatif" >&2; exit 2; }
 case "$RUN_ORDER" in grouped|abba) ;; *) echo "opsi -O: grouped atau abba" >&2; exit 2 ;; esac
 
-[ -x "$RBOT" ] || {
-  echo "rbot tidak ditemukan/dieksekusi: $RBOT" >&2
+[ -x "$SATRIA" ] || {
+  echo "satria tidak ditemukan/dieksekusi: $SATRIA" >&2
   exit 1
 }
-RBOT=$(cd "$(dirname "$RBOT")" && pwd)/$(basename "$RBOT")
+SATRIA=$(cd "$(dirname "$SATRIA")" && pwd)/$(basename "$SATRIA")
 IFS=, read -r -a TOOLS <<< "$TOOLS_OPT"
 for t in "${TOOLS[@]}"; do
-  case $t in rbot | ninja | make) ;; *)
+  case $t in satria | ninja | make) ;; *)
     echo "tool tidak dikenal: $t" >&2
     exit 1
     ;;
   esac
 done
-for t in gcc tar ar $(printf '%s\n' "${TOOLS[@]}" | grep -vx rbot); do
+for t in gcc tar ar $(printf '%s\n' "${TOOLS[@]}" | grep -vx satria); do
   command -v "$t" > /dev/null 2>&1 || {
     echo "tool wajib tidak ada: $t" >&2
     exit 1
@@ -124,14 +124,14 @@ done
 # ---------------------------- strace (opsional) ----------------------------
 # strace memakai ptrace yang bentrok dengan proot (juga ptrace/seccomp) dan
 # pernah membuat proot-distro FORCE CLOSE — otomatis DILEWATI di dalam proot.
-# Paksa aktif kembali dengan RBOT_BENCH_STRACE=1 bila tetap diinginkan.
+# Paksa aktif kembali dengan SATRIA_BENCH_STRACE=1 bila tetap diinginkan.
 IN_PROOT=0
 if [ -n "${PROOT:-}" ] || [ -n "${PROOT_L2S_DIR:-}" ]; then IN_PROOT=1; fi
 case ${container:-} in *proot*) IN_PROOT=1 ;; esac
 HAVE_STRACE=0
 STRACE_SKIP=""
 if command -v strace > /dev/null 2>&1; then
-  if [ "${RBOT_BENCH_STRACE:-}" = 1 ]; then
+  if [ "${SATRIA_BENCH_STRACE:-}" = 1 ]; then
     HAVE_STRACE=1
   elif [ "$IN_PROOT" = 1 ]; then
     STRACE_SKIP="proot terdeteksi — strace (ptrace) bentrok & pernah force close"
@@ -142,9 +142,9 @@ fi
 
 # ---------------------------- versi ----------------------------------------
 first_ver() { grep -oE '[0-9]+(\.[0-9]+)+' | head -1; }
-rbot_id() {
+satria_id() {
   local d c h v_bin
-  d=$(dirname "$RBOT")
+  d=$(dirname "$SATRIA")
   c=$(git -C "$d" describe --tags --exact-match 2> /dev/null)
   if [ -n "$c" ]; then
     c="release ${c}"
@@ -153,12 +153,12 @@ rbot_id() {
     if [ -n "$c" ]; then
       c="dev git:${c}"
     else
-      v_bin=$($RBOT version 2> /dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-      [ -z "$v_bin" ] && v_bin=$(strings "$RBOT" 2> /dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+      v_bin=$($SATRIA version 2> /dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+      [ -z "$v_bin" ] && v_bin=$(strings "$SATRIA" 2> /dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
       c="release ${v_bin:-unknown}"
     fi
   fi
-  h=$(sha1sum "$RBOT" 2> /dev/null | cut -c1-6)
+  h=$(sha1sum "$SATRIA" 2> /dev/null | cut -c1-6)
   echo "${c} bin:${h:-n/a}"
 }
 declare -A VER
@@ -167,7 +167,7 @@ CC_NAME=gcc
 gcc --version 2> /dev/null | head -1 | grep -qi clang && CC_NAME=clang
 command -v ninja > /dev/null 2>&1 && VER[ninja]=$(ninja --version 2>&1 | first_ver)
 command -v make > /dev/null 2>&1 && VER[make]=$(make --version 2>&1 | first_ver)
-VER[rbot]=$(rbot_id)
+VER[satria]=$(satria_id)
 
 # ---------------------------- direktori kerja ------------------------------
 [ -n "$OUTDIR" ] || OUTDIR="$PWD/ws.tmp"
@@ -206,7 +206,7 @@ ws_source report.sh
 
 # ---------------------------- main -----------------------------------------
 trap 'echo; echo "dibatalkan."; exit 130' INT
-echo "${C_BLD}${C_CYN}▌ rbot workspace benchmark${C_RST} ${C_DIM}· $(plural "${#TOOLS[@]}" tool) · $(plural "$NRUN" run) · median${C_RST}"
+echo "${C_BLD}${C_CYN}▌ satria workspace benchmark${C_RST} ${C_DIM}· $(plural "${#TOOLS[@]}" tool) · $(plural "$NRUN" run) · median${C_RST}"
 rule_line "$(box_width)"
 echo "Workspace : rupamod ($NMOD .rp) · core ($NSRC .c) · bade ($NSRC .c)"
 echo "Graph     : bade depends_on rupamod (embed), core <-> bade (circular)"
@@ -215,7 +215,7 @@ echo
 echo "Versions  :"
 for k in "${TOOLS[@]}"; do printf '  %-5s : %s\n' "$k" "${VER[$k]:-?}"; done
 printf '  %-5s : %s\n' "$CC_NAME" "$VER_GCC · $(uname -m)"
-[ -n "$RBOT_ARGS" ] && echo "rbot args : $RBOT_ARGS"
+[ -n "$SATRIA_ARGS" ] && echo "satria args : $SATRIA_ARGS"
 echo
 rules_header
 echo
@@ -226,7 +226,7 @@ for s in cold noop leaf bade mod touch hedit sel dep libtouch libhdr strace; do
   [ "$s" = strace ] && [ "$HAVE_STRACE" != 1 ] && continue # tidak dihitung bila dilewati
   have_scenario "$s" && TOTAL=$((TOTAL + ${#TOOLS[@]} * NRUN))
 done
-have_scenario rel && case " ${TOOLS[*]} " in *" rbot "*) TOTAL=$((TOTAL + NRUN)) ;; esac
+have_scenario rel && case " ${TOOLS[*]} " in *" satria "*) TOTAL=$((TOTAL + NRUN)) ;; esac
 [ "$TOTAL" -gt 0 ] || TOTAL=1
 
 CUR="gen"

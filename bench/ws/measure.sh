@@ -43,11 +43,11 @@ run_once() {
   # dan setelah edit header tidak boleh ada object basi yang lolos (nilai
   # WS_SHARED_VALUE mengalir ke kedua main).
   if [ "$rc" -eq 0 ]; then
-    # Path binary: rbot root-centric (bin/ di root workspace — design/
+    # Path binary: satria root-centric (bin/ di root workspace — design/
     # workspace_v1.md); ninja/make memakai layout nested per proyek.
     local rupa_bin bade_bin
     case $label in
-      rbot) rupa_bin="$WS/bin/rupa"; bade_bin="$WS/bin/bade" ;;
+      satria) rupa_bin="$WS/bin/rupa"; bade_bin="$WS/bin/bade" ;;
       *) rupa_bin="$WS/core/bin/rupa"; bade_bin="$WS/bade/bin/bade" ;;
     esac
     if ! "$rupa_bin" >/dev/null 2>>"$ERRLOG" ||
@@ -74,7 +74,7 @@ run_once() {
     $([ -n "$EXPECT_MISS" ] && echo 1 || echo 0) >> "$VIEW_CSV"
   if [ "$rc" -eq 0 ] && [ -n "$EXPECT_MISS" ]; then
     # Shim/snapshot mengukur pekerjaan nyata. Kerja di luar harapan berarti
-    # Not in accordance untuk tool mana pun (termasuk rbot).
+    # Not in accordance untuk tool mana pun (termasuk satria).
     echo "$label/$scen: kerja berbeda dari harapan:$EXPECT_MISS" >> "$ERRLOG"
     NOT_ACC=$((NOT_ACC + 1))
   fi

@@ -99,7 +99,7 @@ bool packStageEntries(const Config *c, const char *root) {
     char src[MAX_PATH * 2], dstRoot[MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src), dstRoot, sizeof(dstRoot)))
       return false;
-    /* Fallback .exe: bin/rbot -> bin/rbot.exe di host Windows. */
+    /* Fallback .exe: bin/satria -> bin/satria.exe di host Windows. */
     char eff[MAX_PATH * 2];
     packResolveSource(src, eff, sizeof(eff));
     if (fsFileExists(eff)) {
@@ -107,7 +107,7 @@ bool packStageEntries(const Config *c, const char *root) {
       snprintf(dst, sizeof(dst), "%s/%s", root, dstRoot);
       mkparent(dst);
       if (!packCopyFile(eff, dst)) {
-        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", eff);
+        fprintf(stderr, "satria: pack: gagal menyalin %s\n", eff);
         return false;
       }
       continue;
@@ -134,7 +134,7 @@ bool packStageEntries(const Config *c, const char *root) {
 
       mkparent(dst);
       if (!packCopyFile(file, dst)) {
-        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", file);
+        fprintf(stderr, "satria: pack: gagal menyalin %s\n", file);
         listFree(&files);
         return false;
       }

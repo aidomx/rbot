@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_PACK_STAGE_H
-#define RBOT_V0_1_0_PACK_STAGE_H
+#ifndef SATRIA_V0_1_0_PACK_STAGE_H
+#define SATRIA_V0_1_0_PACK_STAGE_H
 
 #include <stdbool.h>
 #include "pack_internal.h"

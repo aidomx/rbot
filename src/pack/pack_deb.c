@@ -9,7 +9,7 @@
  * Pemetaan data: setiap entri pack.files dipasang di
  *   <pack.deb.install_prefix>/<entri>  (mis. bin/app -> /usr/local/bin/app)
  * Mode file: 0755 untuk komponen pertama bin/ dan file .so*, 0644 lainnya.
- * Staging di .rbot/pack/deb/{control,data} lalu dihapus setelah jadi.
+ * Staging di .satria/pack/deb/{control,data} lalu dihapus setelah jadi.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,7 +57,7 @@ static void debArch(const Config *c, char *out, size_t n) {
        sampai orang lain mencoba memasangnya di perangkat target. */
     if (strcmp(host, "all") != 0 && strcmp(c->pack.debArchitecture, host) != 0) {
       fprintf(stderr,
-              "rbot: pack: peringatan: pack.deb.architecture='%s' tidak cocok dengan "
+              "satria: pack: peringatan: pack.deb.architecture='%s' tidak cocok dengan "
               "arsitektur compiler saat ini ('%s'); binary yang dikemas kemungkinan "
               "dikompilasi untuk '%s', bukan '%s'. Pastikan ini memang cross-build yang "
               "disengaja — jika tidak, paket .deb ini tidak akan bisa dijalankan di "
@@ -132,7 +132,7 @@ static bool debStageData(const Config *c, const char *dataDir, const char *prefi
       snprintf(dest, sizeof(dest), "%s/%s/%s", dataDir, prefixRel, dstRoot);
       mkparent(dest);
       if (!copyFileBytes(eff, dest)) {
-        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", eff);
+        fprintf(stderr, "satria: pack: gagal menyalin %s\n", eff);
         return false;
       }
       debSetFileMode(eff, dstRoot, dest);
@@ -165,7 +165,7 @@ static bool debStageData(const Config *c, const char *dataDir, const char *prefi
       }
 
       if (!copyFileBytes(file, dest)) {
-        fprintf(stderr, "rbot: pack: gagal menyalin %s\n", file);
+        fprintf(stderr, "satria: pack: gagal menyalin %s\n", file);
         listFree(&files);
         return false;
       }
@@ -180,25 +180,25 @@ static bool debStageData(const Config *c, const char *dataDir, const char *prefi
 
 static bool debWriteControl(const Config *c, const char *ctlDir, const char *arch,
                             long long installedKb) {
-  /* ctlDir berakar di stage pendek (".rbot/pack") — rantai buffer di bawah
+  /* ctlDir berakar di stage pendek (".satria/pack") — rantai buffer di bawah
      diukur dari situ agar -Wformat-truncation senyap. */
   char path[128];
   snprintf(path, sizeof(path), "%s/control", ctlDir);
   FILE *fp = fopen(path, "w");
   if (!fp) {
-    fprintf(stderr, "rbot: pack: tidak bisa menulis %s\n", path);
+    fprintf(stderr, "satria: pack: tidak bisa menulis %s\n", path);
     return false;
   }
   fprintf(fp, "Package: %s\n", c->pack.name);
   fprintf(fp, "Version: %s\n", c->pack.version);
   fprintf(fp, "Architecture: %s\n", arch);
   fprintf(fp, "Maintainer: %s\n",
-          c->pack.debMaintainer[0] ? c->pack.debMaintainer : "rbot <rbot@localhost>");
+          c->pack.debMaintainer[0] ? c->pack.debMaintainer : "satria <satria@localhost>");
   fprintf(fp, "Installed-Size: %lld\n", installedKb);
   fprintf(fp, "Description: %s\n",
           c->pack.debDescription[0] ? c->pack.debDescription : c->pack.name);
   bool ok = fclose(fp) == 0;
-  if (!ok) fprintf(stderr, "rbot: pack: gagal menulis control\n");
+  if (!ok) fprintf(stderr, "satria: pack: gagal menulis control\n");
   return ok;
 }
 
@@ -270,12 +270,12 @@ bool packBuildDeb(const Config *c, const PackArtifact *a) {
   while (*prefix == '/')
     prefix++;
   if (!*prefix) {
-    fprintf(stderr, "rbot: pack: pack.deb.install_prefix harus absolut (mis. /usr/local)\n");
+    fprintf(stderr, "satria: pack: pack.deb.install_prefix harus absolut (mis. /usr/local)\n");
     return false;
   }
 
   /* Rantai staging: debRoot/ctlDir/dataDir/tar — semuanya turunan stage
-     (".rbot/pack", <64 char); ukuran buffer dihitung dari rantai itu. */
+     (".satria/pack", <64 char); ukuran buffer dihitung dari rantai itu. */
   char debRoot[96], ctlDir[112], dataDir[112];
   snprintf(debRoot, sizeof(debRoot), "%s/deb", stage);
   snprintf(ctlDir, sizeof(ctlDir), "%s/control", debRoot);
@@ -300,12 +300,12 @@ bool packBuildDeb(const Config *c, const PackArtifact *a) {
   fsRemoveFile(dataTar);
   snprintf(cmd, sizeof(cmd), "tar czf %s -C %s .", ctlTar, ctlDir);
   if (!runCmd(cmd)) {
-    fprintf(stderr, "rbot: pack: tar control gagal\n");
+    fprintf(stderr, "satria: pack: tar control gagal\n");
     return false;
   }
   snprintf(cmd, sizeof(cmd), "tar czf %s -C %s .", dataTar, dataDir);
   if (!runCmd(cmd)) {
-    fprintf(stderr, "rbot: pack: tar data gagal\n");
+    fprintf(stderr, "satria: pack: tar data gagal\n");
     return false;
   }
 
@@ -314,7 +314,7 @@ bool packBuildDeb(const Config *c, const PackArtifact *a) {
   mkparent(a->tmp);
   FILE *fp = fopen(a->tmp, "wb");
   if (!fp) {
-    fprintf(stderr, "rbot: pack: tidak bisa menulis %s\n", a->tmp);
+    fprintf(stderr, "satria: pack: tidak bisa menulis %s\n", a->tmp);
     return false;
   }
   bool ok = fwrite("!<arch>\n", 1, 8, fp) == 8 && arMemberBuf(fp, "debian-binary", "2.0\n", 4) &&
@@ -322,7 +322,7 @@ bool packBuildDeb(const Config *c, const PackArtifact *a) {
   if (fclose(fp) != 0) ok = false;
   if (!ok) {
     fsRemoveFile(a->tmp);
-    fprintf(stderr, "rbot: pack: gagal merakit ar %s\n", a->path);
+    fprintf(stderr, "satria: pack: gagal merakit ar %s\n", a->path);
     return false;
   }
 
@@ -330,7 +330,7 @@ bool packBuildDeb(const Config *c, const PackArtifact *a) {
   fsRemoveFile(a->path);
   if (rename(a->tmp, a->path) != 0) {
     fsRemoveFile(a->tmp);
-    fprintf(stderr, "rbot: pack: tidak bisa menempatkan %s\n", a->path);
+    fprintf(stderr, "satria: pack: tidak bisa menempatkan %s\n", a->path);
     return false;
   }
 

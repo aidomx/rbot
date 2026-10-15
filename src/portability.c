@@ -1,5 +1,5 @@
 /*
- * portability — payung lapisan OS rbot.
+ * portability — payung lapisan OS satria.
  *
  * Isi dipecah modular (folder src/port/):
  *   - port/port_proc.c : proses & waktu (probe PATH, Ctrl+C/foreground,
@@ -11,7 +11,7 @@
  */
 #include "portability.h"
 
-/* Konvensi path: rbot secara internal selalu memakai '/' (diterima GCC,
+/* Konvensi path: satria secara internal selalu memakai '/' (diterima GCC,
    Clang, maupun MSVC di Windows), jadi hasil OS yang memakai '\\' harus
    dinormalkan lewat sini. */
 void pathNormalizeSlash(char *s) {

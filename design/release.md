@@ -1,4 +1,4 @@
-# Rencana Release Workspace rbot
+# Rencana Release Workspace satria
 
 Tanggal: 5 Oktober 2026
 Revisi 2 (10 Oktober 2026): release = SATU paket workspace, bukan daftar
@@ -6,7 +6,7 @@ terikat proyek.
 
 ## 1. Tujuan
 
-Menambahkan mekanisme "release" pada rbot untuk menghasilkan artefak
+Menambahkan mekanisme "release" pada satria untuk menghasilkan artefak
 distribusi siap pakai.
 
 "release" menggunakan kemampuan packaging yang sudah dimiliki "pack",
@@ -96,12 +96,12 @@ Aturan penting:
 ## 4. CLI
 
 ```bash
-rbot -w                       # build + release (bila release.* ada)
-rbot -w clean                 # bersih, tidak ada release
-rbot -w <proyek>              # build closure; release tetap workspace penuh
-rbot --release                # paksa release meski build selektif
-rbot release                  # mode tunggal: build + release proyek
-rbot release -- name=x        # OVERRIDDEN name untuk run ini
+satria -w                       # build + release (bila release.* ada)
+satria -w clean                 # bersih, tidak ada release
+satria -w <proyek>              # build closure; release tetap workspace penuh
+satria --release                # paksa release meski build selektif
+satria release                  # mode tunggal: build + release proyek
+satria release -- name=x        # OVERRIDDEN name untuk run ini
 ```
 
 Selektor `name=<project>` revisi 1 DIHAPUS — tidak ada lagi daftar

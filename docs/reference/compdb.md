@@ -1,6 +1,6 @@
 # Compilation Database
 
-rbot can generate `compile_commands.json` for editor and language-server tooling.
+satria can generate `compile_commands.json` for editor and language-server tooling.
 
 Use:
 

@@ -2,16 +2,16 @@
 # scale-build.sh — full-build scaling benchmark for the synthetic graph from graph.sh.
 #
 # It generates each workspace, removes previous build artifacts, then measures
-# full rbot builds. Each run therefore measures compilation + graph resolution.
+# full satria builds. Each run therefore measures compilation + graph resolution.
 #
 # Usage:
 #   ./bench/scale-build.sh
 #   ./bench/scale-build.sh -n 100,500,1000,5000 -e 1,5 -r 3
-#   ./bench/scale-build.sh -n 1000,5000 -e 1000,5000 -r 5 -b ./bin/rbot
+#   ./bench/scale-build.sh -n 1000,5000 -e 1000,5000 -r 5 -b ./bin/satria
 #
 set -u
 
-RBOT="bin/rbot"
+SATRIA="bin/satria"
 NODES="100,500,1000,5000"
 EDGES="1,5"
 RUNS=5
@@ -25,7 +25,7 @@ usage() {
 
 while getopts "b:n:e:r:o:kh" opt; do
   case "$opt" in
-    b) RBOT=$OPTARG ;;
+    b) SATRIA=$OPTARG ;;
     n) NODES=$OPTARG ;;
     e) EDGES=$OPTARG ;;
     r) RUNS=$OPTARG ;;
@@ -37,8 +37,8 @@ while getopts "b:n:e:r:o:kh" opt; do
 done
 
 [[ "$RUNS" =~ ^[0-9]+$ && "$RUNS" -gt 0 ]] || { echo "runs harus > 0" >&2; exit 2; }
-[ -x "$RBOT" ] || { echo "rbot tidak ditemukan/dieksekusi: $RBOT" >&2; exit 1; }
-RBOT=$(cd "$(dirname "$RBOT")" && pwd)/$(basename "$RBOT")
+[ -x "$SATRIA" ] || { echo "satria tidak ditemukan/dieksekusi: $SATRIA" >&2; exit 1; }
+SATRIA=$(cd "$(dirname "$SATRIA")" && pwd)/$(basename "$SATRIA")
 GRAPH="$PWD/bench/graph.sh"
 [ -x "$GRAPH" ] || { echo "bench/graph.sh tidak ditemukan" >&2; exit 1; }
 
@@ -83,8 +83,8 @@ for n in "${NS[@]}"; do
       rc=0
       (
         cd "$ws"
-        rm -rf .rbot build bin
-        "$RBOT" >/dev/null
+        rm -rf .satria build bin
+        "$SATRIA" >/dev/null
       ) || rc=$?
       end=$(now_ns)
       ms=$(( (end - start) / 1000000 ))

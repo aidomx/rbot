@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_CMDS_INTERNAL_H
-#define RBOT_V0_1_0_CMDS_INTERNAL_H
+#ifndef SATRIA_V0_1_0_CMDS_INTERNAL_H
+#define SATRIA_V0_1_0_CMDS_INTERNAL_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -43,13 +43,13 @@ bool cmdsBuildLibraryEx(const Config *c, const List *srcs, bool linkPathLibs);
 bool cmdsBuildLibrary(const Config *c, const List *srcs);
 
 /* Kompilasi paralel (-jN). Return false bila ada yang gagal/interrupt.
-   quiet=true menekan baris status per job (dipakai `rbot profile`, yang
+   quiet=true menekan baris status per job (dipakai `satria profile`, yang
    outputnya harus bersih agar laporan tidak tercampur log kompilasi). */
 bool cmdsRunParallelJobs(const Config *c, const char *inc, const char *wf, const List *srcs,
                          char *objPath, size_t objCap, int jobs, int *outCompiled,
                          int *outFailed, int *outInterrupted, bool quiet);
 
-/* Terbitkan build/version.h dari .rbot-version (root project). */
+/* Terbitkan build/version.h dari .satria-version (root project). */
 bool cmdsEmitVersionHeader(const Config *c, bool *changed);
 
 /* ============ fase pack (proyek binary + pack.*) ============ */
@@ -79,7 +79,7 @@ int cmdsPackOnlyProject(const Config *c);
 int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly);
 
 /* Koleksi source .c/.cpp dari Config — entri file langsung, folder discan
-   rekursif (walk cache .rbot/ws.src bila mode workspace aktif); hasil
+   rekursif (walk cache .satria/ws.src bila mode workspace aktif); hasil
    terurut (urutan link reprodusibel). */
 void cmdsCollectSources(const Config *c, List *out);
 
@@ -94,16 +94,16 @@ int cmdsCleanRun(const Config *c);
 /*
  * Lokasi file state (state_path): mode workspace membangun SEMUA proyek
  * dari satu cwd (root workspace), jadi file state per proyek diprefiks
- * nama di .rbot/workspace/ (design/workspace_v1.md §State & Cache):
- *   .rbot/workspace/<proyek>.build.fingerprint | .ws.state | .ws.lib.state
- *   .rbot/workspace/<proyek>.deps.cache | .src
- * Mode single tetap .rbot/<leaf> relatif cwd (root proyek). Dipanggil
+ * nama di .satria/workspace/ (design/workspace_v1.md §State & Cache):
+ *   .satria/workspace/<proyek>.build.fingerprint | .ws.state | .ws.lib.state
+ *   .satria/workspace/<proyek>.deps.cache | .src
+ * Mode single tetap .satria/<leaf> relatif cwd (root proyek). Dipanggil
  * wsCmdBuild sebelum tiap pass proyek; "" = kembali ke jalur lama.
  */
 void cmdsStateSetWsProject(const char *name); /* "" / NULL = clear */
 const char *cmdsStateWsProject(void);         /* NULL bila mode single */
 void cmdsStatePath(char *out, size_t n, const char *leaf);
-/* mkdirs induk path state (.rbot atau .rbot/workspace) sebelum tulis. */
+/* mkdirs induk path state (.satria atau .satria/workspace) sebelum tulis. */
 void cmdsStateMkdirFor(const char *path);
 
 typedef struct {
@@ -115,7 +115,7 @@ typedef struct {
 /* Hash konfigurasi compile/link + set source (FNV-1a). */
 void cmdsFingerprintMake(const Config *c, const List *srcs, CmdsBuildFingerprint *fp);
 bool cmdsFingerprintLoad(CmdsBuildFingerprint *fp);
-/* Simpan ke .rbot/build.fingerprint. libOnly = fase library workspace:
+/* Simpan ke .satria/build.fingerprint. libOnly = fase library workspace:
    hanya hash compile yang dikommit; hash sources/link dipertahankan dari
    catatan sebelumnya agar pass binary run yang sama masih mendeteksi
    source set / link config berubah (source dihapus -> link diulang). */
@@ -127,8 +127,8 @@ void cmdsFingerprintInvalidate(void);
 
 /* Fast no-op: true bila state build terakhir masih persis sama — summary
    diulang dari cache dan build dilewati sepenuhnya. libOnly memilih file
-   state fase library (.rbot/build.lib.state); fase binary memakai
-   .rbot/build.state. */
+   state fase library (.satria/build.lib.state); fase binary memakai
+   .satria/build.state. */
 bool cmdsFastStateValid(const char *buildfilePath, bool libOnly);
 
 /* Jalur fast-state workspace (cmds_wsstate.c). Aktif hanya saat workspace
@@ -164,4 +164,4 @@ void cmdsStatMemoReset(void);
 void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
                        const char *buildfilePath, bool libOnly);
 
-#endif /* RBOT_V0_1_0_CMDS_INTERNAL_H */
+#endif /* SATRIA_V0_1_0_CMDS_INTERNAL_H */

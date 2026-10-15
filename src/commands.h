@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_COMMANDS_H
-#define RBOT_V0_1_0_COMMANDS_H
+#ifndef SATRIA_V0_1_0_COMMANDS_H
+#define SATRIA_V0_1_0_COMMANDS_H
 
 #include <stdbool.h>
 
@@ -7,20 +7,20 @@ void showHelp(void);
 
 /*
  * buildfilePath: file konfigurasi yang dipakai (default "Buildfile";
- * dirujuk `rbot -f <file>`; NULL diterima dan diperlakukan sebagai
+ * dirujuk `satria -f <file>`; NULL diterima dan diperlakukan sebagai
  * "Buildfile"). cmdInit menolak menulis jika file itu sudah ada.
  */
 int cmdInit(const char *buildfilePath);
 
 /*
- * `rbot init -w` — tulis template workspace (default "Buildfile.ws";
+ * `satria init -w` — tulis template workspace (default "Buildfile.ws";
  * bila -f diberikan, path itulah yang dipakai). Menolak menulis jika
  * file sudah ada, sama seperti cmdInit.
  */
 int cmdInitWorkspace(const char *buildfilePath);
 
 /*
- * `rbot init -p` — scaffold interaktif (implementasi di commands.c):
+ * `satria init -p` — scaffold interaktif (implementasi di commands.c):
  *   | Project name? [Enter for random name]
  *   | language? [c, cpp] [Enter = c; cpp => src/main.cpp + std = c++17]
  *   | std? / compiler? / flags? [Enter = default konvensi]
@@ -30,10 +30,10 @@ int cmdInitWorkspace(const char *buildfilePath);
  *     | depends_on? (format: <proyek> depends <proyek>) [Enter = none]
  *
  * Simbol `|` pada prompt berwarna cyan bila stdout terminal; otomatis
- * polos di pipe/CI atau saat NO_COLOR/RBOT_NO_COLOR/TERM=dumb.
+ * polos di pipe/CI atau saat NO_COLOR/SATRIA_NO_COLOR/TERM=dumb.
  * Nama selalu menjadi folder scaffold <nama>/: single-project berisi
  * Buildfile + src/ (+ include/ bila diminta); proyek workspace tidak
- * punya Buildfile sendiri (rbot mensintesisnya dari Buildfile.ws).
+ * punya Buildfile sendiri (satria mensintesisnya dari Buildfile.ws).
  * Jawaban non-default ditulis eksplisit ke Buildfile; sisanya konvensi.
  * Pra-cek overwrite: satu saja file target sudah ada => init dibatalkan
  * tanpa menimpa apa pun. EOF di stdin => dibatalkan.
@@ -59,7 +59,7 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly);
 int cmdClean(const char *buildfilePath);
 
 /*
- * cmdCompdbGenerate — `rbot -g compdb`: hasilkan/
+ * cmdCompdbGenerate — `satria -g compdb`: hasilkan/
  * refresh compile_commands.json TANPA membangun apa pun. Jalur query-only:
  * loadConfig -> gather source -> fingerprint compdb -> cache hit / restore
  * blob / render. Tidak ada decide, kompilasi, link, fast-state — aman
@@ -67,4 +67,4 @@ int cmdClean(const char *buildfilePath);
  */
 int cmdCompdbGenerate(const char *buildfilePath);
 
-#endif /* RBOT_V0_1_0_COMMANDS_H */
+#endif /* SATRIA_V0_1_0_COMMANDS_H */

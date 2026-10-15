@@ -34,7 +34,7 @@
  * Workspace adalah LAYER TIPIS di atas jalur build satu project yang sudah
  * ada: file workspace di-parse untuk daftar proyek + setting per proyek +
  * depends_on; tiap proyek disintesis jadi satu Buildfile (disimpan STABIL
- * di .rbot/workspace/<nama>.Buildfile agar cache config & fast path tidak
+ * di .satria/workspace/<nama>.Buildfile agar cache config & fast path tidak
  * miss tiap run), lalu dieksekusi lewat cmdBuild/cmdClean dengan cwd = root
  * proyeknya. FastState, fingerprint, library, compdb — semuanya ikut
  * otomatis tanpa diubah.
@@ -50,7 +50,7 @@
  *                                Buildfile tiap proyek.
  *
  * Root proyek default = <root workspace>/<nama>; override: <n>.root.
- * Path relatif terhadap lokasi file workspace (aturan rbot yang sudah
+ * Path relatif terhadap lokasi file workspace (aturan satria yang sudah
  * ada) — berarti relatif root workspace. Urutan build dari depends_on
  * (topological sort), bukan urutan `projects =`.
  */
@@ -61,7 +61,7 @@
 /* File state workspace di root — padanan build.state per-proyek untuk mode
    workspace, sehingga bootstrap bisa evaluasi no-op tanpa parse topologi
    (design/workspace.md). Definisi di bawah (setelah workspaceFileExists). */
-#define WS_STATE_FILE ".rbot/workspace.state"
+#define WS_STATE_FILE ".satria/workspace.state"
 
 typedef struct {
   char name[WS_NAME_LEN];
@@ -187,7 +187,7 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
      salah kemas. */
   if (strcmp(key, "releases") == 0 || strncmp(key, "releases.", 9) == 0) {
     if (!wsGuardQuiet)
-      fprintf(stderr, "rbot: workspace: sintaks 'releases' tidak lagi didukung\n"
+      fprintf(stderr, "satria: workspace: sintaks 'releases' tidak lagi didukung\n"
                       "        gunakan section release.* — SATU paket workspace\n"
                       "        (release.name/files/exclude/format; lihat design/release.md)\n");
     return;
@@ -222,7 +222,7 @@ static void wsRecordLine(WsModel *m, const char *key, const char *value) {
          ke root workspace. Agregasi lewat path per proyek (../bin). */
       if (strcmp(key, "root") == 0) {
         if (!wsGuardQuiet)
-          fprintf(stderr, "rbot: workspace: 'root' diabaikan (root berlaku per proyek — "
+          fprintf(stderr, "satria: workspace: 'root' diabaikan (root berlaku per proyek — "
                           "deklarasikan per proyek: <nama>.root = ...; output tetap "
                           "root-centric otomatis: bin/, build/, lib/ di root workspace)\n");
         return;
@@ -262,7 +262,7 @@ static bool wsParse(WsModel *m, const char *path) {
 
   FILE *fp = fopen(path, "r");
   if (!fp) {
-    if (!wsGuardQuiet) fprintf(stderr, "rbot: cannot open %s\n", path);
+    if (!wsGuardQuiet) fprintf(stderr, "satria: cannot open %s\n", path);
     return false;
   }
 
@@ -299,7 +299,7 @@ static bool wsParse(WsModel *m, const char *path) {
         char *item = trim(save);
         if (*item && !wsEnsureProject(m, item)) {
           if (!wsGuardQuiet)
-            fprintf(stderr, "rbot: workspace: invalid project name '%s'\n", item);
+            fprintf(stderr, "satria: workspace: invalid project name '%s'\n", item);
           fclose(fp);
           listFree(&aliases);
           return false;
@@ -359,7 +359,7 @@ static bool wsValidatePackMerges(WsModel *m) {
         if (*item) {
           int dep = wsFindProject(m, item);
           if (dep < 0) {
-            fprintf(stderr, "rbot: workspace: '%s' pack.merge unknown project '%s'\n", owner->name,
+            fprintf(stderr, "satria: workspace: '%s' pack.merge unknown project '%s'\n", owner->name,
                     item);
             return false;
           }
@@ -367,7 +367,7 @@ static bool wsValidatePackMerges(WsModel *m) {
           bool ok = wsProjectPackFiles(&m->projects[dep], &files);
           listFree(&files);
           if (!ok) {
-            fprintf(stderr, "rbot: workspace: '%s' pack.merge project '%s' has no pack.files\n",
+            fprintf(stderr, "satria: workspace: '%s' pack.merge project '%s' has no pack.files\n",
                     owner->name, item);
             return false;
           }
@@ -397,11 +397,11 @@ static bool wsValidateRelease(WsModel *m) {
     if (strncmp(ln, "format = ", 9) != 0) continue;
     const char *fmt = ln + 9;
     if (*fmt && strcmp(fmt, "tar") != 0 && strcmp(fmt, "deb") != 0 && strcmp(fmt, "none") != 0) {
-      fprintf(stderr, "rbot: workspace: release.format '%s' tidak dikenal (tar, deb)\n", fmt);
+      fprintf(stderr, "satria: workspace: release.format '%s' tidak dikenal (tar, deb)\n", fmt);
       return false;
     }
     if (strcmp(fmt, "none") == 0) {
-      fprintf(stderr, "rbot: workspace: release.format 'none' tidak bermakna di workspace\n");
+      fprintf(stderr, "satria: workspace: release.format 'none' tidak bermakna di workspace\n");
       return false;
     }
   }
@@ -460,14 +460,14 @@ static void wsCollectPackDeps(WsModel *m) {
 static bool wsVisit(WsModel *m, int idx, unsigned char *color, List *order) {
   if (color[idx] == 2) return true;
   if (color[idx] == 1) {
-    fprintf(stderr, "rbot: workspace: dependency cycle involving '%s'\n", m->projects[idx].name);
+    fprintf(stderr, "satria: workspace: dependency cycle involving '%s'\n", m->projects[idx].name);
     return false;
   }
   color[idx] = 1;
   for (int i = 0; i < m->depends[idx].count; i++) {
     int dep = wsFindProject(m, m->depends[idx].items[i]);
     if (dep < 0) {
-      fprintf(stderr, "rbot: workspace: '%s' depends on unknown project '%s'\n",
+      fprintf(stderr, "satria: workspace: '%s' depends on unknown project '%s'\n",
               m->projects[idx].name, m->depends[idx].items[i]);
       return false;
     }
@@ -918,7 +918,7 @@ static void wsApplyLine(const WsModel *m, const WsProject *p, Config *c, const c
   if (strncmp(key, "pack.", 5) == 0) {
     if (!wsPackWarned) {
       wsPackWarned = true;
-      fprintf(stderr, "rbot: workspace: pack.* per proyek diabaikan di mode workspace "
+      fprintf(stderr, "satria: workspace: pack.* per proyek diabaikan di mode workspace "
                       "(lihat design/workspace_v1.md)\n");
     }
     return;
@@ -972,7 +972,7 @@ static void wsApplyLine(const WsModel *m, const WsProject *p, Config *c, const c
           if (strcmp(warnedTok[w], t) == 0) already = true;
         if (!found && !already && nwarned < 32) {
           snprintf(warnedTok[nwarned++], WS_LINE_LEN, "%s", t);
-          fprintf(stderr, "rbot: workspace: headers.each: '%s' bukan nama proyek dan tidak ada "
+          fprintf(stderr, "satria: workspace: headers.each: '%s' bukan nama proyek dan tidak ada "
                           "sebagai folder di proyek mana pun, dilewati\n", t);
         }
       }
@@ -1085,9 +1085,9 @@ static void wsApplyCdeps(const WsModel *m, const WsProject *p, Config *c) {
       char *item = trim(save);
       if (*item) {
         if (strcmp(item, p->name) == 0) {
-          fprintf(stderr, "rbot: workspace: '%s' cdeps berisi dirinya sendiri\n", p->name);
+          fprintf(stderr, "satria: workspace: '%s' cdeps berisi dirinya sendiri\n", p->name);
         } else if (wsFindProject(m, item) < 0) {
-          fprintf(stderr, "rbot: workspace: '%s' cdeps unknown project '%s'\n", p->name, item);
+          fprintf(stderr, "satria: workspace: '%s' cdeps unknown project '%s'\n", p->name, item);
         } else if (!wsListHas(&deps, item)) {
           listAdd(&deps, item);
         }
@@ -1203,14 +1203,14 @@ static bool wsMarkNeeded(const WsModel *m, int idx, unsigned char *needed,
   if (idx < 0 || idx >= m->projectCount) return false;
   if (needed[idx]) return true;
   if (visiting[idx]) {
-    fprintf(stderr, "rbot: workspace: dependency cycle involving '%s'\n", m->projects[idx].name);
+    fprintf(stderr, "satria: workspace: dependency cycle involving '%s'\n", m->projects[idx].name);
     return false;
   }
   visiting[idx] = 1;
   for (int i = 0; i < m->depends[idx].count; i++) {
     int dep = wsFindProject(m, m->depends[idx].items[i]);
     if (dep < 0) {
-      fprintf(stderr, "rbot: workspace: '%s' depends on unknown project '%s'\n",
+      fprintf(stderr, "satria: workspace: '%s' depends on unknown project '%s'\n",
               m->projects[idx].name, m->depends[idx].items[i]);
       visiting[idx] = 0;
       return false;
@@ -1242,7 +1242,7 @@ static bool wsProjectArchiveOnly(const WsProject *p) {
  *   cmd "clean" -> Config in-memory (wsBuildConfig) + cmdsCleanRun;
  *   cmd "build" -> label pass -> fast-state -> wsBuildConfig ->
  *                  resolveCompiler -> cmdsBuildPassRun (library/binary).
- * State per proyek ditandai cmdsStateSetWsProject (.rbot/workspace/<n>.*).
+ * State per proyek ditandai cmdsStateSetWsProject (.satria/workspace/<n>.*).
  */
 static int wsRunProject(const WsModel *m, const char *name, const char *cmd, int jobs,
                         bool libOnly) {
@@ -1322,7 +1322,7 @@ static void wsModelFree(WsModel *m) {
 static bool wsModelLoad(const char *wsDir, WsModel *m, const char **wsNameOut) {
   const char *wsName = workspaceFileName();
   if (!wsName) {
-    fprintf(stderr, "rbot: %s not found\n", WORKSPACE_FILENAME);
+    fprintf(stderr, "satria: %s not found\n", WORKSPACE_FILENAME);
     return false;
   }
   if (wsNameOut) *wsNameOut = wsName;
@@ -1333,7 +1333,7 @@ static bool wsModelLoad(const char *wsDir, WsModel *m, const char **wsNameOut) {
     return false;
   }
   if (m->projectCount == 0) {
-    fprintf(stderr, "rbot: workspace: no projects declared\n");
+    fprintf(stderr, "satria: workspace: no projects declared\n");
     wsModelFree(m);
     return false;
   }
@@ -1435,7 +1435,7 @@ static int wsRelease(WsModel *m, int jobs, const char *wsDir) {
       else if (strncmp(k, "deb.", 4) == 0)
         packApplyDeb(&c, k + 4, v);
       else
-        fprintf(stderr, "rbot: release: key '%s' tidak dikenal (padanan pack.*)\n", k);
+        fprintf(stderr, "satria: release: key '%s' tidak dikenal (padanan pack.*)\n", k);
     }
   }
 
@@ -1498,17 +1498,17 @@ static int wsRelease(WsModel *m, int jobs, const char *wsDir) {
 
   /* packRunAt berjalan di CWD sekarang — pastikan itu root workspace. */
   if (!fsSetCwd(wsDir)) {
-    fprintf(stderr, "rbot: cannot enter workspace root\n");
+    fprintf(stderr, "satria: cannot enter workspace root\n");
     packFreeConfig(&c.pack);
     return 1;
   }
   bool ok = packRunAt(&c);
   packFreeConfig(&c.pack);
-  if (!ok) fprintf(stderr, "rbot: workspace: release gagal\n");
+  if (!ok) fprintf(stderr, "satria: workspace: release gagal\n");
   return ok ? 0 : 1;
 
 oom:
-  fprintf(stderr, "rbot: workspace: kehabisan memori (release)\n");
+  fprintf(stderr, "satria: workspace: kehabisan memori (release)\n");
   packFreeConfig(&c.pack);
   return 1;
 }
@@ -1572,7 +1572,7 @@ static int wsRunBatchSerial(const WsModel *m, const WsWork *batch, int n, int jo
 
 #ifndef _WIN32
 /* Paralel (POSIX): fork satu child per proyek — jobs dibagi rata (min 1).
-   Output anak diarahkan ke file sementara .rbot/ws-par-* agar laporan
+   Output anak diarahkan ke file sementara .satria/ws-par-* agar laporan
    per-proyek tidak tercampur; parent mencetak per slot (urutan worklist)
    setelah semua anak batch selesai. Anak gagal -> rc non-nol -> batch
    berikutnya berhenti (seperti serial). Untuk batch paralel penanda fase
@@ -1582,7 +1582,7 @@ static int wsRunBatchFork(const WsModel *m, const WsWork *batch, int n, int jobs
   (void)wsDir; /* proyek dieksekusi in-process dari root workspace */
   const char *pre = libOnly ? "ws-libpass-pre" : "ws-binpass-pre";
   const char *post = libOnly ? "ws-libpass-post" : "ws-binpass-post";
-  mkdirs(".rbot");
+  mkdirs(".satria");
   pid_t *pids = malloc(sizeof(pid_t) * (size_t)n);
   int *fds = malloc(sizeof(int) * (size_t)n);
   char (*tmpl)[32] = malloc(sizeof(char[32]) * (size_t)n);
@@ -1598,7 +1598,7 @@ static int wsRunBatchFork(const WsModel *m, const WsWork *batch, int n, int jobs
   for (int i = 0; i < n; i++) {
     pids[i] = -1;
     fds[i] = -1;
-    snprintf(tmpl[i], 32, ".rbot/ws-par-XXXXXX");
+    snprintf(tmpl[i], 32, ".satria/ws-par-XXXXXX");
     fds[i] = mkstemp(tmpl[i]);
     if (fds[i] < 0) break; /* disk penuh dst: slot sisa -> serial */
     int pj = jobs / n + (i < jobs % n ? 1 : 0);
@@ -1646,7 +1646,7 @@ static int wsRunBatchFork(const WsModel *m, const WsWork *batch, int n, int jobs
 #endif
 
 /* Jalankan batch anak build — DEFAULT SERIAL. Paralel lintas proyek (fork)
-   hanya opt-in via RBOT_WS_PAR=1: pengukuran di rupaws (proot, -j4) menunjukkan
+   hanya opt-in via SATRIA_WS_PAR=1: pengukuran di rupaws (proot, -j4) menunjukkan
    paralel anak ~netral pada inkremental kecil dan ~48% LEBIH LAMBAT pada warm
    build besar (213 compile: 310.8s paralel vs 208.8s serial) — pembagian jobs
    antar anak menurunkan paralelisme dalam-proyek dan proot/contended gcc tidak
@@ -1658,7 +1658,7 @@ static int wsRunBatch(const WsModel *m, const WsWork *batch, int n, int jobs, co
   (void)wsDir; /* proyek dieksekusi in-process dari root workspace */
   if (n <= 0) return 0;
 #ifndef _WIN32
-  if (jobs > 1 && n > 1 && getenv("RBOT_WS_PAR"))
+  if (jobs > 1 && n > 1 && getenv("SATRIA_WS_PAR"))
     return wsRunBatchFork(m, batch, n, jobs, cmd, wsDir, libOnly);
 #endif
   return wsRunBatchSerial(m, batch, n, jobs, cmd, wsDir, libOnly);
@@ -1672,7 +1672,7 @@ static int wsRunBatch(const WsModel *m, const WsWork *batch, int n, int jobs, co
    terakhir (sama untuk seluruh workspace). Hanya dua keputusan: (a) proyek
    fast-hit + (2)+(3) identik -> daftar source dimuat dari snapshot tanpa
    re-scan; (b) (4) identik + file ada -> CompDB tidak ditulis ulang. */
-#define WS_LOG_FILE ".rbot/workspace_log"
+#define WS_LOG_FILE ".satria/workspace_log"
 
 static uint64_t wsFnv1a(uint64_t h, const void *data, size_t n) {
   const unsigned char *p = (const unsigned char *)data;
@@ -1718,7 +1718,7 @@ static uint64_t wsLogFileHash(const char *path) {
 }
 
 static void wsLogSnapshotPath(char *out, size_t n, const char *name) {
-  snprintf(out, n, ".rbot/workspace/%s.src", name);
+  snprintf(out, n, ".satria/workspace/%s.src", name);
 }
 
 /* Baca entry log utk `name` (field 2/3/4). false bila log tak ada/tak cocok. */
@@ -1727,7 +1727,7 @@ static bool wsLogReadEntry(const char *name, uint64_t *cfg, uint64_t *src, uint6
   if (!f) return false;
   char line[512];
   bool found = false;
-  if (fgets(line, sizeof(line), f) && strncmp(line, "RBOTWLOG1 ", 10) == 0) {
+  if (fgets(line, sizeof(line), f) && strncmp(line, "SATRIAWLOG1 ", 10) == 0) {
     while (fgets(line, sizeof(line), f)) {
       char pname[WS_NAME_LEN];
       unsigned long long a = 0, b = 0, c = 0;
@@ -1773,7 +1773,7 @@ static bool wsLogLoadSrcs(const char *name, List *out) {
   FILE *f = fopen(path, "r");
   if (!f) return false;
   char line[WS_PATH_LEN + 32];
-  bool ok = fgets(line, sizeof(line), f) != NULL && strncmp(line, "RBOTWSLIST1 ", 12) == 0;
+  bool ok = fgets(line, sizeof(line), f) != NULL && strncmp(line, "SATRIAWSLIST1 ", 12) == 0;
   while (ok && fgets(line, sizeof(line), f)) {
     size_t n = strlen(line);
     if (n && line[n - 1] == '\n') line[n - 1] = '\0';
@@ -1795,10 +1795,10 @@ static void wsLogWrite(const WsModel *m, const uint64_t *cfgH, const uint64_t *s
                        uint64_t cdb) {
   char cwd[WS_PATH_LEN];
   if (!fsGetCwd(cwd, sizeof(cwd))) return;
-  mkdirs(".rbot");
+  mkdirs(".satria");
   FILE *f = fopen(WS_LOG_FILE ".tmp", "w");
   if (!f) return;
-  fprintf(f, "RBOTWLOG1 %s\n", cwd);
+  fprintf(f, "SATRIAWLOG1 %s\n", cwd);
   for (int i = 0; i < m->projectCount; i++)
     fprintf(f, "P %s %016llx %016llx %016llx\n", m->projects[i].name,
             (unsigned long long)cfgH[i], (unsigned long long)srcH[i], (unsigned long long)cdb);
@@ -1847,7 +1847,7 @@ static bool wsCompdbRefresh(const WsModel *m) {
   for (int i = 0; i < n && ok; i++) {
     cfgH[i] = wsLogCfgHash(m, i);
     if (!wsBuildConfig(m, i, &cfgs[i]) || !resolveCompiler(&cfgs[i])) {
-      fprintf(stderr, "rbot: workspace: gagal menyusun config '%s' (compdb)\n",
+      fprintf(stderr, "satria: workspace: gagal menyusun config '%s' (compdb)\n",
               m->projects[i].name);
       ok = false;
       break;
@@ -1900,7 +1900,7 @@ static bool wsCompdbRefresh(const WsModel *m) {
 int workspaceRun(const char *cmd, int jobs, const char *only, const char *releaseSel) {
   char wsDir[MAX_PATH];
   if (!fsGetCwd(wsDir, sizeof(wsDir))) {
-    fprintf(stderr, "rbot: cannot determine current directory\n");
+    fprintf(stderr, "satria: cannot determine current directory\n");
     return 1;
   }
   WsModel m;
@@ -1929,7 +1929,7 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
      - releaseSel : `-- key=value[,...]` — OVERRIDE setting release untuk
                     run ini (name, version, format, target->format; dsb).
                     Konfigurasi dasar tetap dari section release.*.
-     - only       : `rbot -w <proyek>` — build proyek + closure-nya;
+     - only       : `satria -w <proyek>` — build proyek + closure-nya;
                     release tetap workspace penuh bila release.* ada.
      - keduanya kosong : build + release seluruh workspace. */
   bool releaseOnly = releaseSel && *releaseSel;
@@ -1943,7 +1943,7 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
       const char *comma = strchr(p, ',');
       size_t len = comma ? (size_t)(comma - p) : strlen(p);
       if (len == 0 || len >= sizeof(pair)) {
-        fprintf(stderr, "rbot: workspace: override release tidak valid\n");
+        fprintf(stderr, "satria: workspace: override release tidak valid\n");
         wsModelFree(&m);
         return 1;
       }
@@ -1952,7 +1952,7 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
       char *eq = strchr(pair, '=');
       if (!eq) {
         fprintf(stderr,
-                "rbot: workspace: override '%s' tidak valid (pakai key=value, mis. name=rupa)\n",
+                "satria: workspace: override '%s' tidak valid (pakai key=value, mis. name=rupa)\n",
                 trim(pair));
         wsModelFree(&m);
         return 1;
@@ -1963,12 +1963,12 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
       const char *key = strcmp(k, "target") == 0 ? "format" : k;
       if (strcmp(key, "format") == 0 && *v && strcmp(v, "tar") != 0 && strcmp(v, "deb") != 0 &&
           strcmp(v, "none") != 0) {
-        fprintf(stderr, "rbot: workspace: format '%s' tidak dikenal (tar, deb)\n", v);
+        fprintf(stderr, "satria: workspace: format '%s' tidak dikenal (tar, deb)\n", v);
         wsModelFree(&m);
         return 1;
       }
       if (strcmp(k, "name") == 0 && !wsValidName(v)) {
-        fprintf(stderr, "rbot: workspace: nama release '%s' tidak valid\n", v);
+        fprintf(stderr, "satria: workspace: nama release '%s' tidak valid\n", v);
         wsModelFree(&m);
         return 1;
       }
@@ -1997,7 +1997,7 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
     if (only && *only) {
       int target = wsFindProject(&m, only);
       if (target < 0) {
-        fprintf(stderr, "rbot: workspace: unknown project '%s'\n", only);
+        fprintf(stderr, "satria: workspace: unknown project '%s'\n", only);
         wsModelFree(&m);
         return 1;
       }
@@ -2025,21 +2025,21 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
   /* Gerbang workspace per-closure: hanya entri milik proyek needed yang
      di-stat — `-w <nama>` tidak membayar validasi seluruh workspace. */
   if (strcmp(cmd, "build") == 0) {
-    /* .rbot di direktori anggota = state lama: diabaikan + peringatan
+    /* .satria di direktori anggota = state lama: diabaikan + peringatan
        (design/workspace_v1.md: state hanya di root workspace). */
     for (int i = 0; i < m.projectCount; i++) {
       char mp[WS_PATH_LEN];
-      snprintf(mp, sizeof(mp), "%s/%s/.rbot", wsDir, m.projects[i].root);
+      snprintf(mp, sizeof(mp), "%s/%s/.satria", wsDir, m.projects[i].root);
       if (fsDirExists(mp))
-        fprintf(stderr, "rbot: workspace: %s/.rbot diabaikan — state workspace di root (%s)\n",
+        fprintf(stderr, "satria: workspace: %s/.satria diabaikan — state workspace di root (%s)\n",
                 m.projects[i].root, WS_STATE_FILE);
     }
     wsStateValidFiltered(&m, needed);
     /* Status gerbang akurat (per closure yang dibangun), dihitung di sini setelah
        parse agar tidak mengubah urutan validasi build. */
-    const char *rs = getenv("RBOT_STATUS");
+    const char *rs = getenv("SATRIA_STATUS");
     if (rs && *rs && strcmp(rs, "0") != 0)
-      fprintf(stderr, "rbot status: mode=workspace gate=%s\n", wsGateStartValid ? "valid" : "cold");
+      fprintf(stderr, "satria status: mode=workspace gate=%s\n", wsGateStartValid ? "valid" : "cold");
   }
 
   /* Worklist sekali: proyek needed urut topo + level dependensi. */
@@ -2047,7 +2047,7 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
   int wcount = wsBuildWorklist(&m, needed, work);
 
   if (strcmp(cmd, "build") == 0) {
-    /* Mode ws aktif sekali per run: cache sumber (.rbot/ws.src) dipakai
+    /* Mode ws aktif sekali per run: cache sumber (.satria/ws.src) dipakai
        lintas proyek — satu traversal per direktori (design §Pipeline). */
     wsModeSet(true);
     cmdsStatMemoSetCwd(); /* memo stat ber-key cwd root workspace */
@@ -2105,7 +2105,7 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
                                  seluruh fase berada antara dua penanda) */
 
   /* Rekam/buang workspace state (design/workspace.md): build sukses ->
-     tulis .rbot/workspace.state; clean -> buang agar build berikutnya cold. */
+     tulis .satria/workspace.state; clean -> buang agar build berikutnya cold. */
   if (strcmp(cmd, "build") == 0 && rc == 0) {
     /* Gerbang disimpan setiap run sukses (bukan hanya setelah build), supaya
        perubahan layout yang terjadi saat run (mis. folder state) tidak basi. */
@@ -2136,9 +2136,9 @@ bool workspaceFileExists(void) {
  * workspace.state (design/workspace_v1.md): stamp SEMUA input seluruh
  * workspace, dalam path absolut, diambil dari state yang sudah ditulis
  * build proyek:
- *   .rbot/workspace/<n>.ws.state / <n>.ws.lib.state  (F/D/X per proyek)
- *   .rbot/ws.src                                     (cache sumber di root)
- * Baris pertama: RBOTWSG1 <wsDir absolut>. Lalu baris F/D/X seperti ws.state.
+ *   .satria/workspace/<n>.ws.state / <n>.ws.lib.state  (F/D/X per proyek)
+ *   .satria/ws.src                                     (cache sumber di root)
+ * Baris pertama: SATRIAWSG1 <wsDir absolut>. Lalu baris F/D/X seperti ws.state.
  * `cold` = stamp tidak lagi cocok. Path absolut membuat hasil stat ini ikut
  * masuk memo proses, sehingga validator per proyek tidak men-stat ulang.
  */
@@ -2161,7 +2161,7 @@ static bool wsPathJoin(char *dst, size_t n, const char *a, const char *b) {
   return true;
 }
 
-#define WS_GATE_MAGIC "RBOTWSG1"
+#define WS_GATE_MAGIC "SATRIAWSG1"
 
 static int wsGateCmp(const void *a, const void *b) {
   return strcmp(*(char *const *)a, *(char *const *)b);
@@ -2182,9 +2182,9 @@ static void wsGateJoin(char *out, size_t n, const char *projDir, const char *rel
   else wsPathJoin(out, n, projDir, rel);
 }
 
-/* Folder .rbot adalah state, bukan input: tidak pernah masuk stamp workspace. */
+/* Folder .satria adalah state, bukan input: tidak pernah masuk stamp workspace. */
 static bool wsGateIsState(const char *p) {
-  return strstr(p, "/.rbot") != NULL || strncmp(p, ".rbot", 5) == 0;
+  return strstr(p, "/.satria") != NULL || strncmp(p, ".satria", 5) == 0;
 }
 
 /* Entri yang di-exclude proyek (mis. build, dist) bukan input: freshness arsip
@@ -2240,7 +2240,7 @@ static void wsGateReadState(List *out, const char *projDir, const char *file) {
   fclose(fp);
 }
 
-/* Folder sumber & file yang ditelusuri (.rbot/ws.src — SATU cache di root
+/* Folder sumber & file yang ditelusuri (.satria/ws.src — SATU cache di root
    workspace untuk seluruh proyek): D dan S. Mtime D dari walk. Path di
    dalam file relatif root workspace -> baseDir. */
 static void wsGateReadSrc(List *out, const char *baseDir, const char *file, const List *excl) {
@@ -2311,21 +2311,21 @@ static void wsStateSave(const WsModel *m, const char *wsDir) {
   wsGateAdd(&items, 'F', bf, bm, bs);
 
   for (int i = 0; i < m->projectCount; i++) {
-    /* State proyek kini di root: .rbot/workspace/<n>.ws[.lib].state — path
+    /* State proyek kini di root: .satria/workspace/<n>.ws[.lib].state — path
        DI DALAM file relatif root workspace (satu cwd), jadi base join =
        wsAbs, bukan root proyek. */
     char f1[WS_GATE_PATH * 2], f2[WS_GATE_PATH * 2];
-    snprintf(f1, sizeof(f1), "%s/.rbot/workspace/%s.ws.state", wsAbs, m->projects[i].name);
-    snprintf(f2, sizeof(f2), "%s/.rbot/workspace/%s.ws.lib.state", wsAbs, m->projects[i].name);
+    snprintf(f1, sizeof(f1), "%s/.satria/workspace/%s.ws.state", wsAbs, m->projects[i].name);
+    snprintf(f2, sizeof(f2), "%s/.satria/workspace/%s.ws.lib.state", wsAbs, m->projects[i].name);
     wsGateReadState(&items, wsAbs, f1);
     wsGateReadState(&items, wsAbs, f2);
   }
-  /* .rbot/ws.src: satu cache sumber di root untuk seluruh proyek. */
+  /* .satria/ws.src: satu cache sumber di root untuk seluruh proyek. */
   {
     List excl = {0};
     for (int i = 0; i < m->projectCount; i++) wsGateCollectExcludes(&m->projects[i], &excl);
     char srcFile[WS_GATE_PATH * 2];
-    wsPathJoin(srcFile, sizeof(srcFile), wsAbs, ".rbot/ws.src");
+    wsPathJoin(srcFile, sizeof(srcFile), wsAbs, ".satria/ws.src");
     wsGateReadSrc(&items, wsAbs, srcFile, &excl);
     listFree(&excl);
   }
@@ -2382,7 +2382,7 @@ static void wsStateSave(const WsModel *m, const char *wsDir) {
     fclose(old);
   }
   if (!same) {
-    mkdirs(".rbot");
+    mkdirs(".satria");
     char tmp[WS_GATE_PATH];
     size_t pl = strlen(path);
     if (pl + 5 > sizeof(tmp)) {
@@ -2613,7 +2613,7 @@ bool wsMemberCwdDetect(char *wsRootOut, size_t wsRootN, char *memberOut, size_t 
 
 /*
  * workspaceEnumerate — parse & validasi model workspace untuk enumerasi
- * (dipakai `rbot profile workspace=`): semua validasi model yang sama
+ * (dipakai `satria profile workspace=`): semua validasi model yang sama
  * dengan workspaceRun, TANPA sintesis/build apa pun. nama proyek hasil
  * topo sort diisi ke projectNames[]. Buffer internal model statis —
  * pointer hasil valid sampai panggilan berikutnya.

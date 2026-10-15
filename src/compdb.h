@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_COMPDB_H
-#define RBOT_V0_1_0_COMPDB_H
+#ifndef SATRIA_V0_1_0_COMPDB_H
+#define SATRIA_V0_1_0_COMPDB_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -22,4 +22,4 @@ void writeCompdbMulti(const Config *const *cfgs, List *const *srcs, int count);
    workspace_log untuk keputusan skip-write TANPA merender file. */
 uint64_t compdbMultiFingerprint(const Config *const *cfgs, List *const *srcs, int count);
 
-#endif /* RBOT_V0_1_0_COMPDB_H */
+#endif /* SATRIA_V0_1_0_COMPDB_H */

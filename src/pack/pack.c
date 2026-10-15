@@ -3,7 +3,7 @@
  *
  * Urutan: validasi entri -> resolusi template -> cek freshness (mtime
  * input vs artefak) -> bangun tarball dan/atau .deb -> checksum. Artefak
- * ditulis ke file sementara di .rbot/pack/ lalu direname agar output
+ * ditulis ke file sementara di .satria/pack/ lalu direname agar output
  * lama tidak pernah setengah jadi.
  */
 #include "pack_internal.h"
@@ -17,7 +17,7 @@
 #include "../cmds/cmds_internal.h"
 #include "pack_stage.h"
 
-/* ---- nilai {os}/{arch} host (host target rbot sendiri) ---- */
+/* ---- nilai {os}/{arch} host (host target satria sendiri) ---- */
 
 static const char *packOsName(void) {
 #if defined(_WIN32)
@@ -98,7 +98,7 @@ void packDebName(const char *tarPath, char *out, size_t n) {
   snprintf(out + len, n - len, ".deb");
 }
 
-void packStageDir(char *out, size_t n) { snprintf(out, n, ".rbot/pack"); }
+void packStageDir(char *out, size_t n) { snprintf(out, n, ".satria/pack"); }
 
 int64_t packPathMTimeNs(const char *path) { return fsMTimeNs(path); }
 
@@ -108,7 +108,7 @@ int64_t packNewestInput(const Config *c) {
     char src[MAX_PATH * 2], dst[MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
                         dst, sizeof(dst))) continue;
-    /* Fallback .exe (bin/rbot -> bin/rbot.exe di Windows) agar relink
+    /* Fallback .exe (bin/satria -> bin/satria.exe di Windows) agar relink
        binary tetap memicu kemasan ulang. */
     char eff[MAX_PATH * 2];
     if (!packResolveSource(src, eff, sizeof(eff))) continue;
@@ -173,7 +173,7 @@ static void packDeriveCompress(const Config *c, PackArtifact *a) {
 static bool packChecksumApply(const Config *c, const char *artifactPath) {
   if (strcmp(c->pack.checksum, "sha256") != 0) {
     if (c->pack.checksum[0] && strcmp(c->pack.checksum, "none") != 0)
-      fprintf(stderr, "rbot: pack: checksum '%s' tidak dikenal (sha256)\n", c->pack.checksum);
+      fprintf(stderr, "satria: pack: checksum '%s' tidak dikenal (sha256)\n", c->pack.checksum);
     return true;
   }
   char sumPath[MAX_PATH * 2 + 8];
@@ -184,7 +184,7 @@ static bool packChecksumApply(const Config *c, const char *artifactPath) {
     return true;
   }
   if (!packWriteSha256(artifactPath)) {
-    fprintf(stderr, "rbot: pack: gagal menulis %s\n", sumPath);
+    fprintf(stderr, "satria: pack: gagal menulis %s\n", sumPath);
     return false;
   }
   printf("%s Checksum: %s\n", repPrefix(), sumPath);
@@ -210,28 +210,28 @@ bool packRun(const Config *c) {
 
   /* Validasi entri dulu: paket dengan file yang hilang harus gagal jelas,
      bukan diam-diam memaketkan sisanya. packResolveSource menoleransi
-     entri portabel tanpa .exe (bin/rbot -> bin/rbot.exe di Windows). */
+     entri portabel tanpa .exe (bin/satria -> bin/satria.exe di Windows). */
   for (int i = 0; i < c->pack.files.count; i++) {
     char src[MAX_PATH * 2], dst[MAX_PATH * 2];
     if (!packEntryParts(c->pack.files.items[i], src, sizeof(src),
                         dst, sizeof(dst))) {
-      fprintf(stderr, "rbot: pack: mapping '%s' tidak valid\n", c->pack.files.items[i]);
+      fprintf(stderr, "satria: pack: mapping '%s' tidak valid\n", c->pack.files.items[i]);
       return false;
     }
     char eff[MAX_PATH * 2];
     if (!packResolveSource(src, eff, sizeof(eff))) {
-      fprintf(stderr, "rbot: pack: '%s' tidak ditemukan\n", src);
+      fprintf(stderr, "satria: pack: '%s' tidak ditemukan\n", src);
       return false;
     }
   }
   if (c->pack.files.count == 0) {
-    fprintf(stderr, "rbot: pack: pack.files kosong\n");
+    fprintf(stderr, "satria: pack: pack.files kosong\n");
     return false;
   }
 
   char stage[64];
   packStageDir(stage, sizeof(stage));
-  mkdirs(".rbot");
+  mkdirs(".satria");
   mkdirs(stage);
 
   int64_t newest = packNewestInput(c);
@@ -284,7 +284,7 @@ bool packRun(const Config *c) {
     if (!packChecksumApply(c, a.path)) return false;
   } else if (c->pack.format[0] && strcmp(c->pack.format, "tar") != 0 &&
              strcmp(c->pack.format, "none") != 0) {
-    fprintf(stderr, "rbot: pack: format '%s' tidak dikenal (tar, deb)\n", c->pack.format);
+    fprintf(stderr, "satria: pack: format '%s' tidak dikenal (tar, deb)\n", c->pack.format);
     return false;
   }
   return true;

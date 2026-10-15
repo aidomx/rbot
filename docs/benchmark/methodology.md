@@ -1,6 +1,6 @@
 # Benchmark Methodology
 
-The benchmark bundled with rbot v0.2.0 is intended primarily to detect regressions in rbot, not to establish a universal ranking of build systems.
+The benchmark bundled with satria v0.2.0 is intended primarily to detect regressions in satria, not to establish a universal ranking of build systems.
 
 ## Default workload
 
@@ -21,7 +21,7 @@ The script can compare:
 - Ninja
 - Make
 - Bear + Make (when Bear exists)
-- rbot
+- satria
 - CMake + Ninja (when CMake exists)
 - Meson + Ninja (when Meson exists)
 - XMake (when available)
@@ -41,7 +41,7 @@ Build again without changes. This primarily measures build-tool overhead.
 
 ### `touch`
 
-Touch one header without changing its content. rbot is designed to recognize this as unchanged content and avoid recompiling affected sources.
+Touch one header without changing its content. satria is designed to recognize this as unchanged content and avoid recompiling affected sources.
 
 ### `edit`
 
@@ -69,7 +69,7 @@ A separate syscall CSV is produced when syscall tracing is available.
 
 ## Interpreting results
 
-Do not conclude "rbot is faster" from one run. A useful evaluation asks:
+Do not conclude "satria is faster" from one run. A useful evaluation asks:
 
 1. Is the result reproducible?
 2. How much work was actually performed?
@@ -77,4 +77,4 @@ Do not conclude "rbot is faster" from one run. A useful evaluation asks:
 4. Does the result hold in another environment?
 5. Is a slower result still within an acceptable range?
 
-The most interesting rbot cases are often incremental and no-op builds, especially when content-aware dependency tracking avoids unnecessary compilation.
+The most interesting satria cases are often incremental and no-op builds, especially when content-aware dependency tracking avoids unnecessary compilation.

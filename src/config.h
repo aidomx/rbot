@@ -1,12 +1,12 @@
-#ifndef RBOT_V0_1_0_CONFIG_H
-#define RBOT_V0_1_0_CONFIG_H
+#ifndef SATRIA_V0_1_0_CONFIG_H
+#define SATRIA_V0_1_0_CONFIG_H
 
 #include <stdbool.h>
 
 #include "util.h"
 
 /*
- * rbot — build tool didorong oleh Buildfile deklaratif.
+ * satria — build tool didorong oleh Buildfile deklaratif.
  *
  * Model config sengaja meniru loader format .rupa: subset YAML-like kecil
  * dengan section, satu level nesting, properti `- key: value`, dan entri
@@ -67,7 +67,7 @@ typedef struct {
   char ext[16];
 
   /*
-   * Arsip jadi (embedded.<n>.file): bila diset, rbot TIDAK mengarsipkan
+   * Arsip jadi (embedded.<n>.file): bila diset, satria TIDAK mengarsipkan
    * <src> sendiri — <file> dipakai sebagai arsip input (mis. hasil proyek
    * kemasan lain di workspace). Freshness tetap dicek terhadap mtime
    * <file>. <src> boleh kosong dalam mode ini.
@@ -166,9 +166,9 @@ typedef struct {
 
   /*
    * foreground (default true): bila true, child build berjalan di process
-   * group yang sama dengan rbot (perilaku klasik — Ctrl+C dibawa terminal
+   * group yang sama dengan satria (perilaku klasik — Ctrl+C dibawa terminal
    * ke semua proses). Bila false, child berjalan di process group terpisah
-   * sehingga SIGINT dari terminal hanya sampai ke rbot; rbot meneruskannya
+   * sehingga SIGINT dari terminal hanya sampai ke satria; satria meneruskannya
    * ke child secara eksplisit lalu membatalkan build dengan rapi.
    */
   bool foreground;
@@ -214,7 +214,7 @@ typedef struct {
   /*
    * embedded: entri bernama yang asetnya diarsipkan dan di-embed ke binary
    * (Buildfile: embedded). Generik — project yang menentukan apa yang
-   * di-embed; rbot hanya mengarsipkan, mengonversi via ld -r -b binary,
+   * di-embed; satria hanya mengarsipkan, mengonversi via ld -r -b binary,
    * dan menerbitkan header.
    */
   EmbeddedEntry emb[MAX_EMBEDDED];
@@ -226,8 +226,8 @@ bool loadConfig(Config *c, const char *path);
 
 /*
  * loadConfigEx — varian loadConfig dengan kontrol penulisan cache.
- * cacheWrite=false: parse Buildfile TANPA menulis .rbot (cache config) —
- * untuk jalur non-mutating (`rbot profile`) yang tidak boleh memperbarui
+ * cacheWrite=false: parse Buildfile TANPA menulis .satria (cache config) —
+ * untuk jalur non-mutating (`satria profile`) yang tidak boleh memperbarui
  * cache build normal. Membaca cache yang valid tetap diizinkan (read-only).
  */
 bool loadConfigEx(Config *c, const char *path, bool cacheWrite);
@@ -246,7 +246,7 @@ void configApplyLine(Config *c, const char *key, const char *value);
  * configFinalize — terapkan konvensi proyek standar pada Config yang sudah
  * di-parse (sources->src, headers->include bila folder ada, nama binary
  * dari cwd, deteksi C++, resolusi path embedded). Dipanggil loadConfig
- * setelah parse; juga publik untuk jalur tanpa Buildfile (rbot profile).
+ * setelah parse; juga publik untuk jalur tanpa Buildfile (satria profile).
  * MURNI derivasi in-memory — tidak menulis file apa pun.
  */
 void configFinalize(Config *c);
@@ -266,4 +266,4 @@ void configMergeUnique(List *dst, const List *src);
  */
 void configApplyCompilerSuffix(Config *c);
 
-#endif /* RBOT_V0_1_0_CONFIG_H */
+#endif /* SATRIA_V0_1_0_CONFIG_H */

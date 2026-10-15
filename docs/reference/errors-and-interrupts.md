@@ -2,7 +2,7 @@
 
 ## SIGINT
 
-rbot handles Ctrl+C and forwards interruption to active child processes. This is important for compilers running in parallel and for environments where process groups behave differently from a conventional shell.
+satria handles Ctrl+C and forwards interruption to active child processes. This is important for compilers running in parallel and for environments where process groups behave differently from a conventional shell.
 
 A cancelled build must not be recorded as a successful build state.
 

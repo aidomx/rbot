@@ -1,14 +1,14 @@
-#ifndef RBOT_V0_1_0_EMBED_LD_CACHE_H
-#define RBOT_V0_1_0_EMBED_LD_CACHE_H
+#ifndef SATRIA_V0_1_0_EMBED_LD_CACHE_H
+#define SATRIA_V0_1_0_EMBED_LD_CACHE_H
 
 #include <stdbool.h>
 #include <stddef.h>
 
 /*
- * embed_ld_cache — cache persisten hasil deteksi GNU ld (.rbot/ld.cache).
+ * embed_ld_cache — cache persisten hasil deteksi GNU ld (.satria/ld.cache).
  *
  * ldAvailable() (embed.c) menjalankan probe `ld --version` paling sering
- * sekali per proses — hasilnya (g_ldAvailable) mati begitu rbot keluar,
+ * sekali per proses — hasilnya (g_ldAvailable) mati begitu satria keluar,
  * jadi setiap run yang membangun proyek ber-`embedded` men-spawn sh + ld
  * lagi (3–5 ms per run; lihat problem_note.txt P1). Modul ini menyimpan
  * verdict probe lintas-run: run berikutnya cukup SATU stat ke binary ld
@@ -28,7 +28,7 @@ bool ldCacheResolve(const char *exe, char *out, size_t n);
    fisik sendiri lalu menyimpannya via cacheWriteLD. */
 bool cacheReadLD(const char *ldPath, bool *out);
 
-/* Fast cache check: validate .rbot/ld.cache for an already-resolved ld; never probes. */
+/* Fast cache check: validate .satria/ld.cache for an already-resolved ld; never probes. */
 bool cacheCheckLD(const char *ldPath, bool *out);
 
 /* Update cache for an already-resolved ld using an already-probed verdict. */
@@ -38,8 +38,8 @@ void cacheUpdateLD(const char *ldPath, bool gnu);
    Diam bila stat path gagal; tulis atomik (file .tmp lalu rename). */
 void cacheWriteLD(const char *ldPath, bool gnu);
 
-/* Nama file cache (".rbot/ld.cache") — dipakai cmdClean saat menghapus
+/* Nama file cache (".satria/ld.cache") — dipakai cmdClean saat menghapus
    state build. */
 const char *ldCacheFile(void);
 
-#endif /* RBOT_V0_1_0_EMBED_LD_CACHE_H */
+#endif /* SATRIA_V0_1_0_EMBED_LD_CACHE_H */

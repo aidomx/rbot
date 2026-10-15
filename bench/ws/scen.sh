@@ -76,8 +76,8 @@ s_strace() {
       draw_progress
       report="$OUTDIR/workspace.strace.${k}.${r}.txt"
       rm -f "$report"
-      if [ "$k" = rbot ]; then
-        tcmd=("$RBOT" $RBOT_ARGS -j"$NPROC" -w)
+      if [ "$k" = satria ]; then
+        tcmd=("$SATRIA" $SATRIA_ARGS -j"$NPROC" -w)
       elif [ "$k" = ninja ]; then
         tcmd=(ninja)
       else tcmd=(make -j"$NPROC"); fi

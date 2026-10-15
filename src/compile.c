@@ -94,7 +94,7 @@ bool resolveCompiler(Config *c) {
       return true;
     }
   }
-  fprintf(stderr, "rbot: no usable compiler found (tried compiler list)\n");
+  fprintf(stderr, "satria: no usable compiler found (tried compiler list)\n");
   return false;
 }
 
@@ -221,7 +221,7 @@ bool objectPathFor(const Config *c, const char *src, char *out, size_t n) {
     else if (strncmp(src, root, rl) == 0 && (src[rl] == '/' || src[rl] == '\\'))
       rest = src + rl + 1;
     else if (strcmp(src, root) == 0) {
-      /* Entri sources berupa FILE (mis. `sources = main.c` hasil `rbot
+      /* Entri sources berupa FILE (mis. `sources = main.c` hasil `satria
          -xf` untuk build.ninja flat): object = nama file tanpa ekstensi
          langsung di bawah build dir. */
       char rel[MAX_PATH];

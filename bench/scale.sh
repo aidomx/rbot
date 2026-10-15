@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # scale.sh — scale/no-op benchmark for the synthetic graph from graph.sh.
 #
-# It primes each generated workspace once, then measures rbot no-op runs.
+# It primes each generated workspace once, then measures satria no-op runs.
 # This intentionally avoids recompiling thousands of files on every sample:
 # the measured path is graph parsing, dependency loading and invalidation.
 #
 # Usage:
 #   ./bench/scale.sh
 #   ./bench/scale.sh -n 100,500,1000,5000 -e 1,5 -r 3
-#   ./bench/scale.sh -n 1000,5000 -e 1000,5000 -r 5 -b ./bin/rbot
+#   ./bench/scale.sh -n 1000,5000 -e 1000,5000 -r 5 -b ./bin/satria
 #
 set -u
 
-RBOT="bin/rbot"
+SATRIA="bin/satria"
 NODES="100,500,1000,5000"
 EDGES="1,5"
 RUNS=5
@@ -26,7 +26,7 @@ usage() {
 
 while getopts "b:n:e:r:o:kh" opt; do
   case "$opt" in
-    b) RBOT=$OPTARG ;;
+    b) SATRIA=$OPTARG ;;
     n) NODES=$OPTARG ;;
     e) EDGES=$OPTARG ;;
     r) RUNS=$OPTARG ;;
@@ -38,8 +38,8 @@ while getopts "b:n:e:r:o:kh" opt; do
 done
 
 [[ "$RUNS" =~ ^[0-9]+$ && "$RUNS" -gt 0 ]] || { echo "runs harus > 0" >&2; exit 2; }
-[ -x "$RBOT" ] || { echo "rbot tidak ditemukan/dieksekusi: $RBOT" >&2; exit 1; }
-RBOT=$(cd "$(dirname "$RBOT")" && pwd)/$(basename "$RBOT")
+[ -x "$SATRIA" ] || { echo "satria tidak ditemukan/dieksekusi: $SATRIA" >&2; exit 1; }
+SATRIA=$(cd "$(dirname "$SATRIA")" && pwd)/$(basename "$SATRIA")
 GRAPH="$PWD/bench/graph.sh"
 [ -x "$GRAPH" ] || { echo "bench/graph.sh tidak ditemukan" >&2; exit 1; }
 
@@ -77,8 +77,8 @@ for n in "${NS[@]}"; do
     # Prime: one real build, excluded from timings.
     (
       cd "$ws"
-      rm -rf .rbot build bin
-      "$RBOT" >/dev/null
+      rm -rf .satria build bin
+      "$SATRIA" >/dev/null
     ) || {
       echo "prime gagal: n=$n e=$e" >&2
       exit 1
@@ -94,7 +94,7 @@ for n in "${NS[@]}"; do
       rc=0
       (
         cd "$ws"
-        "$RBOT" >/dev/null
+        "$SATRIA" >/dev/null
       ) || rc=$?
       end=$(now_ns)
       ms=$(( (end - start) / 1000000 ))

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scale-graph.sh — graph/invalidation scaling benchmark.
 #
-# Each workspace is built once (prime, excluded from timing), then rbot is
+# Each workspace is built once (prime, excluded from timing), then satria is
 # invoked repeatedly with an unchanged workspace. The measured path is the
 # graph/build-state inspection needed to prove that nothing must be rebuilt.
 # No source object is intentionally recompiled during measured runs.
@@ -9,11 +9,11 @@
 # Usage:
 #   ./bench/scale-graph.sh
 #   ./bench/scale-graph.sh -n 100,500,1000,5000 -e 100,1000 -r 5
-#   ./bench/scale-graph.sh -n 10000 -e 10000 -r 3 -b ./bin/rbot
+#   ./bench/scale-graph.sh -n 10000 -e 10000 -r 3 -b ./bin/satria
 #
 set -u
 
-RBOT="bin/rbot"
+SATRIA="bin/satria"
 NODES="100,500,1000,5000"
 EDGES="100,1000"
 RUNS=5
@@ -23,12 +23,12 @@ KEEP=0
 usage() { sed -n '2,/^# ====.*$/p' "$0"; exit 0; }
 while getopts "b:n:e:r:o:kh" opt; do
   case "$opt" in
-    b) RBOT=$OPTARG ;; n) NODES=$OPTARG ;; e) EDGES=$OPTARG ;; r) RUNS=$OPTARG ;; o) OUTDIR=$OPTARG ;; k) KEEP=1 ;; h) usage ;; *) usage ;;
+    b) SATRIA=$OPTARG ;; n) NODES=$OPTARG ;; e) EDGES=$OPTARG ;; r) RUNS=$OPTARG ;; o) OUTDIR=$OPTARG ;; k) KEEP=1 ;; h) usage ;; *) usage ;;
   esac
 done
 [[ "$RUNS" =~ ^[0-9]+$ && "$RUNS" -gt 0 ]] || { echo "runs harus > 0" >&2; exit 2; }
-[ -x "$RBOT" ] || { echo "rbot tidak ditemukan/dieksekusi: $RBOT" >&2; exit 1; }
-RBOT=$(cd "$(dirname "$RBOT")" && pwd)/$(basename "$RBOT")
+[ -x "$SATRIA" ] || { echo "satria tidak ditemukan/dieksekusi: $SATRIA" >&2; exit 1; }
+SATRIA=$(cd "$(dirname "$SATRIA")" && pwd)/$(basename "$SATRIA")
 GRAPH="$PWD/bench/graph.sh"
 [ -x "$GRAPH" ] || { echo "bench/graph.sh tidak ditemukan" >&2; exit 1; }
 mkdir -p "$OUTDIR"; OUTDIR=$(cd "$OUTDIR" && pwd)
@@ -42,7 +42,7 @@ for n in "${NS[@]}"; do for e in "${ES[@]}"; do
   ws="$OUTDIR/n${n}-e${e}"
   echo; echo "========================================"; echo "  graph nodes=$n edges=$e"; echo "========================================"
   "$GRAPH" -n "$n" -e "$e" -o "$ws" >/dev/null || exit $?
-  ( cd "$ws"; rm -rf .rbot build bin; "$RBOT" >/dev/null ) || { echo "prime gagal: n=$n e=$e" >&2; exit 1; }
+  ( cd "$ws"; rm -rf .satria build bin; "$SATRIA" >/dev/null ) || { echo "prime gagal: n=$n e=$e" >&2; exit 1; }
   H=$(( (e + n - 1) / n )); (( H > 0 )) || H=1
   graph_edges=$(wc -l < "$ws/graph.tsv")
   [ "$graph_edges" -eq "$e" ] || { echo "edge count mismatch: $graph_edges != $e" >&2; exit 1; }
@@ -50,7 +50,7 @@ for n in "${NS[@]}"; do for e in "${ES[@]}"; do
   times=()
   for ((run=1; run<=RUNS; run++)); do
     start=$(now_ns); rc=0
-    ( cd "$ws"; "$RBOT" >/dev/null ) || rc=$?
+    ( cd "$ws"; "$SATRIA" >/dev/null ) || rc=$?
     end=$(now_ns); ms=$(( (end-start)/1000000 ))
     after=$(find "$ws/build" -type f -name '*.o' 2>/dev/null | wc -l)
     rebuilt=0; (( after != before )) && rebuilt=1

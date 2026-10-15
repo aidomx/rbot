@@ -24,7 +24,7 @@ gen_c() { # gen_c <proyek> <prefix>
 }
 
 # Mode embed: `ld -r -b binary` bila linker mendukungnya (GNU ld); bila tidak
-# (LLD di Termux), array C lewat embed_c.sh — fallback yang sama dengan rbot,
+# (LLD di Termux), array C lewat embed_c.sh — fallback yang sama dengan satria,
 # sehingga pekerjaan kedua tool setara. BENCH_EMBED=carray|ld memaksa mode.
 embed_mode() {
   [ -n "${BENCH_EMBED:-}" ] && {

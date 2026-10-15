@@ -6,7 +6,7 @@ output as o
 
 root = .
 
-# SIGINT dikendalikan rbot, lalu diteruskan ke child build
+# SIGINT dikendalikan satria, lalu diteruskan ke child build
 foreground = false 
 
 c.build = false
@@ -27,17 +27,17 @@ compiler = cl, gcc, clang
 progress.bar = true
 progress.error = always
 
-o.binaryName = rbot
+o.binaryName = satria
 o.binaryDir = bin
 o.buildDir = build
 # auto generate compile_commands.json
 o.compileCommands = auto 
 
-release.name = rbot
+release.name = satria
 release.version = 0.2.3
 release.output = dist/{name}-v{version}.tar.gz
 
-release.files = bin/rbot:bin/rbot, README.md:share/rbot/README.md, LICENSE:share/rbot/LICENSE, src/cmd.txt:share/rbot/cmd.txt
+release.files = bin/satria:bin/satria, README.md:share/satria/README.md, LICENSE:share/satria/LICENSE, src/cmd.txt:share/satria/cmd.txt
 
 release.format = deb
 release.checksum = sha256

@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_COMPILE_H
-#define RBOT_V0_1_0_COMPILE_H
+#ifndef SATRIA_V0_1_0_COMPILE_H
+#define SATRIA_V0_1_0_COMPILE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -72,4 +72,4 @@ char *targetFlags(const Config *c);
 bool compileLibraryOne(const Config *c, const char *inc, const char *wf, const char *src,
                        const char *obj);
 
-#endif /* RBOT_V0_1_0_COMPILE_H */
+#endif /* SATRIA_V0_1_0_COMPILE_H */

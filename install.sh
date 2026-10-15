@@ -1,39 +1,39 @@
 #!/bin/sh
-# rbot installation script
+# satria installation script
 #
-# This is a standard, safe build/install script for the rbot C project.
+# This is a standard, safe build/install script for the satria C project.
 # It compiles the source code and places the binary in the bin/ directory.
 #
 # Pemakaian:
-#   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh -s -- --dev
-#   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh -s -- --dev --version v0.2.0
-#   curl -fsSL https://raw.githubusercontent.com/aidomx/rbot/main/install.sh | sh -s -- --version v0.2.0
+#   curl -fsSL https://raw.githubusercontent.com/aidomx/satria/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/aidomx/satria/main/install.sh | sh -s -- --dev
+#   curl -fsSL https://raw.githubusercontent.com/aidomx/satria/main/install.sh | sh -s -- --dev --version v0.2.0
+#   curl -fsSL https://raw.githubusercontent.com/aidomx/satria/main/install.sh | sh -s -- --version v0.2.0
 #   ./install.sh --dev  (jika dijalankan dari dalam source tree lokal)
 #
-# Mode default (curl) mengunduh binary rbot dari GitHub Releases ke /usr/local/bin/rbot.
-# Mode --dev melakukan bootstrap build rbot dari source dengan compiler C lokal.
+# Mode default (curl) mengunduh binary satria dari GitHub Releases ke /usr/local/bin/satria.
+# Mode --dev melakukan bootstrap build satria dari source dengan compiler C lokal.
 #
 # Sumber versi (urutan prioritas):
 #   1. --version <tag>    (argumen eksplisit)
-#   2. $RBOT_VERSION      (env, di-set CI dari git tag, mis. v0.2.0)
-#   3. .rbot-version      (file di source tree; hanya untuk --dev)
+#   2. $SATRIA_VERSION      (env, di-set CI dari git tag, mis. v0.2.0)
+#   3. .satria-version      (file di source tree; hanya untuk --dev)
 #   4. fallback hardcoded
 
 set -eu
 
 GITHUB_USER="aidomx"
-REPO_NAME="rbot"
+REPO_NAME="satria"
 BRANCH="main"
-VERSION="v0.2.0"   # fallback terakhir; ditimpa oleh --version / RBOT_VERSION / .rbot-version
+VERSION="v0.2.0"   # fallback terakhir; ditimpa oleh --version / SATRIA_VERSION / .satria-version
 
 # Nama asset di GitHub Releases (harus persis sama dengan yang
 # di-upload oleh .github/workflows/release.yml).
-ASSET_WINDOWS_X64="rbot-windows-x64.exe"
-ASSET_LINUX_X64="rbot-linux-x64"
-ASSET_LINUX_ARM64="rbot-linux-arm64"
-ASSET_MACOS_ARM64="rbot-macos-arm64"
-ASSET_MACOS_X64="rbot-macos-x64"
+ASSET_WINDOWS_X64="satria-windows-x64.exe"
+ASSET_LINUX_X64="satria-linux-x64"
+ASSET_LINUX_ARM64="satria-linux-arm64"
+ASSET_MACOS_ARM64="satria-macos-arm64"
+ASSET_MACOS_X64="satria-macos-x64"
 
 # ---------------------------------------------------------------------------
 # Parsing argumen
@@ -48,7 +48,7 @@ while [ $# -gt 0 ]; do
       ;;
     --version)
       if [ $# -lt 2 ]; then
-        echo "rbot: --version memerlukan argumen tag (mis. --version v0.2.0)" >&2
+        echo "satria: --version memerlukan argumen tag (mis. --version v0.2.0)" >&2
         exit 1
       fi
       VERSION_TAG="$2"
@@ -65,31 +65,31 @@ done
 # ---------------------------------------------------------------------------
 case "$(uname -s 2>/dev/null || echo unknown)" in
   Darwin)
-    INSTALL_PATH="/usr/local/bin/rbot"
+    INSTALL_PATH="/usr/local/bin/satria"
     ;;
   Linux)
     if [ -n "${PREFIX:-}" ] && [ -d "${PREFIX}" ]; then
-      INSTALL_PATH="${PREFIX}/bin/rbot"
+      INSTALL_PATH="${PREFIX}/bin/satria"
     else
-      INSTALL_PATH="/usr/local/bin/rbot"
+      INSTALL_PATH="/usr/local/bin/satria"
     fi
     ;;
   *)
-    INSTALL_PATH="/usr/local/bin/rbot"
+    INSTALL_PATH="/usr/local/bin/satria"
     ;;
 esac
 
-# Prioritas: RBOT_VERSION (env) > .rbot-version (file). VERSION_TAG sudah
+# Prioritas: SATRIA_VERSION (env) > .satria-version (file). VERSION_TAG sudah
 # ditangani di pemanggil sebelum fungsi ini dipanggil.
 read_version() {
-  # Prioritas 1: env RBOT_VERSION (di-set CI dari git tag v*).
-  if [ -n "${RBOT_VERSION:-}" ]; then
-    VERSION="$RBOT_VERSION"
+  # Prioritas 1: env SATRIA_VERSION (di-set CI dari git tag v*).
+  if [ -n "${SATRIA_VERSION:-}" ]; then
+    VERSION="$SATRIA_VERSION"
     return
   fi
 
-  # Prioritas 2: file .rbot-version (untuk dev lokal).
-  file="$1/.rbot-version"
+  # Prioritas 2: file .satria-version (untuk dev lokal).
+  file="$1/.satria-version"
   if [ -f "$file" ]; then
     v=$(sed -n "1p" "$file")
     [ -n "$v" ] && VERSION="$v"
@@ -103,7 +103,7 @@ install_binary() {
   binary="$1"
   chmod +x "$binary"
   if ! "$binary" version >/dev/null 2>&1; then
-    echo "rbot: binary tidak bisa dijalankan di sistem ini: ${binary}" >&2
+    echo "satria: binary tidak bisa dijalankan di sistem ini: ${binary}" >&2
     return 1
   fi
   echo "> Installing : ${INSTALL_PATH}"
@@ -115,7 +115,7 @@ install_binary() {
       sudo mkdir -p "$install_dir"
     else
       mkdir -p "$install_dir" || {
-        echo "rbot: tidak bisa membuat ${install_dir}" >&2
+        echo "satria: tidak bisa membuat ${install_dir}" >&2
         return 1
       }
     fi
@@ -126,7 +126,7 @@ install_binary() {
   elif command -v sudo >/dev/null 2>&1; then
     sudo mv "$binary" "${INSTALL_PATH}"
   else
-    echo "rbot: tidak punya izin tulis ke ${install_dir} dan sudo tidak tersedia" >&2
+    echo "satria: tidak punya izin tulis ke ${install_dir} dan sudo tidak tersedia" >&2
     return 1
   fi
 
@@ -148,21 +148,21 @@ detect_asset_name() {
       case "$arch" in
         x86_64|amd64)   echo "$ASSET_LINUX_X64" ;;
         aarch64|arm64)  echo "$ASSET_LINUX_ARM64" ;;
-        *) echo "rbot: arsitektur Linux tidak didukung: $arch" >&2; return 1 ;;
+        *) echo "satria: arsitektur Linux tidak didukung: $arch" >&2; return 1 ;;
       esac
       ;;
     Darwin)
       case "$arch" in
         arm64)  echo "$ASSET_MACOS_ARM64" ;;
         x86_64) echo "$ASSET_MACOS_X64" ;;
-        *) echo "rbot: arsitektur macOS tidak didukung: $arch" >&2; return 1 ;;
+        *) echo "satria: arsitektur macOS tidak didukung: $arch" >&2; return 1 ;;
       esac
       ;;
     MINGW*|MSYS*|CYGWIN*)
       echo "$ASSET_WINDOWS_X64"
       ;;
     *)
-      echo "rbot: OS tidak didukung: $os" >&2
+      echo "satria: OS tidak didukung: $os" >&2
       return 1
       ;;
   esac
@@ -178,7 +178,7 @@ fetch_release_json() {
   fi
 
   curl -fsSL \
-    -H 'User-Agent: rbot-installer' \
+    -H 'User-Agent: satria-installer' \
     -H 'Accept: application/vnd.github+json' \
     "$api"
 }
@@ -197,7 +197,7 @@ json_field() {
 
 # ---------------------------------------------------------------------------
 # Termux (Android): binary release dibangun dengan glibc dan tidak bisa
-# dijalankan di bionic. Di Termux rbot dibangun dari source tag release.
+# dijalankan di bionic. Di Termux satria dibangun dari source tag release.
 # ---------------------------------------------------------------------------
 is_termux() {
   case "${PREFIX:-}" in
@@ -211,17 +211,17 @@ if is_termux; then
     echo "> Termux    : binary release (glibc) tidak kompatibel, build dari source"
     DEV=1
   fi
-  if [ -z "${VERSION_TAG}" ] && [ -n "${RBOT_VERSION:-}" ]; then
-    VERSION_TAG="${RBOT_VERSION}"
+  if [ -z "${VERSION_TAG}" ] && [ -n "${SATRIA_VERSION:-}" ]; then
+    VERSION_TAG="${SATRIA_VERSION}"
   fi
   if [ -z "${VERSION_TAG}" ]; then
     RELEASE_JSON_T="$(fetch_release_json "")" || {
-      echo "rbot: gagal mengambil metadata release dari GitHub API" >&2
+      echo "satria: gagal mengambil metadata release dari GitHub API" >&2
       exit 1
     }
     VERSION_TAG="$(json_field "${RELEASE_JSON_T}" '"tag_name"')"
     if [ -z "${VERSION_TAG}" ]; then
-      echo "rbot: gagal menentukan tag release terbaru" >&2
+      echo "satria: gagal menentukan tag release terbaru" >&2
       exit 1
     fi
   fi
@@ -242,15 +242,15 @@ if [ "$DEV" -eq 1 ]; then
 
   # Deteksi apakah dijalankan dari dalam source tree lokal
   SCRIPT_DIR="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
-  if [ -f "${SCRIPT_DIR}/src/main.c" ] && [ -f "${SCRIPT_DIR}/include/rbot.h" ]; then
+  if [ -f "${SCRIPT_DIR}/src/main.c" ] && [ -f "${SCRIPT_DIR}/include/satria.h" ]; then
     SRC_DIR="${SCRIPT_DIR}"
   else
     command -v curl >/dev/null 2>&1 || {
-      echo "rbot: --dev membutuhkan curl untuk mengunduh source" >&2
+      echo "satria: --dev membutuhkan curl untuk mengunduh source" >&2
       exit 1
     }
     command -v tar >/dev/null 2>&1 || {
-      echo "rbot: --dev membutuhkan tar untuk mengekstrak source" >&2
+      echo "satria: --dev membutuhkan tar untuk mengekstrak source" >&2
       exit 1
     }
 
@@ -260,20 +260,20 @@ if [ "$DEV" -eq 1 ]; then
       SOURCE_URL="https://github.com/${GITHUB_USER}/${REPO_NAME}/archive/refs/heads/${BRANCH}.tar.gz"
     fi
     echo "> Downloading source: ${SOURCE_URL}"
-    curl -fsSL "${SOURCE_URL}" -o "${TMP_DIR}/rbot.tar.gz"
-    tar -xzf "${TMP_DIR}/rbot.tar.gz" -C "${TMP_DIR}"
+    curl -fsSL "${SOURCE_URL}" -o "${TMP_DIR}/satria.tar.gz"
+    tar -xzf "${TMP_DIR}/satria.tar.gz" -C "${TMP_DIR}"
     SRC_DIR=$(find "${TMP_DIR}" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 
     if [ -z "${SRC_DIR}" ] || [ ! -f "${SRC_DIR}/src/main.c" ]; then
-      echo "rbot: source tree tidak valid" >&2
+      echo "satria: source tree tidak valid" >&2
       exit 1
     fi
   fi
 
   # Prioritas versi:
   #   1. --version <tag>
-  #   2. RBOT_VERSION (env, di-set CI dari git tag)
-  #   3. .rbot-version
+  #   2. SATRIA_VERSION (env, di-set CI dari git tag)
+  #   3. .satria-version
   #   4. $VERSION (fallback hardcoded)
   if [ -n "${VERSION_TAG}" ]; then
     VERSION="${VERSION_TAG}"
@@ -282,11 +282,11 @@ if [ "$DEV" -eq 1 ]; then
   fi
 
   command -v "${CC:-cc}" >/dev/null 2>&1 || {
-    echo "rbot: compiler C '${CC:-cc}' tidak ditemukan; pasang gcc/clang terlebih dahulu (Termux: pkg install clang)" >&2
+    echo "satria: compiler C '${CC:-cc}' tidak ditemukan; pasang gcc/clang terlebih dahulu (Termux: pkg install clang)" >&2
     exit 1
   }
 
-  echo "> Bootstrap  : rbot ${VERSION}"
+  echo "> Bootstrap  : satria ${VERSION}"
   echo "> Compiler   : ${CC:-cc}"
 
   mkdir -p "${TMP_DIR}/build/obj"
@@ -294,7 +294,7 @@ if [ "$DEV" -eq 1 ]; then
   TOTAL=$(printf '%s\n' "$SOURCES" | sed '/^$/d' | wc -l | tr -d ' ')
 
   if [ "$TOTAL" -eq 0 ]; then
-    echo "rbot: tidak ada file sumber (.c) ditemukan di ${SRC_DIR}/src" >&2
+    echo "satria: tidak ada file sumber (.c) ditemukan di ${SRC_DIR}/src" >&2
     exit 1
   fi
 
@@ -336,7 +336,7 @@ if [ "$DEV" -eq 1 ]; then
     obj="${obj%.c}.o"
     mkdir -p "$(dirname "$obj")"
     "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra \
-      -DRBOT_VERSION_EMBEDDED=\"${VERSION}\" \
+      -DSATRIA_VERSION_EMBEDDED=\"${VERSION}\" \
       -I"${SRC_DIR}/include" -I"${SRC_DIR}/src" \
       -c "$src" -o "$obj"
     DONE=$((DONE + 1))
@@ -350,24 +350,24 @@ if [ "$DEV" -eq 1 ]; then
   OBJECTS=$(find "${TMP_DIR}/build/obj" -name '*.o' -type f | sort)
 
   mkdir -p "${SRC_DIR}/build/bin"
-  "${CC:-cc}" $OBJECTS -o "${SRC_DIR}/build/bin/rbot" -pthread -lm
+  "${CC:-cc}" $OBJECTS -o "${SRC_DIR}/build/bin/satria" -pthread -lm
   progress 100
   printf '\n'
 
-  chmod +x "${SRC_DIR}/build/bin/rbot"
-  echo "> Built & Saved: ${SRC_DIR}/build/bin/rbot"
+  chmod +x "${SRC_DIR}/build/bin/satria"
+  echo "> Built & Saved: ${SRC_DIR}/build/bin/satria"
 
-  if [ -x "${SRC_DIR}/build/bin/rbot" ]; then
-    "${SRC_DIR}/build/bin/rbot" version 2>/dev/null || true
+  if [ -x "${SRC_DIR}/build/bin/satria" ]; then
+    "${SRC_DIR}/build/bin/satria" version 2>/dev/null || true
   fi
 
   # Bila source berasal dari unduhan sementara (di dalam TMP_DIR), binary
   # wajib dipindah keluar sebelum trap cleanup menghapus TMP_DIR saat exit.
   case "${SRC_DIR}" in
     "${TMP_DIR}"/*)
-      if ! install_binary "${SRC_DIR}/build/bin/rbot"; then
-        cp "${SRC_DIR}/build/bin/rbot" ./rbot &&
-          echo "> Saved (fallback): $PWD/rbot"
+      if ! install_binary "${SRC_DIR}/build/bin/satria"; then
+        cp "${SRC_DIR}/build/bin/satria" ./satria &&
+          echo "> Saved (fallback): $PWD/satria"
       fi
       ;;
   esac
@@ -380,14 +380,14 @@ fi
 # ---------------------------------------------------------------------------
 
 command -v curl >/dev/null 2>&1 || {
-  echo "rbot: membutuhkan curl untuk mengunduh binary" >&2
+  echo "satria: membutuhkan curl untuk mengunduh binary" >&2
   exit 1
 }
 
-# Di mode default, --version eksplisit menang; kalau tidak, RBOT_VERSION dipakai;
+# Di mode default, --version eksplisit menang; kalau tidak, SATRIA_VERSION dipakai;
 # kalau tidak ada keduanya, pakai release "latest".
-if [ -z "${VERSION_TAG}" ] && [ -n "${RBOT_VERSION:-}" ]; then
-  VERSION_TAG="${RBOT_VERSION}"
+if [ -z "${VERSION_TAG}" ] && [ -n "${SATRIA_VERSION:-}" ]; then
+  VERSION_TAG="${SATRIA_VERSION}"
 fi
 
 ASSET="$(detect_asset_name)" || exit 1
@@ -400,7 +400,7 @@ else
 fi
 
 RELEASE_JSON="$(fetch_release_json "${VERSION_TAG}")" || {
-  echo "rbot: gagal mengambil metadata release dari GitHub API" >&2
+  echo "satria: gagal mengambil metadata release dari GitHub API" >&2
   exit 1
 }
 
@@ -418,8 +418,8 @@ URL="$(printf '%s' "${RELEASE_JSON}" \
   | sed -E 's/.*"(https[^"]+)".*/\1/')"
 
 if [ -z "${URL}" ]; then
-  echo "rbot: asset '${ASSET}' tidak ada di release ${TAG_NAME:-latest}" >&2
-  echo "rbot: asset yang tersedia:" >&2
+  echo "satria: asset '${ASSET}' tidak ada di release ${TAG_NAME:-latest}" >&2
+  echo "satria: asset yang tersedia:" >&2
   printf '%s' "${RELEASE_JSON}" \
     | tr ',' '\n' \
     | grep -F '"name"' \
@@ -433,7 +433,7 @@ trap cleanup EXIT INT TERM
 
 echo "> Downloading: ${URL}"
 if ! curl -fsSL "${URL}" -o "${TMP_FILE}"; then
-  echo "rbot: gagal mengunduh binary dari ${URL}" >&2
+  echo "satria: gagal mengunduh binary dari ${URL}" >&2
   exit 1
 fi
 

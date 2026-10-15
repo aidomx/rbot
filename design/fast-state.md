@@ -4,13 +4,13 @@ Status: catatan desain + pengukuran. Belum diimplementasi (lihat bagian "Rencana
 
 ## Tujuan
 
-No-op `rbot -w` harus membayar biaya yang sebanding dengan jumlah input yang
+No-op `satria -w` harus membayar biaya yang sebanding dengan jumlah input yang
 benar-benar dipakai build, bukan dengan isi folder. Target acuan: ninja di
 workspace yang sama (65 stat), single project (102 stat).
 
-## Pengukuran (bench/ws.sh, `-n 1 -r 1`, rbot dihitung via LD_PRELOAD)
+## Pengukuran (bench/ws.sh, `-n 1 -r 1`, satria dihitung via LD_PRELOAD)
 
-| Skenario | rbot stat | rbot opendir | ninja stat |
+| Skenario | satria stat | satria opendir | ninja stat |
 |---|---|---|---|
 | no-op, workspace bench (awal) | 170 | 2 | 65 |
 | no-op, sesudah buang `build` dari headers | 160 | 2 | 65 |
@@ -65,8 +65,8 @@ Dengan ini `library/` dan `include/` tetap aman tanpa dicatat per file.
 
 Yang sudah ada per proyek (cocok dengan single project): `build.state`,
 `build.lib.state`, `build.fingerprint`, `deps.cache`, `compile_commands.*`,
-`ld.cache`. Yang di workspace: `.rbot/workspace/.rbot/*.Buildfile.cache`
-(config cache per proyek) dan `.rbot/workspace.state`.
+`ld.cache`. Yang di workspace: `.satria/workspace/.satria/*.Buildfile.cache`
+(config cache per proyek) dan `.satria/workspace.state`.
 
 Catatan penting: `workspace.state` tidak mengurangi jumlah stat. Verifikasi
 "tidak ada yang berubah" tetap perlu men-stat setiap input (ninja juga
@@ -82,7 +82,7 @@ leksikal. Di-reset di `cmdBuildEx` tepat sebelum build dimulai.
 
 ## Hash isi
 
-Saat mtime berubah (mis. touch), rbot membaca isi file dan membandingkan hash
+Saat mtime berubah (mis. touch), satria membaca isi file dan membandingkan hash
 dengan snapshot di `deps.cache`. Ini membuat `touch` benar tapi lebih mahal
 (96 ms vs 50 ms ninja di single project). Usulan: cache hash per
 (path, mtime, size) sehingga file yang tidak berubah tidak dibaca ulang.
@@ -94,11 +94,11 @@ project tetap memakai `cmdsFastStateSave`/`cmdsFastStateValid` tanpa perubahan.
 
 1. **Langkah 1, selesai: penulisan state workspace.**
    - `depsClosureVisit` (src/deps/deps_snapshot.c, API di src/deps.h).
-   - `wsFastStateSave` menulis `.rbot/ws.state` (fase binary) dan
-     `.rbot/ws.lib.state` (fase library) dari closure, dipanggil sebelum
+   - `wsFastStateSave` menulis `.satria/ws.state` (fase binary) dan
+     `.satria/ws.lib.state` (fase library) dari closure, dipanggil sebelum
      `depsFree` hanya saat `wsModeActive()`.
    - Verifikasi: closure cocok persis dengan header di file `.d` (core 2/2,
-     bade 3/3, tanpa selisih). Benchmark `ninja,rbot` tetap identik.
+     bade 3/3, tanpa selisih). Benchmark `ninja,satria` tetap identik.
    - Belum dipakai untuk validasi.
 2. **Langkah 2, selesai: `wsFastStateValid`** dengan file state sendiri, dipanggil
    dari `cmdBuildEx` hanya saat `wsModeActive()`.
@@ -148,19 +148,19 @@ project tetap memakai `cmdsFastStateSave`/`cmdsFastStateValid` tanpa perubahan.
   closure harus disimpan di save, bukan dihitung ulang saat validasi.
 - Fallback pemindai #include (build pertama, MSVC) mungkin lebih lebar; itu
   aman tapi lebih mahal.
-- Pengukuran syscall dari LD_PRELOAD hanya menghitung proses rbot. Biaya di
+- Pengukuran syscall dari LD_PRELOAD hanya menghitung proses satria. Biaya di
   device (proot) belum diukur untuk perubahan ini.
 
-## Pengukuran jalur rebuild: skenario `sel` (edit leaf + bade, lalu `rbot -w core`)
+## Pengukuran jalur rebuild: skenario `sel` (edit leaf + bade, lalu `satria -w core`)
 
-Beban kerja sama untuk kedua tool: 8 proses (rbot: 6 gcc + 2 ar; ninja: 8 perintah).
+Beban kerja sama untuk kedua tool: 8 proses (satria: 6 gcc + 2 ar; ninja: 8 perintah).
 
 | | proses | stat | opendir |
 |---|---|---|---|
 | ninja | 8 | 85 | 0 |
-| rbot | 8 | 324 | 14 |
+| satria | 8 | 324 | 14 |
 
-Rincian stat rbot (324 total, 96 path unik):
+Rincian stat satria (324 total, 96 path unik):
 
 - Penulisan state workspace (`wsFastStateSave`): 62 stat (diukur dengan build
   yang melewati penulisan: 324 -> 262).
@@ -173,7 +173,7 @@ Rincian opendir (14): `walkDir` di `commands.c:518-519` menelusuri folder sumber
 setiap fase, dan `embed.c:177`/`438` menelusuri folder modul embed. Ninja tidak
 melakukan ini karena daftar inputnya sudah tertulis di `build.ninja`.
 
-Profil `RBOT_PROFILE=1` (sandbox): decide 0.6 ms, fingerprint 0.2 ms, compile
+Profil `SATRIA_PROFILE=1` (sandbox): decide 0.6 ms, fingerprint 0.2 ms, compile
 110 ms, link 21 ms. Jadi selisih bukan di CPU decide; biayanya ada di syscall
 (stat, opendir) yang mahal di proot.
 
@@ -204,7 +204,7 @@ Target yang realistis: stat sel dari 324 turun ke sekitar 150, opendir ke 0.
 
 Perubahan:
 
-1. **Cache daftar sumber** (`.rbot/ws.src`, mode workspace): walk folder sumber
+1. **Cache daftar sumber** (`.satria/ws.src`, mode workspace): walk folder sumber
    dan folder embed disimpan bersama stamp mtime folder yang ditelusuri. Mtime
    dicatat sebelum folder dibaca. Dipakai di pengumpulan source build, scan
    `.cpp` di config, dan walk embed. Cache dikosongkan di awal setiap proyek.

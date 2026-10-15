@@ -21,27 +21,27 @@ prime_cached() { # prime_cached <tool>: prime sekali per tool, lalu cp -a
 s_release() {
   have_scenario rel || return 0
   case " ${TOOLS[*]} " in
-    *" rbot "*) : ;;
+    *" satria "*) : ;;
     *)
-      printf '  %s! rel: rbot tidak dipilih; dilewati%s\n' "$C_YEL" "$C_RST"
+      printf '  %s! rel: satria tidak dipilih; dilewati%s\n' "$C_YEL" "$C_RST"
       return 0
       ;;
   esac
   local r
-  if ! prime_cached rbot; then
-    record_fail rbot rel
+  if ! prime_cached satria; then
+    record_fail satria rel
     return 0
   fi
   for ((r = 1; r <= NRUN; r++)); do
-    run_once rbot rel rel_cmd "0.0.$r"
+    run_once satria rel rel_cmd "0.0.$r"
   done
 }
 
 reset_all() {
-  # root build/bin/lib/dist = output root-centric rbot (design/
-  # workspace_v1.md); sisanya layout nested ninja/make + state rbot.
+  # root build/bin/lib/dist = output root-centric satria (design/
+  # workspace_v1.md); sisanya layout nested ninja/make + state satria.
   (cd "$WS" && rm -rf core/build core/bin bade/build bade/bin \
-    rupamod/build rupamod/modules modules .rbot core/lib bade/lib .ninja_log .ninja_deps \
+    rupamod/build rupamod/modules modules .satria core/lib bade/lib .ninja_log .ninja_deps \
     build bin lib dist)
 }
 
@@ -80,11 +80,11 @@ prime_tool() {
 # ke file dulu.
 prime_gate() {
   local archive="$WS/modules/rupa_modules.tar" f list="$OUTDIR/.gate.list"
-  # Path keluaran per tool: rbot root-centric (bin/, lib/, build/<proyek>/
+  # Path keluaran per tool: satria root-centric (bin/, lib/, build/<proyek>/
   # di root workspace — design/workspace_v1.md); ninja/make layout nested.
   local rupa_bin bade_bin core_so bade_so core_main core_a bade_a
   case $1 in
-    rbot)
+    satria)
       rupa_bin="bin/rupa"; bade_bin="bin/bade"
       core_so="lib/libcore.so"; bade_so="lib/libbade.so"
       core_main="build/core/main.o"; core_a="lib/libcore.a"; bade_a="lib/libbade.a" ;;
@@ -114,7 +114,7 @@ prime_gate() {
   # setidaknya satu dari dua urutan library wajib gagal.
   # LLD (Termux) menyelesaikan archive sirkular tanpa group: uji ini tidak
   # bermakna di sana (linker-dependent). Graf tetap dibuktikan oleh runtime
-  # check di atas; build ninja memakai --start-group seperti rbot.
+  # check di atas; build ninja memakai --start-group seperti satria.
   if ld --version 2>/dev/null | grep -qi lld; then
     echo "  i $1: uji negatif circular dilewati (linker LLD)" >&2
     return 0

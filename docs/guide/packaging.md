@@ -1,14 +1,14 @@
 # Packaging
 
-rbot has built-in packaging support through the `pack.*` namespace.
+satria has built-in packaging support through the `pack.*` namespace.
 
 ## Source archive
 
 ```text
-pack.name = rbot
+pack.name = satria
 pack.version = 0.2.0
 pack.output = dist/{name}-v{version}.tar.gz
-pack.files = bin/rbot:bin/rbot, README.md:share/rbot/README.md
+pack.files = bin/satria:bin/satria, README.md:share/satria/README.md
 ```
 
 A mapping uses:
@@ -21,7 +21,7 @@ Without a mapping, the source path is preserved.
 
 Binary entries may omit the `.exe` suffix: when the exact source is absent,
 the packer falls back to `<source>.exe` (a Windows-linked binary is
-`bin/rbot.exe` while the Buildfile says `bin/rbot`). The packaged path keeps
+`bin/satria.exe` while the Buildfile says `bin/satria`). The packaged path keeps
 the destination as configured.
 
 ## Package formats

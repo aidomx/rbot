@@ -1,7 +1,7 @@
-# CLI rbot: self-upgrade dan self-uninstall
+# CLI satria: self-upgrade dan self-uninstall
 
-`rbot` adalah build tool sistem, bukan package manager. Karena itu, CLI
-rbot tidak menyediakan registry package atau mekanisme untuk memasang,
+`satria` adalah build tool sistem, bukan package manager. Karena itu, CLI
+satria tidak menyediakan registry package atau mekanisme untuk memasang,
 memperbarui, dan menghapus dependency eksternal. Pengelolaan dependency
 sistem tetap menjadi tanggung jawab package manager OS; source dependency
 proyek tetap dikelola oleh proyek dan penggunanya.
@@ -9,21 +9,21 @@ proyek tetap dikelola oleh proyek dan penggunanya.
 Untuk saat ini, perintah pengelolaan instalasi global yang dirancang khusus
 hanya:
 
-- `rbot self-upgrade` — memperbarui program rbot itu sendiri.
-- `rbot self-uninstall` — menghapus instalasi rbot yang dikelola installer
-  resmi beserta state global milik rbot.
+- `satria self-upgrade` — memperbarui program satria itu sendiri.
+- `satria self-uninstall` — menghapus instalasi satria yang dikelola installer
+  resmi beserta state global milik satria.
 
-## 1. `rbot self-upgrade`
+## 1. `satria self-upgrade`
 
 ```bash
-rbot self-upgrade
+satria self-upgrade
 ```
 
-Perintah ini hanya memperbarui rbot, bukan dependency proyek atau package
-sistem. Tidak diperlukan registry rbot terpisah. Informasi versi terbaru
+Perintah ini hanya memperbarui satria, bukan dependency proyek atau package
+sistem. Tidak diperlukan registry satria terpisah. Informasi versi terbaru
 diambil langsung dari GitHub Releases API repository resmi:
 
-`https://api.github.com/repos/aidomx/rbot/releases/latest`
+`https://api.github.com/repos/aidomx/satria/releases/latest`
 
 ### Alur
 
@@ -31,7 +31,7 @@ diambil langsung dari GitHub Releases API repository resmi:
 2. Validasi respons dan `tag_name`; respons yang hilang atau tidak valid
    dianggap gagal.
 3. Bandingkan tag release dengan versi yang tertanam pada binary aktif.
-4. Jika versinya sama, laporkan bahwa rbot sudah terbaru dan berhenti.
+4. Jika versinya sama, laporkan bahwa satria sudah terbaru dan berhenti.
 5. Jika berbeda, gunakan installer distribusi resmi untuk memasang release
    yang sesuai dengan tag tersebut.
 6. Laporkan hasil installer. Jika pemeriksaan, pengunduhan, atau instalasi
@@ -50,36 +50,36 @@ diambil langsung dari GitHub Releases API repository resmi:
 - Validasi artefak, pergantian binary, dan pemulihan jika instalasi gagal
   merupakan tanggung jawab installer resmi.
 - **Windows:** upgrade otomatis hanya untuk binary resmi di
-  `%LOCALAPPDATA%\rbot\rbot.exe`. Karena executable yang sedang berjalan
-  terkunci, rbot membuat helper PowerShell sementara di direktori temp,
-  menjalankannya di console terpisah, lalu keluar. Helper menunggu proses rbot
+  `%LOCALAPPDATA%\satria\satria.exe`. Karena executable yang sedang berjalan
+  terkunci, satria membuat helper PowerShell sementara di direktori temp,
+  menjalankannya di console terpisah, lalu keluar. Helper menunggu proses satria
   berakhir, memeriksa GitHub Releases API, dan menjalankan `install.ps1`
   dari tag release yang sudah divalidasi. Lokasi custom dan source checkout
   ditolak; jika helper tidak dapat dijalankan, instalasi tidak diubah.
 - **POSIX:** upgrade menggunakan `install.sh` resmi setelah pemeriksaan versi
   selesai. Binary di lokasi custom atau source checkout tidak diganti otomatis.
 
-## 2. `rbot self-uninstall [--yes|-y]`
+## 2. `satria self-uninstall [--yes|-y]`
 
 ```bash
-rbot self-uninstall
-rbot self-uninstall --yes
+satria self-uninstall
+satria self-uninstall --yes
 ```
 
-Perintah ini menghapus instalasi rbot yang dikelola installer resmi dan
-state global rbot. Perintah ini tidak menghapus dependency sistem, source
+Perintah ini menghapus instalasi satria yang dikelola installer resmi dan
+state global satria. Perintah ini tidak menghapus dependency sistem, source
 proyek, maupun state build setiap proyek.
 
 ### Cakupan
 
-- Binary rbot hanya jika lokasinya dikenali sebagai target instalasi yang
+- Binary satria hanya jika lokasinya dikenali sebagai target instalasi yang
   dikelola installer resmi dan penghapusannya aman.
-- Direktori state global `$RBOT_HOME`, dengan default `~/.rbot/`.
+- Direktori state global `$SATRIA_HOME`, dengan default `~/.satria/`.
 - Hanya file dan direktori yang secara eksplisit menjadi milik instalasi
-  global rbot.
+  global satria.
 
-`RBOT_HOME` dapat digunakan untuk mengubah lokasi state global. Sebelum
-menghapusnya, rbot harus memvalidasi path agar tidak menerima root direktori,
+`SATRIA_HOME` dapat digunakan untuk mengubah lokasi state global. Sebelum
+menghapusnya, satria harus memvalidasi path agar tidak menerima root direktori,
 `.` atau `..`, dan tidak mengikuti symlink untuk menghapus data di luarnya.
 
 ### Konfirmasi
@@ -92,32 +92,32 @@ menghapusnya, rbot harus memvalidasi path agar tidak menerima root direktori,
   jika tidak, hapus state yang aman dihapus dan jelaskan langkah manual
   yang tersisa.
 - Jangan melaporkan penghapusan penuh jika binary atau state yang dimiliki
-  rbot masih tertinggal.
+  satria masih tertinggal.
 
 Contoh konfirmasi:
 
 ```text
-This will remove rbot and its globally managed state (~/.rbot/).
+This will remove satria and its globally managed state (~/.satria/).
 Are you sure? [y/N]
 ```
 
 ### Yang tidak boleh dihapus
 
-- `project/.rbot/`, karena merupakan state build proyek.
+- `project/.satria/`, karena merupakan state build proyek.
 - `project/third/` atau direktori source lain yang disediakan pengguna.
 - Binary atau file yang kepemilikannya tidak dapat dipastikan sebagai milik
-  instalasi rbot.
+  instalasi satria.
 - Package sistem yang dipasang melalui `apt`, `pacman`, `dnf`, `brew`, atau
   package manager OS lainnya.
 
 ## 3. Prinsip desain
 
-1. **Tanggung jawab terbatas:** rbot mengelola dirinya sendiri, bukan package
+1. **Tanggung jawab terbatas:** satria mengelola dirinya sendiri, bukan package
    sistem atau dependency eksternal.
-2. **Tanpa registry package:** versi rbot diperiksa langsung melalui GitHub
+2. **Tanpa registry package:** versi satria diperiksa langsung melalui GitHub
    Releases API; tidak diperlukan metadata registry tersendiri.
 3. **Kepemilikan eksplisit:** hanya hapus atau ganti resource yang diketahui
-   milik instalasi rbot.
+   milik instalasi satria.
 4. **Aman saat gagal:** kegagalan pemeriksaan versi atau upgrade tidak boleh
    merusak instalasi yang sedang berjalan.
 5. **Non-interaktif aman:** jangan menunggu input pada stdin non-TTY; operasi

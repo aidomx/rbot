@@ -95,10 +95,10 @@ static uint64_t compdbEntryHash(const Config *c, const List *srcs, const char *c
 }
 
 static bool compdbCacheHit(uint64_t fingerprint) {
-  if (!fsFileExists("compile_commands.json") || !fsFileExists(".rbot/compile_commands.cache"))
+  if (!fsFileExists("compile_commands.json") || !fsFileExists(".satria/compile_commands.cache"))
     return false;
 
-  FILE *fp = fopen(".rbot/compile_commands.cache", "r");
+  FILE *fp = fopen(".satria/compile_commands.cache", "r");
   if (!fp) return false;
 
   unsigned long long cached = 0;
@@ -108,27 +108,27 @@ static bool compdbCacheHit(uint64_t fingerprint) {
 }
 
 static void saveCompdbCache(uint64_t fingerprint) {
-  mkdirs(".rbot");
-  FILE *fp = fopen(".rbot/compile_commands.cache.tmp", "w");
+  mkdirs(".satria");
+  FILE *fp = fopen(".satria/compile_commands.cache.tmp", "w");
   if (!fp) return;
   fprintf(fp, "%016llx\n", (unsigned long long)fingerprint);
   fclose(fp);
   /* Rename is intentionally done through the shell-independent stdio/OS
-     fallback already used by rbot's portability layer only where available.
+     fallback already used by satria's portability layer only where available.
      If the atomic replacement is unavailable, the old cache is harmless. */
-  remove(".rbot/compile_commands.cache");
-  rename(".rbot/compile_commands.cache.tmp", ".rbot/compile_commands.cache");
+  remove(".satria/compile_commands.cache");
+  rename(".satria/compile_commands.cache.tmp", ".satria/compile_commands.cache");
 }
 
 /* ============ restore dari blob (optimasi jalur restore) ============
  * compile_commands.json yang hilang (terhapus manual / antar bench run)
  * dulu selalu dirender ulang penuh. Padahal fingerprint yang sama
  * menghasilkan byte JSON yang sama persis (deterministik). Konten json
- * terakhir ikut disimpan sebagai blob .rbot/compile_commands.blob —
+ * terakhir ikut disimpan sebagai blob .satria/compile_commands.blob —
  * restore = fingerprint cocok + salin file, tanpa render ulang. */
 
 static bool compdbCacheFingerprint(uint64_t fingerprint) {
-  FILE *fp = fopen(".rbot/compile_commands.cache", "r");
+  FILE *fp = fopen(".satria/compile_commands.cache", "r");
   if (!fp) return false;
   unsigned long long cached = 0;
   bool ok = fscanf(fp, "%llx", &cached) == 1;
@@ -160,37 +160,37 @@ static bool compdbCopyFile(const char *src, const char *dst) {
 }
 
 static bool compdbRestoreFromBlob(uint64_t fingerprint) {
-  if (!fsFileExists(".rbot/compile_commands.blob")) return false;
+  if (!fsFileExists(".satria/compile_commands.blob")) return false;
   if (!compdbCacheFingerprint(fingerprint)) return false;
-  if (!compdbCopyFile(".rbot/compile_commands.blob", ".rbot/compile_commands.json.tmp"))
+  if (!compdbCopyFile(".satria/compile_commands.blob", ".satria/compile_commands.json.tmp"))
     return false;
   remove("compile_commands.json");
-  if (rename(".rbot/compile_commands.json.tmp", "compile_commands.json") != 0) {
-    fsRemoveFile(".rbot/compile_commands.json.tmp");
+  if (rename(".satria/compile_commands.json.tmp", "compile_commands.json") != 0) {
+    fsRemoveFile(".satria/compile_commands.json.tmp");
     return false;
   }
   return true;
 }
 
 static void saveCompdbBlob(const char *buf, size_t len) {
-  mkdirs(".rbot");
-  FILE *fp = fopen(".rbot/compile_commands.blob.tmp", "wb");
+  mkdirs(".satria");
+  FILE *fp = fopen(".satria/compile_commands.blob.tmp", "wb");
   if (!fp) return;
   size_t wrote = fwrite(buf, 1, len, fp);
   if (wrote != len) {
     fclose(fp);
-    fsRemoveFile(".rbot/compile_commands.blob.tmp");
+    fsRemoveFile(".satria/compile_commands.blob.tmp");
     return;
   }
   if (fclose(fp) != 0) {
-    fsRemoveFile(".rbot/compile_commands.blob.tmp");
+    fsRemoveFile(".satria/compile_commands.blob.tmp");
     return;
   }
 #ifdef _WIN32
-  fsRemoveFile(".rbot/compile_commands.blob");
+  fsRemoveFile(".satria/compile_commands.blob");
 #endif
-  if (rename(".rbot/compile_commands.blob.tmp", ".rbot/compile_commands.blob") != 0)
-    fsRemoveFile(".rbot/compile_commands.blob.tmp");
+  if (rename(".satria/compile_commands.blob.tmp", ".satria/compile_commands.blob") != 0)
+    fsRemoveFile(".satria/compile_commands.blob.tmp");
 }
 
 // ============================================================================
@@ -326,8 +326,8 @@ void writeCompdb(const Config *c, List *srcs) {
  * Satu compile_commands.json mewakili SELURUH workspace: beberapa
  * (Config, srcs) dirender berurutan (topo order proyek) menjadi SATU file
  * di root workspace. Skip-write bila fingerprint gabungan cocok dengan
- * cache (.rbot/compile_commands.cache) — no-op tidak menyentuh disk dan
- * tidak mencetak apa pun; blob (.rbot/compile_commands.blob) dipakai untuk
+ * cache (.satria/compile_commands.cache) — no-op tidak menyentuh disk dan
+ * tidak mencetak apa pun; blob (.satria/compile_commands.blob) dipakai untuk
  * restore tanpa render, sama dengan jalur single-project. */
 
 uint64_t compdbMultiFingerprint(const Config *const *cfgs, List *const *srcs, int count) {

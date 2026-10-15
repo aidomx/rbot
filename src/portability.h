@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_PORTABILITY_H
-#define RBOT_V0_1_0_PORTABILITY_H
+#ifndef SATRIA_V0_1_0_PORTABILITY_H
+#define SATRIA_V0_1_0_PORTABILITY_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -9,12 +9,12 @@
 #include "util.h"
 
 /*
- * portability — lapisan tipis di atas API OS supaya rbot bisa dibangun di
+ * portability — lapisan tipis di atas API OS supaya satria bisa dibangun di
  * Linux/POSIX maupun Windows (MinGW & MSVC). Seluruh panggilan yang
  * POSIX-only (dirent.h, unistd.h, command -v, rm -rf, dst.) dipindahkan ke
  * sini; modul lain cukup memakai API netral di bawah.
  *
- * Konvensi path: rbot secara internal selalu memakai '/' (diterima GCC,
+ * Konvensi path: satria secara internal selalu memakai '/' (diterima GCC,
  * Clang, maupun MSVC di Windows), jadi lapisan ini menormalkan hasil OS
  * (mis. GetCurrentDirectory memberi '\\') lewat pathNormalizeSlash().
  */
@@ -31,12 +31,12 @@ bool probeAvailable(const char *exe);
  * Mode foreground (Buildfile: foreground, default true).
  *
  * foreground=true  : perilaku klasik — child berada di process group yang
- *                    sama dengan rbot; Ctrl+C dari terminal menghentikan
- *                    rbot dan compiler sekaligus (POSIX), sementara di
+ *                    sama dengan satria; Ctrl+C dari terminal menghentikan
+ *                    satria dan compiler sekaligus (POSIX), sementara di
  *                    Windows child selalu dipisah dan diteruskan
  *                    CTRL_BREAK (perilaku lama tetap).
- * foreground=false : rbot memasang handler SIGINT-nya sendiri. Ctrl+C hanya
- *                    sampai ke rbot, lalu diteruskan ke child secara
+ * foreground=false : satria memasang handler SIGINT-nya sendiri. Ctrl+C hanya
+ *                    sampai ke satria, lalu diteruskan ke child secara
  *                    eksplisit. Panggil SEBELUM procRun/procStart.
  */
 bool procSetForeground(bool foreground);
@@ -46,7 +46,7 @@ bool procInterrupted(void);
 
 /* Jalankan command lewat shell OS (sh / cmd.exe); true bila exit 0.
    Return PROC_RUN_INTERRUPTED bila child berhenti karena Ctrl+C yang
-   ditangani rbot (foreground=false). */
+   ditangani satria (foreground=false). */
 #define PROC_RUN_INTERRUPTED (-1)
 bool procRun(const char *cmd);
 
@@ -54,7 +54,7 @@ bool procRun(const char *cmd);
  * Proses paralel (Buildfile: -jN, mirip make).
  * procStart menjalankan command tanpa menunggu; kumpulkan handle-nya lalu
  * panggil procWaitAny sampai selesai. Child paralel selalu di process group
- * terpisah sehingga SIGINT dari rbot terarah per proses.
+ * terpisah sehingga SIGINT dari satria terarah per proses.
  */
 typedef struct {
 #ifdef _WIN32
@@ -136,7 +136,7 @@ bool fsSetCwd(const char *path);
 bool fsMapRead(const char *path, void **outData, size_t *outSize);
 void fsMapClose(void *data, size_t size); /* aman dipanggil dgn data=NULL */
 
-#endif /* RBOT_V0_1_0_PORTABILITY_H */
+#endif /* SATRIA_V0_1_0_PORTABILITY_H */
 
 #ifdef _WIN32
 #define strtok_r strtok_s

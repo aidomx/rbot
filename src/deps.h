@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_DEPS_H
-#define RBOT_V0_1_0_DEPS_H
+#ifndef SATRIA_V0_1_0_DEPS_H
+#define SATRIA_V0_1_0_DEPS_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -9,7 +9,7 @@
 /*
  * deps — pelacak dependensi header untuk build incremental.
  *
- * Tanpa ini, rbot hanya membandingkan mtime object dengan file .c-nya,
+ * Tanpa ini, satria hanya membandingkan mtime object dengan file .c-nya,
  * sehingga mengubah sebuah header tidak pernah memicu kompilasi ulang.
  * Sumber dependensi dua lapis, dipilih per source saat run:
  *   1. file .d dari compiler (flag -MMD -MP, GCC/Clang) — bila tersedia dan
@@ -62,7 +62,7 @@ void depsClosureVisitMany(DepCache *dc, const char *const *srcs, int count,
 /*
  * Verifikasi konten (anti recompile tanpa perubahan isi, mis. setelah
  * `touch`): `true` bila snapshot hash source + seluruh dependensinya dari
- * build sukses terakhir (persist di .rbot/deps.cache) sama dengan isi file
+ * build sukses terakhir (persist di .satria/deps.cache) sama dengan isi file
  * saat ini. Snapshot dibaca sekali lazily; jika file tak dikenal snapshot,
  * dianggap berubah (return false — perilaku aman).
  */
@@ -82,7 +82,7 @@ void depsRecordUpdate(DepCache *dc, const char *src);
  */
 bool depsSnapshotIncomplete(const DepCache *dc);
 
-/* Tulis snapshot ke .rbot/deps.cache (atomik; diam bila gagal). */
+/* Tulis snapshot ke .satria/deps.cache (atomik; diam bila gagal). */
 void depsSave(DepCache *dc);
 
 
@@ -93,4 +93,4 @@ void depsSave(DepCache *dc);
  */
 bool depsLoadDotD(DepCache *dc, const char *src);
 
-#endif /* RBOT_V0_1_0_DEPS_H */
+#endif /* SATRIA_V0_1_0_DEPS_H */

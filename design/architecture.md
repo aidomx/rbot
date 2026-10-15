@@ -1,18 +1,18 @@
-# Arsitektur rbot
+# Arsitektur satria
 
 > REKONSTRUKSI (3 Okt 2026) — dokumen asli hilang bersama penghapusan tak
-> sengaja direktori rbot dan tidak ikut backup. Ditulis ulang dari arsitektur
+> sengaja direktori satria dan tidak ikut backup. Ditulis ulang dari arsitektur
 > kode aktif (`src/`) plus keputusan yang tercatat di sesi kerja. Kode adalah
 > sumber kebenaran bila ada perbedaan.
 
 ## Gambar umum
 
-rbot adalah build tool untuk project C yang dikelola satu file konfigurasi
+satria adalah build tool untuk project C yang dikelola satu file konfigurasi
 deklaratif (`Buildfile`, atau `Buildfile.ws` untuk banyak proyek).
 Satu binary tanpa dependensi runtime; bootstrap build lewat
 `install.sh --dev` (compiler C langsung, tanpa cmake; Windows:
-`install.ps1 --dev`). rbot self-hosting: `./install.sh --dev` lalu
-`./build/bin/rbot` (menulis `bin/rbot`).
+`install.ps1 --dev`). satria self-hosting: `./install.sh --dev` lalu
+`./build/bin/satria` (menulis `bin/satria`).
 
 Target platform: Linux, macOS, Windows (MSVC + MinGW), Termux (native dan
 proot-distro).
@@ -21,7 +21,7 @@ proot-distro).
 
 ```text
 main.c                 dispatcher tipis
-  └─ rbot.c            rbotRun(): parse argv (-f -j -w -xf/-xcf), pilih jalur
+  └─ satria.c            satriaRun(): parse argv (-f -j -w -xf/-xcf), pilih jalur
       └─ commands.c    routing command + Summary akhir
           ├─ uses/     workspace (-w): sintesis Buildfile per proyek,
           │            depends_on, build selektif -w <nama>
@@ -46,7 +46,7 @@ pack-only (tanpa binary) → `cmdsPackOnlyProject`; proyek binary sukses →
 | Berkas | Peran |
 |---|---|
 | main.c | entry point tipis |
-| rbot.c | rbotRun(), rbotVersion() (RBOT_VERSION_EMBEDDED) |
+| satria.c | satriaRun(), satriaVersion() (SATRIA_VERSION_EMBEDDED) |
 | commands.c | routing command, Summary, help |
 | config.c / config.h | parse + finalize + routing key (pack.* → pack/) |
 | compile.c | kompilasi paralel (posix_spawn), link, library |
@@ -64,7 +64,7 @@ pack-only (tanpa binary) → `cmdsPackOnlyProject`; proyek binary sukses →
 | deps/ | deps_core (graf), deps_dotd (parse .d), deps_snapshot (hash konten) |
 | nc/ | nc_parse / nc_expand / nc_convert / nc_util — ninja → Buildfile |
 | pack/ | pack.c (dispatch, template, freshness), pack_config (parsing), pack_tar, pack_deb, pack_sha256 |
-| prof/ | profil fase (RBOT_PROFILE=1 → stderr; timespec_get C11, tanpa syscall) |
+| prof/ | profil fase (SATRIA_PROFILE=1 → stderr; timespec_get C11, tanpa syscall) |
 | port/ | port_fs (fsSetMode/fsGetMode, remove tree), port_proc (spawn proses) |
 | uses/ | alias.c (alias `X as Y`), use.c, workspace.c (mode -w) |
 
@@ -75,11 +75,11 @@ dokumentasi Bahasa Indonesia.
 
 | Lokasi | Isi |
 |---|---|
-| `.rbot/` config cache | Config ter-serialisasi (v6); hit bila input tak berubah |
-| `.rbot/deps.cache` | snapshot hash + edges (`!e`/`!k`) untuk keputusan konten |
-| `.rbot/pack/` | staging packaging (dihapus oleh `clean`; `dist/` tidak) |
-| `.rbot-embed-<n>.tmp` | temp fase embed |
-| `build/version.h` | RBOT_VERSION_EMBEDDED dari `.rbot-version` |
+| `.satria/` config cache | Config ter-serialisasi (v6); hit bila input tak berubah |
+| `.satria/deps.cache` | snapshot hash + edges (`!e`/`!k`) untuk keputusan konten |
+| `.satria/pack/` | staging packaging (dihapus oleh `clean`; `dist/` tidak) |
+| `.satria-embed-<n>.tmp` | temp fase embed |
+| `build/version.h` | SATRIA_VERSION_EMBEDDED dari `.satria-version` |
 
 Aturan penting: no-op tidak menulis apa pun; snapshot deps hanya direkam
 setelah build sukses; pass rekam dilewati pada no-op murni.
@@ -93,18 +93,18 @@ setelah build sukses; pass rekam dilewati pada no-op murni.
 - `stat` per entri direktori → `d_type` dari `readdir`; `mkdir` berulang
   dilewati; mtime dari fase klasifikasi dipakai ulang saat keputusan link.
 - Angka benchmark no-op/proot: lihat README.md § Benchmark.
-- Pengukuran internal memakai profil fase (`RBOT_PROFILE=1`), BUKAN strace —
+- Pengukuran internal memakai profil fase (`SATRIA_PROFILE=1`), BUKAN strace —
   strace tidak aman/terdistorsi baik di proot (ptrace ganda) maupun Android
   native (ptrace di atas seccomp). Temuan 3 Okt 2026: cold workspace ~90%
-  adalah waktu gcc di proot; no-op 0,2 s; rbot ≈ ninja pada cold n=80
+  adalah waktu gcc di proot; no-op 0,2 s; satria ≈ ninja pada cold n=80
   (13,2 s vs 12,8 s). Rincian di `todos/2_10_2026.md`.
 
 ## Lingkungan khusus
 
 ### Termux / Android
-- **NOTICE /tmp**: bila rbot butuh temp dir, wajib cek `uname -o`; Android →
-  `/data/data/com.termux/files/usr/tmp`. Status saat ini: rbot bebas hardcode
-  `/tmp` — staging pack di `.rbot/pack/`, embed temp `.rbot-embed-<n>.tmp`.
+- **NOTICE /tmp**: bila satria butuh temp dir, wajib cek `uname -o`; Android →
+  `/data/data/com.termux/files/usr/tmp`. Status saat ini: satria bebas hardcode
+  `/tmp` — staging pack di `.satria/pack/`, embed temp `.satria-embed-<n>.tmp`.
 
 ### proot-distro
 - Syscall diawasi ptrace → biayanya puluhan kali Linux biasa; setiap fitur
@@ -116,7 +116,7 @@ setelah build sukses; pass rekam dilewati pada no-op murni.
 
 ## Bootstrap & rilis
 
-- `install.sh`: mode default mengunduh `bin/rbot` dari repo; `--dev`
+- `install.sh`: mode default mengunduh `bin/satria` dari repo; `--dev`
   bootstrap build dengan `${CC:-cc}` tanpa cmake. Windows: `install.ps1`
   (hormati `CC`; link `shell32` untuk `fsRemoveTree`/SHFileOperationA di
   MSVC).

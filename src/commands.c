@@ -18,7 +18,7 @@
 #include "util.h"
 
 /*
- * commands — command publik rbot (build/init/help; clean ada di
+ * commands — command publik satria (build/init/help; clean ada di
  * cmds/cmds_state.c). Fase build yang berdiri sendiri dipisah modular:
  *   - cmds/cmds_lib.c   : fase library, kompilasi paralel, header versi.
  *   - cmds/cmds_state.c : fingerprint build, fast no-op snapshot, clean.
@@ -39,12 +39,12 @@ int cmdInit(const char *buildfilePath) {
 
   FILE *fp = fopen(path, "w");
   if (!fp) {
-    fprintf(stderr, "rbot: cannot create %s\n", path);
+    fprintf(stderr, "satria: cannot create %s\n", path);
     return 1;
   }
 
   /* Template minimal: proyek standar (src/ + include/ opsional) cukup
-     `use project` — sisanya konvensi rbot (sources=src, headers=include
+     `use project` — sisanya konvensi satria (sources=src, headers=include
      bila ada, binary = nama folder). Proyek non-standar bebas menambah
      field eksplisit; lihat docs/guide/buildfile.md. */
   fputs("use project\n", fp);
@@ -65,7 +65,7 @@ int cmdInitWorkspace(const char *buildfilePath) {
 
   FILE *fp = fopen(path, "w");
   if (!fp) {
-    fprintf(stderr, "rbot: cannot create %s\n", path);
+    fprintf(stderr, "satria: cannot create %s\n", path);
     return 1;
   }
 
@@ -109,7 +109,7 @@ static bool projectNameValid(const char *s) {
   return true;
 }
 
-/* Nama acak rbot-xxxxxx: /dev/urandom (POSIX) atau rand() (Windows/fallback). */
+/* Nama acak satria-xxxxxx: /dev/urandom (POSIX) atau rand() (Windows/fallback). */
 static void randomProjectName(char *out, size_t n) {
   unsigned char rnd[4] = {0};
   FILE *f = fopen("/dev/urandom", "rb");
@@ -127,16 +127,16 @@ static void randomProjectName(char *out, size_t n) {
   }
   unsigned v = ((unsigned)rnd[0] << 24) | ((unsigned)rnd[1] << 16) | ((unsigned)rnd[2] << 8) |
                (unsigned)rnd[3];
-  snprintf(out, n, "rbot-%06x", v & 0xFFFFFFu);
+  snprintf(out, n, "satria-%06x", v & 0xFFFFFFu);
 }
 
 /* Warna prompt hanya saat stdout terminal; NO_COLOR (standar no-color.org),
-   RBOT_NO_COLOR, dan TERM=dumb mematikan. Di pipe/CI otomatis polos. */
+   SATRIA_NO_COLOR, dan TERM=dumb mematikan. Di pipe/CI otomatis polos. */
 static bool termColorWanted(void) {
   if (!termIsTTY()) return false;
   const char *no = getenv("NO_COLOR");
   if (no && *no) return false;
-  no = getenv("RBOT_NO_COLOR");
+  no = getenv("SATRIA_NO_COLOR");
   if (no && *no) return false;
   const char *term = getenv("TERM");
   if (term && strcmp(term, "dumb") == 0) return false;
@@ -196,7 +196,7 @@ static void upperName(char *dst, size_t n, const char *src) {
 static bool writeNew(const char *path, const char *content) {
   FILE *fp = fopen(path, "w");
   if (!fp) {
-    fprintf(stderr, "rbot: cannot create %s\n", path);
+    fprintf(stderr, "satria: cannot create %s\n", path);
     return false;
   }
   fputs(content, fp);
@@ -211,14 +211,14 @@ int cmdInteractiveInit(void) {
   char stdv[64] = {0}, compv[192] = {0}, flagsv[512] = {0};
   bool wantInclude = false, wantWs = false, langCpp = false;
 
-  printf("> rbot init interaktif - enter memakai default\n\n");
+  printf("> satria init interaktif - enter memakai default\n\n");
 
   if (!askPrompt("Project name? [enter for random name] ", line, sizeof(line))) goto eof;
   copyStr(name, sizeof(name), trim(line));
   if (!name[0]) randomProjectName(name, sizeof(name));
   if (!projectNameValid(name)) {
     fprintf(stderr,
-            "rbot: nama proyek '%s' tidak valid - pakai huruf, angka, '_' atau '-' (maks 63)\n",
+            "satria: nama proyek '%s' tidak valid - pakai huruf, angka, '_' atau '-' (maks 63)\n",
             name);
     return 2;
   }
@@ -238,17 +238,17 @@ int cmdInteractiveInit(void) {
                  sizeof(line)))
     goto eof;
   if (!normalizeList(stdv, sizeof(stdv), line)) {
-    fprintf(stderr, "rbot: nilai std terlalu panjang\n");
+    fprintf(stderr, "satria: nilai std terlalu panjang\n");
     return 2;
   }
   if (!askPrompt("compiler? [enter = auto-detect] ", line, sizeof(line))) goto eof;
   if (!normalizeList(compv, sizeof(compv), line)) {
-    fprintf(stderr, "rbot: nilai compiler terlalu panjang\n");
+    fprintf(stderr, "satria: nilai compiler terlalu panjang\n");
     return 2;
   }
   if (!askPrompt("flags? [enter = default] ", line, sizeof(line))) goto eof;
   if (!normalizeList(flagsv, sizeof(flagsv), line)) {
-    fprintf(stderr, "rbot: nilai flags terlalu panjang\n");
+    fprintf(stderr, "satria: nilai flags terlalu panjang\n");
     return 2;
   }
   if (!askPrompt("Create include/? [y/N] ", line, sizeof(line))) goto eof;
@@ -271,7 +271,7 @@ int cmdInteractiveInit(void) {
     if (!askPrompt("Workspace projects? [enter = app,tool] ", line, sizeof(line))) goto eof;
     char memlist[512];
     if (!normalizeList(memlist, sizeof(memlist), line)) {
-      fprintf(stderr, "rbot: daftar proyek terlalu panjang\n");
+      fprintf(stderr, "satria: daftar proyek terlalu panjang\n");
       return 2;
     }
     if (!memlist[0]) copyStr(memlist, sizeof(memlist), "app,tool");
@@ -283,12 +283,12 @@ int cmdInteractiveInit(void) {
       char *item = trim(save);
       if (*item) {
         if (!projectNameValid(item)) {
-          fprintf(stderr, "rbot: nama proyek '%s' tidak valid - pakai huruf, angka, '_' atau '-'\n",
+          fprintf(stderr, "satria: nama proyek '%s' tidak valid - pakai huruf, angka, '_' atau '-'\n",
                   item);
           return 2;
         }
         if (nn >= 16) {
-          fprintf(stderr, "rbot: init -p mendukung maksimal 16 proyek workspace\n");
+          fprintf(stderr, "satria: init -p mendukung maksimal 16 proyek workspace\n");
           return 2;
         }
         if (strcmp(item, name) != 0) /* proyek utama sudah di daftar */
@@ -306,7 +306,7 @@ int cmdInteractiveInit(void) {
       if (v[0]) {
         if (sscanf(v, "%63s depends %63s", depA, depB) != 2) {
           fprintf(stderr,
-                  "rbot: format depends_on '%s' tidak dipahami - contoh: tool depends app\n", v);
+                  "satria: format depends_on '%s' tidak dipahami - contoh: tool depends app\n", v);
           return 2;
         }
         bool aOk = false, bOk = false;
@@ -316,7 +316,7 @@ int cmdInteractiveInit(void) {
         }
         if (!aOk || !bOk) {
           fprintf(stderr,
-                  "rbot: depends_on '%s depends %s': proyek tidak ada di daftar - "
+                  "satria: depends_on '%s depends %s': proyek tidak ada di daftar - "
                   "tambahkan dulu di Workspace projects\n",
                   depA, depB);
           return 2;
@@ -351,7 +351,7 @@ int cmdInteractiveInit(void) {
       }
     }
     if (conflictPath[0]) {
-      fprintf(stderr, "rbot: %s sudah ada - init dihentikan (tidak ada yang ditimpa)\n",
+      fprintf(stderr, "satria: %s sudah ada - init dihentikan (tidak ada yang ditimpa)\n",
               conflictPath);
       return 1;
     }
@@ -450,7 +450,7 @@ int cmdInteractiveInit(void) {
     }
 
     /* Anggota workspace: folder <nama>/ + src/main.c (tanpa Buildfile —
-       proyek workspace memakai Buildfile hasil sintesis rbot). */
+       proyek workspace memakai Buildfile hasil sintesis satria). */
     for (int i = 1; i < nn; i++) {
       char msrc[MAX_PATH * 2], mdir[MAX_PATH * 2], mbody[512];
       mkdirs(names[i]);
@@ -469,15 +469,15 @@ int cmdInteractiveInit(void) {
 
     if (wantWs) {
       if (!writeNew(WORKSPACE_FILENAME, ws)) return 1;
-      printf("\n> Next      : rbot -w\n");
+      printf("\n> Next      : satria -w\n");
     } else {
-      printf("\n> Next      : cd %s && rbot\n", name);
+      printf("\n> Next      : cd %s && satria\n", name);
     }
   }
   return 0;
 
 eof:
-  fprintf(stderr, "\nrbot: init dibatalkan (EOF)\n");
+  fprintf(stderr, "\nsatria: init dibatalkan (EOF)\n");
   return 1;
 }
 
@@ -489,7 +489,7 @@ int cmdCompdbGenerate(const char *buildfilePath) {
   if (!resolveCompiler(&c)) return 1;
 
   if (!fsSetCwd(c.root)) {
-    fprintf(stderr, "rbot: cannot enter root '%s'\n", c.root);
+    fprintf(stderr, "satria: cannot enter root '%s'\n", c.root);
     return 1;
   }
 
@@ -521,7 +521,7 @@ int cmdCompdbGenerate(const char *buildfilePath) {
   listSort(&srcs); /* urutan entri json = urutan link (reprodusible) */
 
   if (srcs.count == 0) {
-    fprintf(stderr, "rbot: tidak ada source .c/.cpp di sources — tidak ada compdb untuk dibuat\n");
+    fprintf(stderr, "satria: tidak ada source .c/.cpp di sources — tidak ada compdb untuk dibuat\n");
     return 1;
   }
 
@@ -534,7 +534,7 @@ int cmdCompdbGenerate(const char *buildfilePath) {
 
 /* ==================== build ==================== */
 
-/* Build penuh satu proyek — jalur rbot satu-proyek & fase binary workspace. */
+/* Build penuh satu proyek — jalur satria satu-proyek & fase binary workspace. */
 int cmdBuild(int jobs, const char *buildfilePath) {
   return cmdBuildEx(jobs, buildfilePath, false);
 }
@@ -547,8 +547,8 @@ int cmdBuild(int jobs, const char *buildfilePath) {
  * supaya fase lain tinggal memakai hasilnya tanpa men-stat ulang.
  *
  * Kontrol via env (default: satu stat / file — decide membaca plan):
- *   RBOT_DECIDE_FROM_PLAN=0  decide men-stat src+objek sendiri (perilaku lama).
- *   RBOT_STATPLAN_OBS=0      jangan stamp objek saat gather; decide men-stat
+ *   SATRIA_DECIDE_FROM_PLAN=0  decide men-stat src+objek sendiri (perilaku lama).
+ *   SATRIA_STATPLAN_OBS=0      jangan stamp objek saat gather; decide men-stat
  *                            objek sendiri (perilaku lama).
  * Kedua env =0 bersama-sama memulihkan perilaku lama 100%.
  *
@@ -597,7 +597,7 @@ static bool envOff(const char *name) {
 static void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
   int n = srcs->count;
   p->count = n;
-  p->obsObj = !envOff("RBOT_STATPLAN_OBS");
+  p->obsObj = !envOff("SATRIA_STATPLAN_OBS");
   /* +1 menghindari malloc(0) saat n==0 */
   p->path = malloc(sizeof(char *) * (size_t)(n + 1));
   p->srcM = malloc(sizeof(int64_t) * (size_t)(n + 1));
@@ -647,7 +647,7 @@ static void statPlanBuild(StatPlan *p, const Config *c, const List *srcs) {
 
 int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
   /* Fast no-op per fase (miniws): fase binary memakai build.state, fase
-     library workspace memakai build.lib.state — no-op `rbot -w` tidak
+     library workspace memakai build.lib.state — no-op `satria -w` tidak
      membayar loadConfig + fingerprint + decide penuh per proyek. */
   bool fastOk = wsModeActive() ? wsFastStateValid(buildfilePath, libOnly)
                                : cmdsFastStateValid(buildfilePath, libOnly);
@@ -663,15 +663,15 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
 
   /* Mode sinyal: build paralel selalu butuh handler forward SIGINT karena
      tiap compiler ada di process group sendiri (Ctrl+C dari terminal hanya
-     sampai ke rbot). Build serial mengikuti Buildfile: foreground. */
+     sampai ke satria). Build serial mengikuti Buildfile: foreground. */
   procSetForeground(jobs > 1 ? false : c.foreground);
 
   if (!fsDirExists(c.root)) {
-    fprintf(stderr, "rbot: root '%s' is not a directory\n", c.root);
+    fprintf(stderr, "satria: root '%s' is not a directory\n", c.root);
     return 1;
   }
   if (!fsSetCwd(c.root)) {
-    fprintf(stderr, "rbot: cannot enter root '%s'\n", c.root);
+    fprintf(stderr, "satria: cannot enter root '%s'\n", c.root);
     return 1;
   }
 
@@ -680,8 +680,8 @@ int cmdBuildEx(int jobs, const char *buildfilePath, bool libOnly) {
 
 /*
  * cmdsCollectSources — koleksi source .c/.cpp dari Config: entri FILE
- * (mis. hasil `rbot -xf` untuk build.ninja flat) masuk langsung; selain
- * itu dianggap folder dan discan rekursif (walk cache .rbot/ws.src bila
+ * (mis. hasil `satria -xf` untuk build.ninja flat) masuk langsung; selain
+ * itu dianggap folder dan discan rekursif (walk cache .satria/ws.src bila
  * mode workspace aktif — lihat wsModeSet). Urutan hasil = urutan link:
  * .c dan .cpp dihasilkan dua walkDir terpisah per folder root, jadi di-sort
  * ulang jadi satu barisan stabil — baris link reprodusible antar mesin dan
@@ -724,7 +724,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   if (!c.binary) {
     if (c.pack.requested) return cmdsPackOnlyProject(&c);
     if (c.embCount == 0) {
-      fprintf(stderr, "rbot: nothing to build (output.binary = false)\n");
+      fprintf(stderr, "satria: nothing to build (output.binary = false)\n");
       return 1;
     }
     mkdirs(c.outBuildDir);
@@ -739,7 +739,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
       if (!have) anyMissing = true; /* entri hilang = build gagal, bukan sukses sunyi*/
     }
     if (anyMissing) {
-      fprintf(stderr, "rbot: build failed: entri embedded hilang (lihat '(missing)' di atas)\n");
+      fprintf(stderr, "satria: build failed: entri embedded hilang (lihat '(missing)' di atas)\n");
       return 1;
     }
     /* No-op: tidak ada arsip yang dibangun ulang (design/build_report.md). */
@@ -752,14 +752,14 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   cmdsCollectSources(&c, &srcs);
 
   /* One-pass stat plan: stamp source (selalu) + object (default; hilangkan
-   * dengan RBOT_STATPLAN_OBS=0) SEKALI di sini. Konsumen berikutnya memakai
+   * dengan SATRIA_STATPLAN_OBS=0) SEKALI di sini. Konsumen berikutnya memakai
    * hasilnya tanpa stat ulang. */
   StatPlan plan;
   statPlanInit(&plan);
   statPlanBuild(&plan, &c, &srcs);
 
   if (srcs.count == 0) {
-    fprintf(stderr, "rbot: tidak ada source .c/.cpp di sources — proyek standar memakai folder "
+    fprintf(stderr, "satria: tidak ada source .c/.cpp di sources — proyek standar memakai folder "
                     "src/ (atau set sources = ... untuk tata letak lain)\n");
     statPlanFree(&plan);
     return 1;
@@ -818,7 +818,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   }
   if (embHeaderChanged || verHeaderChanged) {
     if (verHeaderChanged)
-      printf("%s Version : .rbot-version changed, recompiling all sources\n", repPrefix());
+      printf("%s Version : .satria-version changed, recompiling all sources\n", repPrefix());
     else
       printf("%s Embedded: config changed, recompiling all sources\n", repPrefix());
     for (int i = 0; i < srcs.count; i++) {
@@ -848,7 +848,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
    *   1. mtime — object usang bila header transitive lebih baru. Murah.
    *   2. konten — bila mtime mengatakan stale (mis. setelah `touch`), hash
    *      isi dibandingkan dengan snapshot build sukses terakhir
-   *      (.rbot/deps.cache). Konten sama => tidak perlu kompilasi ulang.
+   *      (.satria/deps.cache). Konten sama => tidak perlu kompilasi ulang.
    *
    * Edges header diambil dari file .d compiler (flag -MMD, GCC/Clang) —
    * akurat & lengkap; pemindai #include hanya fallback (build pertama,
@@ -861,13 +861,13 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
      sini agar keputusan link (no-op) tidak men-stat ulang semua object. */
   int64_t maxObjM = -1;
   bool anyObjMissing = false;
-  /* Default: decide membaca plan (satu stat / file). RBOT_DECIDE_FROM_PLAN=0
+  /* Default: decide membaca plan (satu stat / file). SATRIA_DECIDE_FROM_PLAN=0
      mengembalikan stat sendiri (perilaku lama). */
-  bool decideFromPlan = !envOff("RBOT_DECIDE_FROM_PLAN");
+  bool decideFromPlan = !envOff("SATRIA_DECIDE_FROM_PLAN");
   for (int i = 0; i < srcs.count; i++) {
     const char *src = srcs.items[i];
     if (!objectPathFor(&c, src, obj, sizeof(obj))) continue;
-    /* Sumber mtime dari plan one-pass; RBOT_DECIDE_FROM_PLAN=0 = stat sendiri.
+    /* Sumber mtime dari plan one-pass; SATRIA_DECIDE_FROM_PLAN=0 = stat sendiri.
        Objek: dari plan bila objek ikut distamp (obsObj), selain itu stat
        sendiri. Semantik -1 (hilang) dipertahankan. */
     int64_t srcM = (decideFromPlan && plan.srcM) ? plan.srcM[i] : cmdsMTimeDecide(src);
@@ -922,7 +922,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
 
       compiled++;
       if (procInterrupted()) {
-        /* foreground=false: child mati karena forward SIGINT dari rbot —
+        /* foreground=false: child mati karena forward SIGINT dari satria —
            hentikan build, jangan lanjut ke source berikutnya. */
         interrupted++;
         if (ok || c.progressErrorAlways)
@@ -940,7 +940,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     /* Jangan percaya fingerprint lama setelah sebagian object mungkin telah
        ditulis dengan konfigurasi baru sebelum interupsi. */
     if (compileConfigChanged) cmdsFingerprintInvalidate();
-    fprintf(stderr, "\nrbot: build interrupted; stopping\n");
+    fprintf(stderr, "\nsatria: build interrupted; stopping\n");
     free(inc);
     free(wf);
     statPlanFree(&plan);
@@ -951,7 +951,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
     /* Sebagian object bisa berhasil dibuat sebelum object lain gagal. Hapus
        state agar build berikutnya tidak melewatkan rebuild konfigurasi penuh. */
     if (compileConfigChanged) cmdsFingerprintInvalidate();
-    fprintf(stderr, "\nrbot: build failed with %d error(s); linking skipped\n", failed);
+    fprintf(stderr, "\nsatria: build failed with %d error(s); linking skipped\n", failed);
     free(inc);
     free(wf);
     statPlanFree(&plan);
@@ -1198,7 +1198,7 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
   free(wf);
 
   if (!linked) {
-    fprintf(stderr, "rbot: link failed\n");
+    fprintf(stderr, "satria: link failed\n");
     statPlanFree(&plan);
     return 1;
   }

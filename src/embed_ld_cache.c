@@ -1,5 +1,5 @@
 /*
- * embed_ld_cache — cache persisten hasil deteksi GNU ld (.rbot/ld.cache).
+ * embed_ld_cache — cache persisten hasil deteksi GNU ld (.satria/ld.cache).
  *
  * ldAvailable() (embed.c) hanya meng-cache hasilnya per proses, jadi
  * setiap run yang membangun proyek ber-`embedded` men-spawn sh + ld lagi
@@ -8,13 +8,13 @@
  * SATU stat ke binary ld hasil resolusi PATH (path + mtime ns + size)
  * untuk memvalidasi — tanpa spawn.
  *
- * Aturan penting: RBOT_NO_LD tidak pernah dibaca di sini — env override
+ * Aturan penting: SATRIA_NO_LD tidak pernah dibaca di sini — env override
  * itu diputuskan embed.c SEBELUM menyentuh cache, sehingga fallback tanpa
- * ld (RBOT_NO_LD=1, dipakai Uji 2 verify-fpic.sh) tetap selalu jalan.
+ * ld (SATRIA_NO_LD=1, dipakai Uji 2 verify-fpic.sh) tetap selalu jalan.
  * Cache juga tidak dipakai di Windows (jalur embed MSVC memakai fallback
  * C-array; lihat embed.h).
  *
- * Format file: "RBOTLD1", version u32, mtime ns (2x u32 LE), size (2x u32
+ * Format file: "SATRIALD1", version u32, mtime ns (2x u32 LE), size (2x u32
  * LE), key (u32 len + bytes), verdict u8. Helper semuanya menulis byte
  * demi byte dengan urutan eksplisit — aman lintas arsitektur/endianness.
  */
@@ -27,9 +27,9 @@
 #include "portability.h"
 #include "util.h"
 
-#define LD_CACHE_MAGIC "RBOTLD1"
+#define LD_CACHE_MAGIC "SATRIALD1"
 #define LD_CACHE_VERSION 1u
-#define LD_CACHE_FILE ".rbot/ld.cache"
+#define LD_CACHE_FILE ".satria/ld.cache"
 
 /* Cap key path di file — path absolut binary ld muat jauh di bawah ini. */
 #define LD_CACHE_KEY_MAX 1024
@@ -185,9 +185,9 @@ void cacheWriteLD(const char *ldPath, bool gnu) {
   long long size = 0;
   if (!fsStampNsSize(ldPath, &mtimeNs, &size) || mtimeNs < 0) return;
 
-  /* .rbot harus ada sebelum file cache bisa ditulis (mkdir satu level,
+  /* .satria harus ada sebelum file cache bisa ditulis (mkdir satu level,
      diam bila sudah ada). */
-  mkdirs(".rbot");
+  mkdirs(".satria");
   char tmp[sizeof(LD_CACHE_FILE) + 8];
   snprintf(tmp, sizeof(tmp), "%s.tmp", LD_CACHE_FILE);
   FILE *fp = fopen(tmp, "wb");

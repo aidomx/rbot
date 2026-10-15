@@ -1,6 +1,6 @@
 # Archives and Embedded Assets
 
-rbot can build archives as workspace artifacts and can embed generated files into another binary/library.
+satria can build archives as workspace artifacts and can embed generated files into another binary/library.
 
 ## Archive source
 

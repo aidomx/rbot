@@ -1,6 +1,6 @@
 #!/bin/sh
 # Embed fallback tanpa `ld -r -b binary` (linker LLD di Termux): array C dari
-# berkas biner, dengan simbol <sym>_start dan <sym>_size seperti embed rbot.
+# berkas biner, dengan simbol <sym>_start dan <sym>_size seperti embed satria.
 # Pemakaian: embed_c.sh <in> <out.c> <sym>
 in=$1; out=$2; sym=$3
 n=$(wc -c < "$in" | tr -d ' ')

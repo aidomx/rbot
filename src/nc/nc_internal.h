@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_NC_INTERNAL_H
-#define RBOT_V0_1_0_NC_INTERNAL_H
+#ifndef SATRIA_V0_1_0_NC_INTERNAL_H
+#define SATRIA_V0_1_0_NC_INTERNAL_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -111,4 +111,4 @@ char *ncExpand(const NcFile *f, const char *tpl, const char *in, const char *out
 /* Parse command hasil ekspansi; true bila edge compile valid (-c src, -o obj). */
 bool ncParseCompile(char *cmd, NcCompile *cc, const char *ninjaDir);
 
-#endif /* RBOT_V0_1_0_NC_INTERNAL_H */
+#endif /* SATRIA_V0_1_0_NC_INTERNAL_H */

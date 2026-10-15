@@ -1,6 +1,6 @@
-# rbot v0.2.2 — Cheatsheet
+# satria v0.2.2 — Cheatsheet
 
-Referensi cepat untuk penggunaan sehari-hari. Berdasarkan dokumentasi `rbot-v0.2.2`; source dipakai untuk memeriksa detail implementasi yang relevan.
+Referensi cepat untuk penggunaan sehari-hari. Berdasarkan dokumentasi `satria-v0.2.2`; source dipakai untuk memeriksa detail implementasi yang relevan.
 
 ---
 
@@ -9,8 +9,8 @@ Referensi cepat untuk penggunaan sehari-hari. Berdasarkan dokumentasi `rbot-v0.2
 ### Build project saat ini
 
 ```bash
-rbot
-rbot -f FILE
+satria
+satria -f FILE
 ```
 
 `-f` memakai Buildfile alternatif.
@@ -18,9 +18,9 @@ rbot -f FILE
 ### Init
 
 ```bash
-rbot init
-rbot init -p
-rbot init -w
+satria init
+satria init -p
+satria init -w
 ```
 
 - `init` → Buildfile project minimal.
@@ -32,36 +32,36 @@ rbot init -w
 ### Jobs
 
 ```bash
-rbot -j
-rbot -j4
-rbot -j1
-rbot --jobs=4
+satria -j
+satria -j4
+satria -j1
+satria --jobs=4
 ```
 
 ### Lainnya
 
 ```bash
-rbot clean
-rbot version
-rbot help
+satria clean
+satria version
+satria help
 ```
 
 ### Workspace
 
 ```bash
-rbot -w
-rbot -w NAME
-rbot -w clean
+satria -w
+satria -w NAME
+satria -w clean
 ```
 
-- `rbot -w` → build workspace dan release yang dideklarasikan.
-- `rbot -w NAME` → build project `NAME` beserta dependency closure; hanya release milik target yang dirilis.
+- `satria -w` → build workspace dan release yang dideklarasikan.
+- `satria -w NAME` → build project `NAME` beserta dependency closure; hanya release milik target yang dirilis.
 
 ### Release CLI
 
 ```bash
-rbot -w release -- name=rupa
-rbot -w release -- name=rupamod target=deb
+satria -w release -- name=rupa
+satria -w release -- name=rupamod target=deb
 ```
 
 `name=` wajib dan project harus ada. `target=` dapat berupa `tar` atau `deb` dan hanya berlaku untuk run tersebut.
@@ -71,7 +71,7 @@ rbot -w release -- name=rupamod target=deb
 Tree v0.2.x memiliki dukungan konversi Ninja, tetapi flag persisnya implementation-specific. Gunakan:
 
 ```bash
-rbot -h
+satria -h
 ```
 
 sebagai sumber kebenaran untuk binary yang terpasang.
@@ -79,11 +79,11 @@ sebagai sumber kebenaran untuk binary yang terpasang.
 ### Profile
 
 ```bash
-rbot profile archive=rupamod
-rbot profile archive=rupamod with=tar,gz      # atau tar,xz / tar,bz2 / tar / none
-rbot profile embed=rupamod                    # dir atau file
-rbot profile library=rupamod with=static,shared
-rbot profile binary=. jobs=4 --report profile.md
+satria profile archive=rupamod
+satria profile archive=rupamod with=tar,gz      # atau tar,xz / tar,bz2 / tar / none
+satria profile embed=rupamod                    # dir atau file
+satria profile library=rupamod with=static,shared
+satria profile binary=. jobs=4 --report profile.md
 ```
 
 - Mengukur biaya operasi tanpa build normal; tidak menyentuh build state.
@@ -110,7 +110,7 @@ project/
 └── src/
 ```
 
-Dengan layout standar, rbot mengisi default secara otomatis.
+Dengan layout standar, satria mengisi default secara otomatis.
 
 ### Default utama
 
@@ -171,7 +171,7 @@ output.compileCommands = auto
 
 # 4. C++
 
-Jika source mengandung `.cpp`, rbot otomatis memakai mode C++ dengan default:
+Jika source mengandung `.cpp`, satria otomatis memakai mode C++ dengan default:
 
 ```text
 std = c++17
@@ -302,7 +302,7 @@ use workspace
 projects = app, tool
 ```
 
-Project standar tidak membutuhkan Buildfile sendiri. rbot mensintesis konfigurasi project dari `Buildfile.ws`.
+Project standar tidak membutuhkan Buildfile sendiri. satria mensintesis konfigurasi project dari `Buildfile.ws`.
 
 Contoh per-project:
 
@@ -378,7 +378,7 @@ Ini menentukan ordering/dependency antar project.
 Build satu project + dependency:
 
 ```bash
-rbot -w ruka
+satria -w ruka
 ```
 
 ---
@@ -465,10 +465,10 @@ Generated embedded header menyediakan informasi/simbol untuk archive, extraction
 Namespace packaging:
 
 ```text
-pack.name = rbot
+pack.name = satria
 pack.version = 0.2.2
 pack.output = dist/{name}-v{version}.tar.gz
-pack.files = bin/rbot:bin/rbot, README.md:share/rbot/README.md
+pack.files = bin/satria:bin/satria, README.md:share/satria/README.md
 ```
 
 Format mapping:
@@ -532,7 +532,7 @@ Deklarasi (key identik `pack.*` karena fase release memakai pack engine):
 release.name = rupa
 release.version = 0.2.2
 release.files = bin/rupa, ../bade/bin/bade, rupadocs
-release.exclude = .git, .rbot, build, node_modules
+release.exclude = .git, .satria, build, node_modules
 release.output = dist/{name}-v{version}.tar.gz
 release.format = deb
 release.checksum = sha256
@@ -545,7 +545,7 @@ Tanpa `release.files`: default = artefak build semua proyek
 Override run via CLI:
 
 ```bash
-rbot -w release -- version=0.2.3,format=tar
+satria -w release -- version=0.2.3,format=tar
 ```
 
 Default format release adalah `tar`.
@@ -557,7 +557,7 @@ Default format release adalah `tar`.
 Full workspace:
 
 ```bash
-rbot -w
+satria -w
 ```
 
 →
@@ -581,22 +581,22 @@ binary pass
 release pass
 ```
 
-`rbot -w` menjalankan seluruh pipeline untuk release yang dideklarasikan.
+`satria -w` menjalankan seluruh pipeline untuk release yang dideklarasikan.
 
-`rbot -w NAME` membangun closure project target dan hanya merilis release yang dimiliki target tersebut.
+`satria -w NAME` membangun closure project target dan hanya merilis release yang dimiliki target tersebut.
 
 ---
 
 # 21. Interactive init
 
 ```bash
-rbot init -p
+satria init -p
 ```
 
 Pertanyaan utama:
 
 ```text
-Project name?        default: random rbot-xxxxxx
+Project name?        default: random satria-xxxxxx
 language?            default: c
 std?                 default: tidak ditulis
 compiler?            default: auto-detect
@@ -642,7 +642,7 @@ myapp/
 Build:
 
 ```bash
-rbot
+satria
 ```
 
 Binary default:
@@ -738,10 +738,10 @@ resmi v0.2.2**, misalnya:
 lib.cdeps
 ```
 
-Jika konfigurasi lama masih diterima oleh rbot, kompatibilitas lama tetap
+Jika konfigurasi lama masih diterima oleh satria, kompatibilitas lama tetap
 boleh digunakan; cheatsheet ini tidak mengubahnya menjadi syntax baru.
 
 ---
 
-**Version:** rbot v0.2.2
+**Version:** satria v0.2.2
 **Purpose:** quick reference, bukan spesifikasi lengkap Buildfile.

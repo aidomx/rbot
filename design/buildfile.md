@@ -11,7 +11,7 @@
    berantai); key tanpa titik mewarisi prefix section terakhir; komentar `//`
    didukung (`#` didukung di semua format).
 
-`rbot` membaca `Buildfile` otomatis; `-f <file>` (atau rapat `-f<file>`) untuk
+`satria` membaca `Buildfile` otomatis; `-f <file>` (atau rapat `-f<file>`) untuk
 nama lain. Path `-f` yang memuat direktori → chdir dulu (gaya `make -C`),
 sources/headers/output tetap relatif terhadap lokasi Buildfile.
 
@@ -31,8 +31,8 @@ sources/headers/output tetap relatif terhadap lokasi Buildfile.
   `embedded.<nama>.archive.dir/name/with.tar/with.ext`. Hasil:
   `build/embedded.h` + object arsip; dua jalur: `ld -r -b binary` (GNU ld)
   vs fallback C array (MSVC/tanpa ld). Freshness arsip otomatis.
-- **versi**: `.rbot-version` → `build/version.h` (RBOT_VERSION_EMBEDDED);
-  mengubah isi memicu kompilasi ulang; `rbot version` selalu benar karena
+- **versi**: `.satria-version` → `build/version.h` (SATRIA_VERSION_EMBEDDED);
+  mengubah isi memicu kompilasi ulang; `satria version` selalu benar karena
   versi ter-embed saat build.
 
 ## Workspace (`use workspace`)
@@ -46,7 +46,7 @@ sources/headers/output tetap relatif terhadap lokasi Buildfile.
 - Sintesis: tiap proyek disintesis menjadi Buildfile dengan prefix
   `projects.<n>.` di-strip; `projects.<n>.pack as pack` menjadi section
   `pack` mandiri di Buildfile sintetis.
-- Eksekusi: `rbot -w` (semua, hormati depends_on) / `rbot -w <nama>`
+- Eksekusi: `satria -w` (semua, hormati depends_on) / `satria -w <nama>`
   (selektif, tetap menarik dependensi).
 
 ## Lintas konfigurasi (`-xf` / `-xcf`)

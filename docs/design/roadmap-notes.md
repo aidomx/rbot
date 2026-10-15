@@ -7,7 +7,7 @@ This document records design ideas discussed after the v0.2.0 source snapshot. T
 Desired output:
 
 ```text
-rbot init
+satria init
 ```
 
 ```text
@@ -17,7 +17,7 @@ use project
 and:
 
 ```text
-rbot init -w
+satria init -w
 ```
 
 ```text
@@ -62,7 +62,7 @@ The build tool should remain independent of those projects even when it is used 
 ## Profiling
 
 Implemented (see the design at `design/profile.md` and the guide at
-`guide/profile.md`): `rbot profile <context>` measures operations without a
+`guide/profile.md`): `satria profile <context>` measures operations without a
 normal build and never mutates build state. Shipped contexts are `archive=`,
 `embed=`, `library=`, and `binary=`; `project=` and `workspace=` remain
 planned until the individual contexts they would aggregate are reliable.

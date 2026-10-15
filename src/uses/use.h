@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_USES_H
-#define RBOT_V0_1_0_USES_H
+#ifndef SATRIA_V0_1_0_USES_H
+#define SATRIA_V0_1_0_USES_H
 
 #include <stdbool.h>
 
@@ -13,7 +13,7 @@
  *   use workspace  — pembungkus banyak project (file: Buildfile.ws;
  *                    lihat uses/workspace.h).
  *   use alias      — nama lama untuk `use project`; tetap diterima demi
- *                    kompatibilitas (Buildfile rbot & template `rbot init`).
+ *                    kompatibilitas (Buildfile satria & template `satria init`).
  *
  * Baris `use` adalah pembungkus namespace itu sendiri: key ditulis LANGSUNG
  * tanpa prefix (`projects.rupa as rupa`, bukan `w.project.rupa`), sama
@@ -39,4 +39,4 @@ UseMode useLineMode(const char *text);
    alias). Dipakai parser untuk membuang barisnya dari aliran konfigurasi. */
 bool useLineKnown(const char *text);
 
-#endif /* RBOT_V0_1_0_USES_H */
+#endif /* SATRIA_V0_1_0_USES_H */

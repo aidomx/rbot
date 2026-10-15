@@ -1,12 +1,12 @@
 /*
- * deps_semhdr — pemeriksaan semantik perubahan header (opt-in: RBOT_HDR_SEM=1).
+ * deps_semhdr — pemeriksaan semantik perubahan header (opt-in: SATRIA_HDR_SEM=1).
  *
  * Konservatif: header yang berubah hanya dimaafkan bila SEMUA perbedaan barisnya
  * adalah prototype fungsi (tanpa struct/enum/typedef/macro/static/inline), dan
  * nama fungsi-nya tidak muncul di TU mana pun dalam subtree dependensi (selain
  * baris prototype itu sendiri). Selain itu, TU dianggap berubah seperti biasa.
  *
- * Salinan header disimpan di .rbot/hdr/<hash-path>.txt saat snapshot direkam,
+ * Salinan header disimpan di .satria/hdr/<hash-path>.txt saat snapshot direkam,
  * sehingga perbedaan dapat dihitung terhadap isi yang terakhir terkompilasi.
  */
 #include <stdbool.h>
@@ -21,7 +21,7 @@
 #define SEM_MAX_NAMES 64
 
 bool depsSemEnabled(void) {
-  const char *e = getenv("RBOT_HDR_SEM");
+  const char *e = getenv("SATRIA_HDR_SEM");
   return e && strcmp(e, "1") == 0;
 }
 

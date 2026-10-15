@@ -50,7 +50,7 @@ static double profNow(void) {
 }
 
 void profInit(void) {
-  const char *e = getenv("RBOT_PROFILE");
+  const char *e = getenv("SATRIA_PROFILE");
   g_on = e && *e && strcmp(e, "0") != 0;
   g_n = 0;
 }
@@ -91,7 +91,7 @@ void profReport(void) {
 
 /*
  * Implementasi sesi (lihat prof.h). Tidak memakai g_on: command profile
- * selalu mengukur, terlepas dari RBOT_PROFILE. PROF_MAX fase cukup untuk
+ * selalu mengukur, terlepas dari SATRIA_PROFILE. PROF_MAX fase cukup untuk
  * context saat ini (<= 5 fase per context); fase melebihi kapasitas
  * dibuang senyap — jumlah context kecil dan tertib.
  */

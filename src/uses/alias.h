@@ -1,5 +1,5 @@
-#ifndef RBOT_V0_1_0_USES_ALIAS_H
-#define RBOT_V0_1_0_USES_ALIAS_H
+#ifndef SATRIA_V0_1_0_USES_ALIAS_H
+#define SATRIA_V0_1_0_USES_ALIAS_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -37,4 +37,4 @@ void aliasResolve(const List *l, char *key, size_t cap);
    baris memang berisi " as ". */
 bool aliasLineAdd(List *l, char *text);
 
-#endif /* RBOT_V0_1_0_USES_ALIAS_H */
+#endif /* SATRIA_V0_1_0_USES_ALIAS_H */

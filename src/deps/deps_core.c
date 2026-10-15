@@ -322,7 +322,7 @@ void depParseNodeIfNeeded(DepCache *dc, int idx) {
   DepNode *node = &dc->nodes[idx];
 
   /* mtime sudah diambil tepat sekali saat node dibuat (depNodeAdd) — file
-     tidak bisa berubah di tengah satu run rbot, jadi stat ulang di sini
+     tidak bisa berubah di tengah satu run satria, jadi stat ulang di sini
      (dan di depsLoadDotD) hanya pemborosan syscall, mahal di proot. */
   if (node->parsed) return;
   node->parsed = true;

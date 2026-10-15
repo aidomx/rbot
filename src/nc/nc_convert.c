@@ -53,7 +53,7 @@ static bool ncInList(const char *s, const char **list) {
   return false;
 }
 
-/* Output biner EXE: "bin/rupa" / "rbot.exe" -> "rupa" (isi buf), NULL bila
+/* Output biner EXE: "bin/rupa" / "satria.exe" -> "rupa" (isi buf), NULL bila
    bukan bentuk itu (arsip .tar.gz, library lib*.a/.so, file .c/.o, dst). */
 static const char *ncBinBase(const char *out, char *buf, size_t n) {
   const char *slash = strrchr(out, '/');
@@ -131,7 +131,7 @@ static void ncScanLibTokens(const NcFile *f, const char *s, int depth, NcList *o
 }
 
 /* Chain embedded generator: arsip (.tar/.gz) -> file sumber yang DIHASILKAN
-   (.c) -> object-nya. rbot punya primitif setara (embedded.<name>.src /
+   (.c) -> object-nya. satria punya primitif setara (embedded.<name>.src /
    .with.tar/.with.ext / .dir / .name) yang menghasilkan object yang sama,
    jadi chain seperti itu ditranslasi alih-alih dianggap source biasa. */
 static bool ncLinkInHas(NcFile *f, const char *path);
@@ -267,7 +267,7 @@ bool ninjaToBuildfile(const char *ninjaPath, const char *outPath, char *err, siz
     if (!r || !r->command || !e->in) continue;
     if (!strstr(r->command, "-c")) continue; /* link/arsip: bukan source */
     /* Source yang DIHASILKAN generator (mis. build/x.c dari arsip) & object
-       embed-nya: tidak ada di tree source — ditangani embedded rbot. */
+       embed-nya: tidak ada di tree source — ditangani embedded satria. */
     if (ncEdgeInEmbeddedChain(&f, i, &embFiles)) continue;
 
     /* include edge: path -I dibuat relatif sebelum substitusi */
@@ -370,7 +370,7 @@ bool ninjaToBuildfile(const char *ninjaPath, const char *outPath, char *err, siz
   fprintf(out, "clean as c\noutput as o\n");
   if (libraries.count) fprintf(out, "library as lib\n");
   fprintf(out, "\n");
-  fprintf(out, "# Dikonversi otomatis dari %s oleh `rbot -xf`.\n\n", ninjaPath);
+  fprintf(out, "# Dikonversi otomatis dari %s oleh `satria -xf`.\n\n", ninjaPath);
   fprintf(out, "root = .\n\n");
   if (strcmp(root, ".") != 0) {
     fprintf(out, "sources = %s\n\n", root);
@@ -383,7 +383,7 @@ bool ninjaToBuildfile(const char *ninjaPath, const char *outPath, char *err, siz
   fprintf(out, "flags =");
   for (int i = 0; i < allFlags.count; i++)
     fprintf(out, "%s %s", i ? "," : "", allFlags.items[i]);
-  fprintf(out, "%s MMD, MP # pelacakan header rbot\n\n", allFlags.count ? "," : "");
+  fprintf(out, "%s MMD, MP # pelacakan header satria\n\n", allFlags.count ? "," : "");
   fprintf(out, "std = %s\n\n", std[0] ? std : "gnu11");
   if (allIncs.count) {
     fprintf(out, "headers =");
@@ -461,7 +461,7 @@ bool ninjaToBuildfile(const char *ninjaPath, const char *outPath, char *err, siz
     fprintf(out, "embedded.%s.src = %s\n", name, arc->in);
     /* Arsip di build/ — bukan di dalam src-nya sendiri (tar: "file changed
        as we read it" bila output ikut terbaca), dan ikut bersih saat
-       `rbot clean`. */
+       `satria clean`. */
     fprintf(out, "embedded.%s.dir = build\n", name);
     fprintf(out, "embedded.%s.with = tar, gz\n", name);
   }

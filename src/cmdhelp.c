@@ -51,7 +51,7 @@ static bool cmdExeDir(char *buf, size_t n) {
 }
 
 static bool cmdLoadText(char *buf, size_t n) {
-  const char *env = getenv("RBOT_CMD");
+  const char *env = getenv("SATRIA_CMD");
   if (env && cmdReadFile(env, buf, n)) return true;
   if (cmdReadFile("src/cmd.txt", buf, n)) return true;
   char base[1024];
@@ -61,7 +61,7 @@ static bool cmdLoadText(char *buf, size_t n) {
     if (cmdReadFile(path, buf, n)) return true;
     snprintf(path, sizeof(path), "%s/cmd.txt", base);
     if (cmdReadFile(path, buf, n)) return true;
-    snprintf(path, sizeof(path), "%s/../share/rbot/cmd.txt", base);
+    snprintf(path, sizeof(path), "%s/../share/satria/cmd.txt", base);
     if (cmdReadFile(path, buf, n)) return true;
   }
   return false;
@@ -101,11 +101,11 @@ static bool helpPrintSection(const char *name) {
   static char text[CMD_TXT_MAX];
   if (!cmdLoadText(text, sizeof(text))) {
     /* Fallback minimal bila cmd.txt tidak ditemukan di semua jalur
-       (mis. binary terpasang tanpa file), agar `rbot help` tidak
+       (mis. binary terpasang tanpa file), agar `satria help` tidak
        pernah kosong. */
     if (strcmp(name, "help") == 0) {
-      printf("Rbot - A simple builder for you\n\n");
-      printf("> rbot [-f <file>] [-jN] <command>\n\n");
+      printf("Satria - A simple builder for you\n\n");
+      printf("> satria [-f <file>] [-jN] <command>\n\n");
       printf("(no command)  build project from Buildfile\n");
       printf("init          create a minimal Buildfile\n");
       printf("clean         remove build artifacts\n");
@@ -115,7 +115,7 @@ static bool helpPrintSection(const char *name) {
       printf("              init, clean, release, compdb, ninja)\n");
       printf("version       show version\n");
       fprintf(stderr,
-              "rbot: cmd.txt tidak ditemukan — set $RBOT_CMD atau jalankan dari repo\n");
+              "satria: cmd.txt tidak ditemukan — set $SATRIA_CMD atau jalankan dari repo\n");
       return true;
     }
     return false;

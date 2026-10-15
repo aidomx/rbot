@@ -1,11 +1,11 @@
 # Workspace
 
-A workspace groups multiple rbot projects under one top-level Buildfile.
+A workspace groups multiple satria projects under one top-level Buildfile.
 
 ## Initialization
 
 ```bash
-rbot init -w
+satria init -w
 ```
 
 ## Basic form
@@ -21,7 +21,7 @@ projects = app, tool
 Each project follows the standard project convention (see
 [Buildfile](buildfile.md)): a folder `<name>/` under the workspace root
 containing `src/` and optionally `include/`. The projects need no
-Buildfile of their own — rbot synthesizes one per project from the
+Buildfile of their own — satria synthesizes one per project from the
 workspace settings, with the binary named after the project. Common
 settings (`flags`, `std`, ...) declared at the workspace level apply to
 every project.
@@ -62,20 +62,20 @@ and are not rebuilt.
 ## Build commands
 
 ```bash
-rbot -w
+satria -w
 ```
 
 Build all projects in the workspace.
 
 ```bash
-rbot -w rupa
+satria -w rupa
 ```
 
 Build a named project and the dependencies needed by it.
 
 ```bash
-rbot -w release -- name=rupa
-cd ../ruka && rbot -w clean
+satria -w release -- name=rupa
+cd ../ruka && satria -w clean
 ```
 
 Release a single project (see [Releases](releases.md)); `clean` works per
@@ -150,7 +150,7 @@ headers = include, build, I.
 headers.internal = ../library
 ```
 
-rbot then tracks files in that folder as build inputs (editing one rebuilds every
+satria then tracks files in that folder as build inputs (editing one rebuilds every
 object that includes it, and a touch with unchanged content rebuilds nothing), but
 does not add the folder to the compiler's include path.
 
@@ -159,4 +159,4 @@ does not add the folder to the compiler's include path.
 A workspace can also declare distribution units — see
 [Releases](releases.md). In short: `releases = ...` names the projects whose
 artifacts get packaged into the workspace-level `dist/release/`, and
-`rbot -w release -- name=<project>` packages a release straight from the CLI.
+`satria -w release -- name=<project>` packages a release straight from the CLI.
