@@ -4,6 +4,7 @@ tool_cmd() {
   case $1 in
     satria) "$SATRIA" $SATRIA_ARGS -j"$NPROC" -w ;;
     ninja) ninja -j"$NPROC" ;;
+    cmake) cmake --build .cmake-build --parallel "$NPROC" ;;
     make) make -j"$NPROC" ;;
   esac
 }
@@ -16,6 +17,7 @@ sel_cmd() { # build selektif cakupan core
   case $1 in
     satria) "$SATRIA" $SATRIA_ARGS -j"$NPROC" -w core ;;
     ninja) ninja -j"$NPROC" $SEL_TARGETS ;;
+    cmake) cmake --build .cmake-build --parallel "$NPROC" ;;
     make) make -j"$NPROC" $SEL_TARGETS ;;
   esac
 }
@@ -23,6 +25,7 @@ dep_cmd() { # build selektif cakupan bade
   case $1 in
     satria) "$SATRIA" $SATRIA_ARGS -j"$NPROC" -w bade ;;
     ninja) ninja -j"$NPROC" $SEL_TARGETS ;;
+    cmake) cmake --build .cmake-build --parallel "$NPROC" ;;
     make) make -j"$NPROC" $SEL_TARGETS ;;
   esac
 }
@@ -44,6 +47,7 @@ rel_cmd() { # release terpisah: tar + checksum (docs/guide/releases.md)
 build_full() {
   case $1 in
     satria) "$SATRIA" $SATRIA_ARGS -j"$NPROC" -w ;;
+    cmake) cmake -S . -B .cmake-build -G Ninja -DCMAKE_C_COMPILER="$WRAPDIR/gcc" >/dev/null && tool_cmd cmake ;;
     *) tool_cmd "$1" ;;
   esac
 }

@@ -42,7 +42,7 @@ reset_all() {
   # workspace_v1.md); sisanya layout nested ninja/make + state satria.
   (cd "$WS" && rm -rf core/build core/bin bade/build bade/bin \
     rupamod/build rupamod/modules modules .satria core/lib bade/lib .ninja_log .ninja_deps \
-    build bin lib dist)
+    build bin lib dist .cmake-build)
 }
 
 ARTIFACT_WARNED=0
@@ -82,16 +82,21 @@ prime_gate() {
   local archive="$WS/modules/rupa_modules.tar" f list="$OUTDIR/.gate.list"
   # Path keluaran per tool: satria root-centric (bin/, lib/, build/<proyek>/
   # di root workspace — design/workspace_v1.md); ninja/make layout nested.
-  local rupa_bin bade_bin core_so bade_so core_main core_a bade_a
+  local rupa_bin bade_bin core_so bade_so core_main bade_main core_a bade_a
   case $1 in
     satria)
       rupa_bin="bin/rupa"; bade_bin="bin/bade"
       core_so="lib/libcore.so"; bade_so="lib/libbade.so"
-      core_main="build/core/main.o"; core_a="lib/libcore.a"; bade_a="lib/libbade.a" ;;
+      core_main="build/core/main.o"; bade_main="build/bade/main.o"; core_a="lib/libcore.a"; bade_a="lib/libbade.a" ;;
+    cmake)
+      rupa_bin="core/bin/rupa"; bade_bin="bade/bin/bade"
+      core_so="core/lib/libcore.so"; bade_so="bade/lib/libbade.so"
+      core_main=".cmake-build/CMakeFiles/rupa.dir/core/src/main.c.o"; bade_main=".cmake-build/CMakeFiles/bade.dir/bade/src/main.c.o"
+      core_a="core/build/libcore.a"; bade_a="bade/build/libbade.a" ;;
     *)
       rupa_bin="core/bin/rupa"; bade_bin="bade/bin/bade"
       core_so="core/lib/libcore.so"; bade_so="bade/lib/libbade.so"
-      core_main="core/build/main.o"; core_a="core/build/libcore.a"; bade_a="bade/build/libbade.a" ;;
+      core_main="core/build/main.o"; bade_main="bade/build/main.o"; core_a="core/build/libcore.a"; bade_a="bade/build/libbade.a" ;;
   esac
   [ -s "$archive" ] || { echo "  ✗ $1: archive tidak ditemukan: $archive" >&2; return 1; }
   tar -tf "$archive" > "$list" 2> /dev/null
@@ -121,7 +126,7 @@ prime_gate() {
   fi
   local no_group_core=0 no_group_bade=0
   (cd "$WS" && gcc "$core_main" "$core_a" "$bade_a" -o "$OUTDIR/.nogroup-core") >/dev/null 2>&1 || no_group_core=1
-  (cd "$WS" && gcc "$WS/bade/build/main.o" "$bade_a" "$core_a" -o "$OUTDIR/.nogroup-bade") >/dev/null 2>&1 || no_group_bade=1
+  (cd "$WS" && gcc "$WS/$bade_main" "$bade_a" "$core_a" -o "$OUTDIR/.nogroup-bade") >/dev/null 2>&1 || no_group_bade=1
   if (( no_group_core == 0 && no_group_bade == 0 )); then
     echo "  ✗ $1: circular semu (kedua link tanpa group berhasil)" >&2
     return 1

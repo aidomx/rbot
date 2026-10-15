@@ -43,20 +43,20 @@ set -uo pipefail
 }
 
 # ---------------------------- konfigurasi ----------------------------------
-NSRC=80                     # -n : jumlah source per proyek
-NHEAD=20                    # -H : jumlah header berantai per proyek
-NMOD=40                     # -m : jumlah file .rp di rupamod
-NRUN=5                      # -r : pengulangan per skenario (median)
-SATRIA=bin/satria               # -b : binary satria
+NSRC=80                       # -n : jumlah source per proyek
+NHEAD=20                      # -H : jumlah header berantai per proyek
+NMOD=40                       # -m : jumlah file .rp di rupamod
+NRUN=5                        # -r : pengulangan per skenario (median)
+SATRIA=bin/satria             # -b : binary satria
 SATRIA_ARGS=""                # -a : argumen tambahan untuk satria
-COMPILERS="gcc"             # -c : nilai 'compiler =' di Buildfile.ws
-KEEP=0                      # -k : jangan hapus workspace di akhir
-ONLY=""                     # -s : subset skenario
+COMPILERS="gcc"               # -c : nilai 'compiler =' di Buildfile.ws
+KEEP=0                        # -k : jangan hapus workspace di akhir
+ONLY=""                       # -s : subset skenario
 TOOLS_OPT="satria,ninja,make" # -t : subset tool pembanding
-OUTDIR=""                   # -o : direktori kerja
+OUTDIR=""                     # -o : direktori kerja
 NPROC=$(nproc 2> /dev/null || echo 4)
-MUT_DELAY=0 # -d : jeda (detik) sebelum tiap edit
-RUN_DELAY=0 # -D : jeda (detik) sebelum tiap pengukuran
+MUT_DELAY=0       # -d : jeda (detik) sebelum tiap edit
+RUN_DELAY=0       # -D : jeda (detik) sebelum tiap pengukuran
 RUN_ORDER=grouped # -O : grouped atau abba (rotasi urutan tool)
 
 usage() {
@@ -92,14 +92,25 @@ opt_uint n "$NSRC" 1
 opt_uint H "$NHEAD" 1
 opt_uint m "$NMOD" 1
 opt_uint r "$NRUN" 1
-case ${BENCH_EMBED:-} in ""|ld|carray) ;; *) echo "BENCH_EMBED harus ld atau carray" >&2; exit 2 ;; esac
+case ${BENCH_EMBED:-} in "" | ld | carray) ;; *)
+  echo "BENCH_EMBED harus ld atau carray" >&2
+  exit 2
+  ;;
+esac
 [[ $MUT_DELAY =~ ^[0-9]+([.][0-9]+)?$ ]] || {
   echo "opsi -d butuh angka detik non-negatif (nilai '$MUT_DELAY')" >&2
   exit 2
 }
 
-[[ $RUN_DELAY =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "opsi -D butuh detik non-negatif" >&2; exit 2; }
-case "$RUN_ORDER" in grouped|abba) ;; *) echo "opsi -O: grouped atau abba" >&2; exit 2 ;; esac
+[[ $RUN_DELAY =~ ^[0-9]+([.][0-9]+)?$ ]] || {
+  echo "opsi -D butuh detik non-negatif" >&2
+  exit 2
+}
+case "$RUN_ORDER" in grouped | abba) ;; *)
+  echo "opsi -O: grouped atau abba" >&2
+  exit 2
+  ;;
+esac
 
 [ -x "$SATRIA" ] || {
   echo "satria tidak ditemukan/dieksekusi: $SATRIA" >&2
@@ -108,18 +119,23 @@ case "$RUN_ORDER" in grouped|abba) ;; *) echo "opsi -O: grouped atau abba" >&2; 
 SATRIA=$(cd "$(dirname "$SATRIA")" && pwd)/$(basename "$SATRIA")
 IFS=, read -r -a TOOLS <<< "$TOOLS_OPT"
 for t in "${TOOLS[@]}"; do
-  case $t in satria | ninja | make) ;; *)
+  case $t in cmake | satria | ninja | make) ;; *)
     echo "tool tidak dikenal: $t" >&2
     exit 1
     ;;
   esac
 done
-for t in gcc tar ar $(printf '%s\n' "${TOOLS[@]}" | grep -vx satria); do
+for t in gcc tar ar $(printf '%s\n' "${TOOLS[@]}" | grep -vE '^(satria|cmake)$'); do
   command -v "$t" > /dev/null 2>&1 || {
     echo "tool wajib tidak ada: $t" >&2
     exit 1
   }
 done
+if [[ " ${TOOLS[*]} " == *" cmake "* ]]; then
+  for t in cmake ninja; do
+    command -v "$t" > /dev/null 2>&1 || { echo "tool wajib tidak ada: $t" >&2; exit 1; }
+  done
+fi
 
 # ---------------------------- strace (opsional) ----------------------------
 # strace memakai ptrace yang bentrok dengan proot (juga ptrace/seccomp) dan
@@ -165,6 +181,7 @@ declare -A VER
 VER_GCC=$(gcc -dumpfullversion 2> /dev/null || gcc -dumpversion 2> /dev/null)
 CC_NAME=gcc
 gcc --version 2> /dev/null | head -1 | grep -qi clang && CC_NAME=clang
+command -v cmake > /dev/null 2>&1 && VER[cmake]=$(cmake --version 2>&1 | first_ver)
 command -v ninja > /dev/null 2>&1 && VER[ninja]=$(ninja --version 2>&1 | first_ver)
 command -v make > /dev/null 2>&1 && VER[make]=$(make --version 2>&1 | first_ver)
 VER[satria]=$(satria_id)
@@ -185,7 +202,10 @@ echo 'label,scenario,rc,ms,obj,arc,lib,bin,cc,eobj,earc,elib,ebin,ecc,miss' > "$
 echo 'tool,scenario,run,rank,percent,seconds,usecs_per_call,calls,errors,syscall' > "$SYSCALL_CSV"
 
 ws_source() { # ws_source <modul>: muat bench/ws/<modul> di shell ini
-  [ -r "$WS_LIB/$1" ] || { echo "modul tidak ditemukan: $WS_LIB/$1" >&2; exit 1; }
+  [ -r "$WS_LIB/$1" ] || {
+    echo "modul tidak ditemukan: $WS_LIB/$1" >&2
+    exit 1
+  }
   # shellcheck source=/dev/null
   source "$WS_LIB/$1"
 }
@@ -224,7 +244,13 @@ echo "${C_BLD}[Execution Stream]${C_RST}"
 TOTAL=0
 for s in cold noop leaf bade mod touch hedit sel dep libtouch libhdr strace; do
   [ "$s" = strace ] && [ "$HAVE_STRACE" != 1 ] && continue # tidak dihitung bila dilewati
-  have_scenario "$s" && TOTAL=$((TOTAL + ${#TOOLS[@]} * NRUN))
+  have_scenario "$s" && {
+    if [ "$s" = strace ]; then
+      TOTAL=$((TOTAL + ${#TOOLS[@]}))
+    else
+      TOTAL=$((TOTAL + ${#TOOLS[@]} * NRUN))
+    fi
+  }
 done
 have_scenario rel && case " ${TOOLS[*]} " in *" satria "*) TOTAL=$((TOTAL + NRUN)) ;; esac
 [ "$TOTAL" -gt 0 ] || TOTAL=1

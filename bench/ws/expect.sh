@@ -24,7 +24,11 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
   EXP_OBJ=-1 EXP_ARC=-1 EXP_LIB=-1 EXP_BIN=-1 EXP_CC=-1
   case $s in
     cold)
-      EXP_OBJ=$EXPECT_OBJ EXP_ARC=1 EXP_LIB=4 EXP_BIN=2 EXP_CC=$((EXPECT_CC + $(embed_extra)))
+      # CMake melakukan compiler identification/probe saat configure cold.
+      # Probe itu pekerjaan nyata, bukan kompilasi source workspace.
+      local cmake_probe=0
+      [ "$k" = cmake ] && cmake_probe=1
+      EXP_OBJ=$EXPECT_OBJ EXP_ARC=1 EXP_LIB=4 EXP_BIN=2 EXP_CC=$((EXPECT_CC + $(embed_extra) + cmake_probe))
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
       exp_chk lib "$l" "$EXP_LIB"

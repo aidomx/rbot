@@ -144,6 +144,68 @@ EOF
     echo "core.library.cdeps = bade"
   } > "$WS/Buildfile.ws"
 
+  # CMake idiomatis, mengikuti tests/rupaws/CMakeLists.txt:
+  # CMake sendiri melakukan discovery, compile, archive dan link.
+  cat > "$WS/CMakeLists.txt" <<'CMAKE_EOF'
+cmake_minimum_required(VERSION 3.20)
+project(wsbench C)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_EXTENSIONS ON)
+add_compile_options(-Wall -Wextra -MMD -MP -fPIC)
+include_directories("${CMAKE_SOURCE_DIR}/include")
+file(GLOB_RECURSE CORE_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/core/src/*.c")
+file(GLOB_RECURSE BADE_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/bade/src/*.c")
+list(REMOVE_ITEM CORE_SRC "${CMAKE_SOURCE_DIR}/core/src/main.c")
+list(REMOVE_ITEM BADE_SRC "${CMAKE_SOURCE_DIR}/bade/src/main.c")
+file(GLOB_RECURSE MOD_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/rupamod/*.rp")
+set(ARCHIVE "${CMAKE_SOURCE_DIR}/modules/rupa_modules.tar")
+add_custom_command(OUTPUT "${ARCHIVE}"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/modules"
+  COMMAND tar -cf "${ARCHIVE}" -C "${CMAKE_SOURCE_DIR}/rupamod"
+    --exclude=build --exclude=dist --exclude=LICENSE
+    --exclude=README.md --exclude=self_archive .
+  DEPENDS ${MOD_SRC} VERBATIM)
+set(EMBED "${CMAKE_CURRENT_BINARY_DIR}/modules/rupa_modules.o")
+if("@EMBED_MODE@" STREQUAL "carray")
+  add_custom_command(OUTPUT "${EMBED}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/modules"
+    COMMAND sh "@WS_LIB@/embed_c.sh" "${ARCHIVE}" "${EMBED}.c" _binary_modules_rupa_modules_tar
+    COMMAND gcc -c -fPIC -o "${EMBED}" "${EMBED}.c"
+    DEPENDS "${ARCHIVE}" VERBATIM)
+else()
+  add_custom_command(OUTPUT "${EMBED}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/modules"
+    COMMAND ld -r -b binary -o "${EMBED}" modules/rupa_modules.tar
+    DEPENDS "${ARCHIVE}" WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" VERBATIM)
+endif()
+set_source_files_properties("${EMBED}" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+add_library(core_obj OBJECT ${CORE_SRC})
+add_library(bade_obj OBJECT ${BADE_SRC})
+set_target_properties(core_obj bade_obj PROPERTIES POSITION_INDEPENDENT_CODE ON)
+add_library(core_static STATIC $<TARGET_OBJECTS:core_obj>)
+add_library(bade_static STATIC $<TARGET_OBJECTS:bade_obj> "${EMBED}")
+add_library(core_shared SHARED $<TARGET_OBJECTS:core_obj>)
+add_library(bade_shared SHARED $<TARGET_OBJECTS:bade_obj> "${EMBED}")
+set_target_properties(core_static PROPERTIES OUTPUT_NAME core
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/core/build")
+set_target_properties(bade_static PROPERTIES OUTPUT_NAME bade
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bade/build")
+set_target_properties(core_shared PROPERTIES OUTPUT_NAME core
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/core/lib")
+set_target_properties(bade_shared PROPERTIES OUTPUT_NAME bade
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bade/lib")
+# Simbol sirkular nyata: kedua executable harus menggunakan archive group.
+add_executable(rupa core/src/main.c)
+add_executable(bade bade/src/main.c)
+set_target_properties(rupa PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/core/bin")
+set_target_properties(bade PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bade/bin")
+foreach(t IN ITEMS rupa bade)
+  target_link_options(${t} PRIVATE "LINKER:--undefined=_binary_modules_rupa_modules_tar_start")
+  target_link_libraries(${t} PRIVATE -Wl,--start-group core_static bade_static -Wl,--end-group)
+endforeach()
+CMAKE_EOF
+  sed -i "s|@EMBED_MODE@|$EMBED_MODE|g; s|@WS_LIB@|$WS_LIB|g" "$WS/CMakeLists.txt"
+
   # ---- pembanding: build.ninja (FAIR: Static Libs + Circular Deps) ----
   {
     echo "cflags = -Wall -Wextra -fPIC -std=gnu11 -Iinclude"

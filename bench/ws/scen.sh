@@ -70,7 +70,7 @@ s_strace() {
   local k r report total_sec total_calls total_err rank
   local pct sec usecs calls errs syscall
   for k in "${TOOLS[@]}"; do
-    for ((r = 1; r <= NRUN; r++)); do
+    for ((r = 1; r <= 1; r++)); do
       reset_all
       CUR="strace/$k#$r"
       draw_progress
@@ -80,6 +80,8 @@ s_strace() {
         tcmd=("$SATRIA" $SATRIA_ARGS -j"$NPROC" -w)
       elif [ "$k" = ninja ]; then
         tcmd=(ninja -j"$NPROC")
+      elif [ "$k" = cmake ]; then
+        tcmd=(cmake --build .cmake-build --parallel "$NPROC")
       else tcmd=(make -j"$NPROC"); fi
       (cd "$WS" && strace -c -f -o "$report" "${tcmd[@]}") > /dev/null 2>> "$ERRLOG"
       total_sec=$(awk '$NF == "total" { print $2; exit }' "$report")
