@@ -7,15 +7,14 @@ on:
         description: "Benchmark tools (comma-separated: satria,ninja,make)"
         type: choice
         required: true
-        default: satria,ninja
+        default: cmake,satria
         options:
+          - cmake
           - satria
-          - ninja
           - make
-          - satria,ninja
+          - cmake,satria
           - satria,make
-          - ninja,make
-          - satria,ninja,make
+          - cmake,make,satria
       sources:
         description: "C sources per project (core and bade)"
         type: number
@@ -69,7 +68,13 @@ jobs:
       - name: Install benchmark dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends build-essential ninja-build make time
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build make time
+
+      # Setup Node.js 24 untuk environment
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
 
       - name: Bootstrap satria
         run: |
@@ -86,6 +91,7 @@ jobs:
             free -h
             df -h .
             gcc --version | head -1
+            cmake --version
             ninja --version
             make --version | head -1
             build/bin/satria version || true
