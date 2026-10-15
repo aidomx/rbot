@@ -79,7 +79,7 @@ s_strace() {
       if [ "$k" = satria ]; then
         tcmd=("$SATRIA" $SATRIA_ARGS -j"$NPROC" -w)
       elif [ "$k" = ninja ]; then
-        tcmd=(ninja)
+        tcmd=(ninja -j"$NPROC")
       else tcmd=(make -j"$NPROC"); fi
       (cd "$WS" && strace -c -f -o "$report" "${tcmd[@]}") > /dev/null 2>> "$ERRLOG"
       total_sec=$(awk '$NF == "total" { print $2; exit }' "$report")
