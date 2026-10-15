@@ -64,11 +64,9 @@ s_cold() {
 
 s_strace() {
   have_scenario strace || return 0
-  [ "$HAVE_STRACE" != 1 ] && {
-    clear_line
-    printf '  %s! strace dilewati%s%s\n' "$C_YEL" "${STRACE_SKIP:+ ($STRACE_SKIP)}" "$C_RST"
-    return 0
-  }
+  # Catatan dilewati dicetak sekali di footer Success Rate
+  # (design/bench_ws_output.md) — tanpa baris terpisah di sini.
+  [ "$HAVE_STRACE" != 1 ] && return 0
   local k r report total_sec total_calls total_err rank
   local pct sec usecs calls errs syscall
   for k in "${TOOLS[@]}"; do

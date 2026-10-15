@@ -25,10 +25,10 @@
 #   libhdr: edit ISI library/ext.h (header internal, diakses include relatif dari r2/k2)
 #   rel   : release terpisah (tar + sha256, rbot-only) sesuai docs/guide/releases.md
 #
-# Laporan: chart median + laporan view (problems/ws.md "View"): blok per
-# skenario "tool in scenario" berisi summary (aktual) vs except (harapan)
-# dengan verdict In/Not in accordance, ditutup benchmark report
-# sukses/gagal per tool (sumber data: view.csv).
+# Laporan (design/bench_ws_output.md): Legend/Metrics/Correctness di depan
+# (setelah versi), stream per run, tabel ringkas [Detailed Validation Log]
+# (verdict In/Not in accordance per skenario+tool), chart median, ditutup
+# Success Rate + artefak (sumber data: view.csv).
 #
 # PRINSIP (acuan interpretasi): setiap tool dinilai terhadap "except" (harapan
 # kerja konsep real workspace), BUKAN terhadap tool lain. Tool bebas memakai
@@ -217,6 +217,8 @@ for k in "${TOOLS[@]}"; do printf '  %-5s : %s\n' "$k" "${VER[$k]:-?}"; done
 printf '  %-5s : %s\n' "$CC_NAME" "$VER_GCC · $(uname -m)"
 [ -n "$RBOT_ARGS" ] && echo "rbot args : $RBOT_ARGS"
 echo
+rules_header
+echo
 echo "${C_BLD}[Execution Stream]${C_RST}"
 
 TOTAL=0
@@ -257,7 +259,7 @@ echo
 echo "${C_BLD}BENCHMARK REPORT (Median)${C_RST}"
 rule_line "$(box_width)"
 report
-rules_footer
+success_footer
 if [ "$NOT_ACC" -gt 0 ] || [ "$MISMATCH_RUNS" -gt 0 ]; then
   printf '%s✗ %d run Not in accordance · %d run gagal — lihat %s%s\n' \
     "$C_RED" "$NOT_ACC" "$MISMATCH_RUNS" "$ERRLOG" "$C_RST"

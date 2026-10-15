@@ -1,5 +1,6 @@
-# Laporan (design/bench_ws_output.md): chart median, blok [Detailed Validation Log],
-# dan footer VALIDATION RULES & METRICS. Dimuat dari ws.sh.
+# Laporan (design/bench_ws_output.md): rules_header (Legend/Metrics/Correctness),
+# tabel ringkas [Detailed Validation Log], chart median, footer Success Rate.
+# Dimuat dari ws.sh.
 # ---------------------------- utilitas -------------------------------------
 rule_line() {
   local w=$1 s=""
@@ -61,9 +62,10 @@ for (j = 1; j <= BW; j++) br = br (j <= len ? "█" : "░")
 col = (i == 1) ? G : ""; mark = (i == 1) ? "★" : " "
 printf "  %s%s %-6s %s %6d ms %5.2f×%s", col, mark, L[i], br, M[i], M[i] / best, Z
 if (BD[i] > 0) printf " %s✗%d%s", R, BD[i], Z
+# Divergensi pekerjaan antar tool: tanda [!] menempel di belakang baris
+# (design/bench_ws_output.md) — waktu bukan perbandingan setara 1:1.
+if (div) printf " %s[!]%s", Y, Z
 printf "\n"
-# Divergensi pekerjaan antar tool: waktu bukan perbandingan setara (audit ws.md butir 5).
-if (div) printf "    %s[!]%s\n", Y, Z
 }
 for (i = 1; i <= nf; i++) printf "  %s✗ %-6s semua run gagal atau tidak sesuai harapan%s\n", R, fl[i], Z
 }
@@ -77,81 +79,76 @@ return mx - mn > 0.5
   rm -f "$sorted"
 }
 
+# ---------------------------- rules (header) -------------------------------
+# Legend/Metrics/Correctness dicetak SEBELUM execution stream (design/
+# bench_ws_output.md) supaya arti metrik & harapan kerja terbaca dulu,
+# bukan setelah angka-angka.
+rules_header() {
+  # Baris literal (bukan printf %-Ns): ★/× multibyte, padding printf = byte.
+  echo "Legend :"
+  echo "  ★    : Tercepat pada skenario ini"
+  echo "  ×    : Rasio waktu terhadap yang tercepat"
+  echo "  [!]  : Pekerjaan berbeda antar tool (waktu tidak setara 1:1, bandingkan dengan hati-hati)"
+  echo "  *    : Tidak di-hard-check pada skenario ini (lihat EXPECTED di blok validasi)"
+  echo
+  echo "Metrics :"
+  printf '  %-5s : %s\n' "obj" ".o berubah"
+  printf '  %-5s : %s\n' "cc" "kompilasi C aktual (shim)"
+  printf '  %-5s : %s\n' "lib" "lib .a/.so"
+  printf '  %-5s : %s\n' "bin" "binary berubah"
+  printf '  %-5s : %s\n' "arc" "arsip .rp berubah"
+  echo
+  echo "Correctness (Validation Rules) :"
+  printf '  %-10s: %s\n' "cold" "obj penuh, arc 1, lib 4, bin 2 · noop: semua nol"
+  printf '  %-10s: %s\n' "leaf/bade" "cc 1 — dependensi compile terbukti via shim"
+  printf '  %-10s: %s\n' "mod" "cc 0 — arsip berubah, kompilasi tidak perlu ulang"
+  printf '  %-10s: %s\n' "touch" "rbot 0 (content-hash); ninja/make 6 (mtime, dependen a.h)"
+  printf '  %-10s: %s\n' "hedit" "SEMUA tool obj cc 6 (edit konten header pusat), lib 4, bin 2"
+  printf '  %-10s: %s\n' "sel" "cakupan disamakan (SEL_TARGETS) — obj cc 2, lib 4, bin 2"
+  printf '  %-10s: %s\n' "dep" "cakupan disamakan — obj cc 1, lib 4, bin 2"
+  printf '  %-10s: %s\n' "rel" "artefak tar + sha256 dicek sha256sum -c (rbot-only)"
+}
+
 # ---------------------------- [Detailed Validation Log] --------------------
-# Satu blok per skenario+tool: SUMMARY (median aktual), EXPECTED (harapan),
-# STATUS. Tanpa border kanan: padding awk berbasis byte, dan simbol ✔/✗ akan
-# membuat garis kanan tidak sejajar.
+# Tabel ringkas per skenario+tool (design/bench_ws_output.md): verdict
+# agregat dari SEMUA run — In accordance hanya bila semua run rc 0 DAN kerja
+# sesuai harapan. Detail miss/gagal tetap tercetak merah saat stream + stderr.log.
 view_report() {
   [ -s "$VIEW_CSV" ] || return 0
-  local tw; tw=$(box_width)
   echo
   echo "${C_BLD}[Detailed Validation Log]${C_RST}"
-  awk -F, -v TOOLS="${TOOLS[*]}" -v TW="$tw" -v SUCC="$OUTDIR/.success.txt" -v B="$C_BLD" -v D="$C_DIM" -v G="$C_GRN" -v R="$C_RED" -v Z="$C_RST" '
-function med(key, f,   i, j, n, a, t) {
-  n = cnt[key, f]
-  if (n == 0) return -999
-  for (i = 1; i <= n; i++) a[i] = val[key, f, i]
-  for (i = 2; i <= n; i++) { t = a[i]; j = i - 1
-    while (j >= 1 && a[j] > t) { a[j + 1] = a[j]; j-- }
-    a[j + 1] = t }
-  return (n % 2) ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2
-}
-function fmtv(v) {
-  if (v == -999) return "n/a"
-  if (v == -1) return "*"
-  return (v == int(v)) ? sprintf("%d", v) : sprintf("%g", v)
-}
-function fmte(x) { if (x + 0 == -1) return "*"; return x }
-function push(key, f, v) { cnt[key, f]++; val[key, f, cnt[key, f]] = v }
-function dashes(n,   s, i) { s = ""; for (i = 0; i < n; i++) s = s "─"; return s }
+  echo
+  awk -F, -v TOOLS="${TOOLS[*]}" -v SUCC="$OUTDIR/.success.txt" '
 {
   k = $2 SUBSEP $1
   seen[k] = 1
-  rc = $3 + 0; ms = $4 + 0
-  # Metrik hanya dari run yang berhasil; run gagal tidak masuk median.
-  if (rc == 0) {
-    if (ms >= 0) push(k, "ms", ms)
-    push(k, "obj", $5 + 0); push(k, "arc", $6 + 0); push(k, "lib", $7 + 0)
-    push(k, "bin", $8 + 0); push(k, "cc", $9 + 0)
-  }
-  eobj[k] = $10; earc[k] = $11; elib[k] = $12; ebin[k] = $13; ecc[k] = $14
-  # In accordance hanya bila SEMUA run rc 0 DAN kerja sesuai harapan (miss = 0).
-  if (rc != 0 || $15 != 0) acc[k] = 0
+  if ($3 != 0 || $15 != 0) acc[k] = 0
   else if (!(k in acc)) acc[k] = 1
 }
 END {
   nsc = split("cold noop leaf bade mod touch hedit sel dep libtouch libhdr rel", SC, " ")
   nt = split(TOOLS, TL, " ")
-  for (si = 1; si <= nsc; si++) {
-    s = SC[si]
+  w = 4
+  for (ti = 1; ti <= nt; ti++) if (length(TL[ti]) > w) w = length(TL[ti])
+  printf "%-*s | %-9s | %s\n", w, "tool", "execution", "status"
+  for (si = 1; si <= nsc; si++)
     for (ti = 1; ti <= nt; ti++) {
-      t = TL[ti]; k = s SUBSEP t
+      t = TL[ti]; k = SC[si] SUBSEP t
       if (!(k in seen)) continue
-      tms = med(k, "ms")
-      lab = "VALIDATION: " t " in " s " "
-      printf "\n┌─ %s%s\n", lab, dashes(TW - length(lab) - 3)
-      tval = (tms == -999) ? "n/a" : sprintf("%sms", fmtv(tms))
-      printf "│ %-8s │ time=%s | obj=%s | cc=%s | lib=%s | bin=%s | arc=%s\n", "SUMMARY", tval, fmtv(med(k, "obj")), fmtv(med(k, "cc")), fmtv(med(k, "lib")), fmtv(med(k, "bin")), fmtv(med(k, "arc"))
-      printf "│ %-8s │ obj=%s | arc=%s | lib=%s | bin=%s | cc=%s\n", "EXPECTED", fmte(eobj[k]), fmte(earc[k]), fmte(elib[k]), fmte(ebin[k]), fmte(ecc[k])
-      if (acc[k]) { printf "│ %-8s │ ✔ In accordance\n", "STATUS"; okc[t]++ }
-      else        { printf "│ %-8s │ ✗ Not in accordance\n", "STATUS"; badc[t]++ }
-      printf "└%s\n", dashes(TW - 1)
+      printf "%-*s | %-9s | %s\n", w, t, SC[si], (acc[k] ? "In accordance" : "Not in accordance")
+      if (acc[k]) okc[t]++; else badc[t]++
     }
-  }
-  # Ringkasan sukses per tool dipakai footer VALIDATION RULES & METRICS.
   for (ti = 1; ti <= nt; ti++) print TL[ti], okc[TL[ti]] + 0, badc[TL[ti]] + 0 > SUCC
   close(SUCC)
-}
-' "$VIEW_CSV"
+}' "$VIEW_CSV"
 }
 
-# ---------------------------- VALIDATION RULES & METRICS -------------------
-rules_footer() {
-  local succ="$OUTDIR/.success.txt" w=0 tw
-  tw=$(box_width)
+# ---------------------------- Success Rate (footer) ------------------------
+# Setelah chart median; catatan strace dilewati dicetak SEKALI di sini
+# (design/bench_ws_output.md — tanpa blok [Strace] terpisah).
+success_footer() {
+  local succ="$OUTDIR/.success.txt" w=0
   echo
-  echo "${C_BLD}VALIDATION RULES & METRICS${C_RST}"
-  rule_line "$tw"
   echo "Success Rate:"
   if [ -s "$succ" ]; then
     w=$(awk '{ if (length($1) > w) w = length($1) } END { print w + 0 }' "$succ")
@@ -159,24 +156,4 @@ rules_footer() {
   fi
   [ "$HAVE_STRACE" = 1 ] || echo "  strace : dilewati${STRACE_SKIP:+ ($STRACE_SKIP)}"
   rm -f "$succ"
-  echo
-  echo "Legend:"
-  echo "  ★   = Tercepat pada skenario ini"
-  echo "  ×   = Rasio waktu terhadap yang tercepat"
-  echo "  [!] = Pekerjaan berbeda antar tool (waktu tidak setara 1:1, bandingkan dengan hati-hati)"
-  echo "  *   = Tidak di-hard-check pada skenario ini (lihat EXPECTED di blok validasi)"
-  echo
-  echo "Metrics:"
-  echo "  obj = .o berubah · cc = kompilasi C aktual (shim) · lib = lib .a/.so"
-  echo "  bin = binary berubah · arc = arsip .rp berubah"
-  echo
-  echo "Harapan Correctness (Validation Rules):"
-  echo "  cold  : obj penuh, arc 1, lib 4, bin 2 · noop: semua nol"
-  echo "  leaf/bade: cc 1 — dependensi compile terbukti via shim"
-  echo "  mod   : cc 0 — arsip berubah, kompilasi tidak perlu ulang"
-  echo "  touch : rbot 0 (content-hash); ninja/make 6 (mtime, dependen a.h)"
-  echo "  hedit : SEMUA tool obj cc 6 (edit konten header pusat), lib 4, bin 2"
-  echo "  sel   : cakupan disamakan (SEL_TARGETS) — obj cc 2, lib 4, bin 2"
-  echo "  dep   : cakupan disamakan — obj cc 1, lib 4, bin 2"
-  echo "  rel   : artefak tar + sha256 dicek sha256sum -c (rbot-only)"
 }
