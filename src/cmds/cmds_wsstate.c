@@ -7,7 +7,7 @@
  *       workspace root-centric (state_path, lihat cmds_internal.h);
  *       bila proyek belum ditetapkan, fallback ke .rbot/ws.state lama.
  * Format (whitespace-delimited, path tanpa spasi):
- *   RBOTWS2 <cwd>
+ *   RBOTWS3 <cwd>
  *   META <skipped> <target|-> <buildfile>
  *   LIB <path>                 library yang diminta (dicetak saat no-op)
  *   F <mtime_ns> <size> <path> input/output yang dipakai (source, object, closure header,
@@ -26,7 +26,7 @@
 #include "../util.h"
 #include "cmds_internal.h"
 
-#define WS_STATE_MAGIC "RBOTWS2"
+#define WS_STATE_MAGIC "RBOTWS3"
 
 static bool wsModeOn = false;
 
@@ -174,6 +174,17 @@ void wsFastStateSave(struct DepCache *dc, const Config *c, const List *srcs, con
     if (c->emb[i].archivePath[0]) addKind(&items, 'O', c->emb[i].archivePath);
   }
   if (hasEmb) addKind(&items, 'O', ldCacheFile());
+
+  /* Library path-form (cdeps lintas-proyek: `library = <dep>/lib/x.a`) —
+     input link fase binary: perubahan .a proyek lain harus membatalkan
+     fast state agar relink terdeteksi (audit ws-benchmark 2026-10-15).
+     Hanya fase binary: .a proyek lain bukan input fase library (kemasan
+     hanya dari object milik proyek sendiri). */
+  if (!libOnly)
+    for (int i = 0; i < c->libraries.count; i++) {
+      const char *lib = c->libraries.items[i];
+      if (strchr(lib, '/') || strchr(lib, '\\')) addKind(&items, 'O', lib);
+    }
 
   /* Folder sumber: setiap folder yang ditelusuri daftar sumber (termasuk
      subfolder) dicatat sebagai stamp direktori. Penambahan/penghapusan file

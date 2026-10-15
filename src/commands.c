@@ -1060,6 +1060,16 @@ int cmdsBuildPassRun(int jobs, Config c, const char *buildfilePath, bool libOnly
         int64_t objectMtime = fsMTimeNs(c.emb[i].objectPath); /* sesudah compile: langsung */
         if (objectMtime < 0 || objectMtime > targetMtime) linkNeeded = true;
       }
+      /* Library lintas-proyek (cdeps -> `library = <dep>/lib/x.a`) adalah input
+         link nyata: perubahan isi .a proyek lain harus me-relink binary ini,
+         meski object milik proyek sendiri tidak berubah. Tanpa ini bin/bade
+         menyimpan salinan basi kode core — audit ws-benchmark 2026-10-15. */
+      for (int i = 0; i < c.libraries.count && !linkNeeded; i++) {
+        const char *lib = c.libraries.items[i];
+        if (!strchr(lib, '/') && !strchr(lib, '\\')) continue; /* bentuk -l: bukan path */
+        int64_t libM = fsMTimeNs(lib);
+        if (libM < 0 || libM > targetMtime) linkNeeded = true;
+      }
     }
   }
 

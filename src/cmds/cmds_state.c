@@ -186,7 +186,7 @@ void cmdsFingerprintInvalidate(void) {
    scan fingerprint + decide penuh per proyek (miniws: jalur ringan). */
 #define BUILD_STATE_FILE ".rbot/build.state"
 #define BUILD_STATE_FILE_LIB ".rbot/build.lib.state"
-#define BUILD_STATE_MAGIC "RBOTFAST3"
+#define BUILD_STATE_MAGIC "RBOTFAST4"
 
 typedef struct {
   char kind;
@@ -744,6 +744,15 @@ void cmdsFastStateSave(const Config *c, const List *srcs, const char *target,
      batal dan jalur normal meng-rebuild varian yang perlu (per-varian). */
   if (staticLib[0]) fastStampAdd(&paths, staticLib);
   if (sharedLib[0]) fastStampAdd(&paths, sharedLib);
+  /* Library path-form (mis. `library = ../x/lib/libx.a`) adalah input link:
+     perubahan arsip eksternal wajib membatalkan fast state agar relink
+     terdeteksi (audit ws-benchmark 2026-10-15). Hanya fase binary — kemasan
+     fase library hanya dari object milik proyek sendiri. */
+  if (!libOnly)
+    for (int i = 0; i < c->libraries.count; i++) {
+      const char *lib = c->libraries.items[i];
+      if (strchr(lib, '/') || strchr(lib, '\\')) fastStampAdd(&paths, lib);
+    }
 
   FastStamp *stamps = calloc((size_t)paths.count, sizeof(FastStamp));
   if (paths.count && !stamps) {
