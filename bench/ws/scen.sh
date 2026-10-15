@@ -11,11 +11,11 @@ mut_dep() {
   mut_mod "$@"
   mut_leaf "$@"
 }
-mut_touch() { (cd "$WS" && touch library/a.h); }
-mut_libtouch() { (cd "$WS" && touch library/ext.h); }
-# Edit isi header internal (library/ext.h), diakses include relatif, bukan -I.
+mut_touch() { (cd "$WS" && touch include/a.h); }
+mut_libtouch() { (cd "$WS" && touch include/ext.h); }
+# Edit isi header internal (include/ext.h), diakses include relatif, bukan -I.
 mut_libhdr() {
-  local f="$WS/library/ext.h" v
+  local f="$WS/include/ext.h" v
   v=$(sed -n 's/^#define WS_EXT_VALUE \([0-9][0-9]*\)$/\1/p' "$f")
   sed -i "s/^#define WS_EXT_VALUE [0-9][0-9]*$/#define WS_EXT_VALUE $((v + 1))/" "$f"
 }
@@ -23,7 +23,7 @@ mut_libhdr() {
 # koheren karena kedua main membandingkan WS_SHARED_VALUE hasil kompilasi
 # sendiri — build parsial yang lolos akan gagal runtime.
 mut_hedit() {
-  local f="$WS/library/a.h" v
+  local f="$WS/include/a.h" v
   v=$(sed -n 's/^#define WS_SHARED_VALUE \([0-9][0-9]*\)$/\1/p' "$f")
   sed -i "s/^#define WS_SHARED_VALUE [0-9][0-9]*$/#define WS_SHARED_VALUE $((v + 1))/" "$f"
 }

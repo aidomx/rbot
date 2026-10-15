@@ -56,40 +56,37 @@ gen_ws() {
   gen_c core r
   gen_c bade k
   # Header publik milik workspace: kedua proyek memakai pusat library/.
-  mkdir -p "$WS/library" "$WS/core/include" "$WS/bade/include" "$WS/modules"
-  printf '#pragma once\n#define WS_SHARED_VALUE 7\n' > "$WS/library/a.h"
-  printf '#pragma once\n#include "a.h"\n#define WS_BADE_VALUE WS_SHARED_VALUE\n' > "$WS/library/b.h"
+  mkdir -p "$WS/include" "$WS/modules"
+  printf '#pragma once\n#define WS_SHARED_VALUE 7\n' > "$WS/include/a.h"
+  printf '#pragma once\n#include "a.h"\n#define WS_BADE_VALUE WS_SHARED_VALUE\n' > "$WS/include/b.h"
   # Header bersama: library/ dipantau lewat headers workspace;
   # ext.h tetap di-include secara relatif tanpa symlink.
-  printf '#pragma once\n#define WS_EXT_VALUE 3\n' > "$WS/library/ext.h"
-  ln -s ../../library/a.h "$WS/core/include/a.h"
-  ln -s ../../library/b.h "$WS/bade/include/b.h"
-  ln -s ../../library/a.h "$WS/bade/include/a.h"
+  printf '#pragma once\n#define WS_EXT_VALUE 3\n' > "$WS/include/ext.h"
   for ((i = 1; i <= NMOD; i++)); do
     printf 'module m%s\nexport f%s\n' "$i" "$i" > "$WS/rupamod/m$i.rp"
   done
 
   # Simbol benar-benar circular: core_entry -> bade_entry -> core_helper.
   cat > "$WS/core/src/r1.c" << 'EOF'
-#include "../include/a.h"
+#include "a.h"
 int bade_entry(void);
 int core_entry(void) { return bade_entry(); }
 EOF
   cat > "$WS/core/src/r2.c" << 'EOF'
-#include "../include/a.h"
-#include "../../library/ext.h"
+#include "a.h"
+#include "ext.h"
 int ws_ext_value = WS_EXT_VALUE;
 int core_helper(void) { return WS_SHARED_VALUE + ws_ext_value - WS_EXT_VALUE; }
 EOF
   cat > "$WS/bade/src/k1.c" << 'EOF'
-#include "../include/b.h"
+#include "b.h"
 int core_helper(void);
 int bade_entry(void) { return core_helper() + (WS_BADE_VALUE - WS_SHARED_VALUE); }
 EOF
   # Jalur balik independen: bade -> core -> bade.
   cat > "$WS/bade/src/k2.c" << 'EOF'
-#include "../include/b.h"
-#include "../../library/ext.h"
+#include "b.h"
+#include "ext.h"
 int core_entry(void);
 int bade_ext_value = WS_EXT_VALUE;
 int bade_reverse(void) { return core_entry() + (WS_BADE_VALUE - WS_SHARED_VALUE) + bade_ext_value - WS_EXT_VALUE; }
@@ -98,12 +95,12 @@ EOF
   #kedua main, sehingga object basi setelah edit header pusat membuat
   #binary gagal (exit != 0) dan terdeteksi sebagai kegagalan build.
   cat > "$WS/core/src/main.c" << 'EOF'
-#include "../include/a.h"
+#include "a.h"
 int core_entry(void);
 int main(void) { return core_entry() == WS_SHARED_VALUE ? 0 : 1; }
 EOF
   cat > "$WS/bade/src/main.c" << 'EOF'
-#include "../include/b.h"
+#include "b.h"
 int bade_reverse(void);
 int main(void) { return bade_reverse() == WS_BADE_VALUE ? 0 : 1; }
 EOF
@@ -120,7 +117,7 @@ EOF
     echo "projects = bade, core, rupamod"
     echo "compiler = $COMPILERS"
     echo "flags = Wall, Wextra, MMD, MP, fPIC"
-    echo "headers = (core, bade, I.), library"
+    echo "headers = I."
     echo "std = gnu11"
     echo "mod.output.binary = false"
     echo "mod.archive.src = ."
@@ -149,7 +146,7 @@ EOF
 
   # ---- pembanding: build.ninja (FAIR: Static Libs + Circular Deps) ----
   {
-    echo "cflags = -Wall -Wextra -fPIC -std=gnu11"
+    echo "cflags = -Wall -Wextra -fPIC -std=gnu11 -Iinclude"
     echo "rule cc"
     echo "  command = mkdir -p \$\$(dirname \$out) && gcc \$cflags -MMD -MF \$out.d -c \$in -o \$out"
     echo "  depfile = \$out.d"
