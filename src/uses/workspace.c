@@ -779,57 +779,116 @@ static int wsHeaderCmp(const void *a, const void *b) {
   return strcmp(*(const char *const *)a, *(const char *const *)b);
 }
 
-static bool wsMapHeaders(const char *root, const char *value, bool global,
-                         char *out, size_t n) {
-  char flat[WS_LINE_LEN];
-  size_t used = 0;
-  int depth = 0;
-  for (const char *p = value; *p; ++p) {
-    if (*p == '(') { if (depth++) return false; continue; }
-    if (*p == ')') { if (--depth < 0) return false; continue; }
-    if (used + 1 >= sizeof(flat)) return false;
-    flat[used++] = *p;
-  }
-  if (depth) return false;
-  flat[used] = '\0';
-  char *items[256];
-  int count = 0;
+
+
+/* Grup `(owner, item, ...)` hanya berlaku untuk proyek `owner`. Di dalamnya,
+   `I.` = <owner>/include dan item lain = path relatif root workspace. Entri di
+   luar kurung berlaku untuk semua proyek (aturan bare di atas). */
+/* `I.` di level workspace = include root; di level proyek = <proyek>/include.
+   Hanya `I.` yang menjadi -I (headers). Item lain hanya dilacak (headers.internal):
+   konsumen harus memanggilnya lewat path relatif, mis. "../../api/api.h".
+   Grup `(owner, ...)` hanya berlaku untuk proyek `owner`; di dalamnya `I.` =
+   <owner>/include dan item lain = path relatif root workspace. */
+static bool wsMapHeaders(const char *root, const char *value, bool global, const char *proj,
+                         bool split, char *outPub, char *outInt, size_t n) {
   char buf[WS_LINE_LEN];
-  copyStr(buf, sizeof(buf), flat);
-  for (char *part = buf;;) {
-    char *comma = strchr(part, ',');
-    if (comma) *comma = '\0';
-    char *item = trim(part);
-    if (*item) {
-      char mapped[WS_LINE_LEN];
-      const char *base = global && strncmp(item, "I.", 2) != 0 ? "." : root;
-      if (global && strcmp(item, "I.") != 0 && wsIsRelPath(item)) {
-        char candidate[WS_LINE_LEN];
-        if (snprintf(candidate, sizeof(candidate), "%s/include", item) >= (int)sizeof(candidate)) return false;
-        if (fsDirExists(candidate)) copyStr(mapped, sizeof(mapped), candidate);
-        else if (!wsMapList(base, item, true, mapped, sizeof(mapped))) return false;
-      } else if (!wsMapList(base, item, true, mapped, sizeof(mapped))) return false;
-      if (count >= 256) return false;
-      items[count] = malloc(strlen(mapped) + 1);
-      if (!items[count]) goto fail;
-      strcpy(items[count++], mapped);
+  if (!value || strlen(value) >= sizeof(buf)) return false;
+  copyStr(buf, sizeof(buf), value);
+  char *pub[256], *intl[256];
+  int npub = 0, nint = 0;
+  char *p = buf;
+  while (*p) {
+    while (*p == ' ' || *p == '\t' || *p == ',') p++;
+    if (!*p) break;
+    if (*p == '(') {
+      char *close = strchr(p, ')');
+      if (!close) goto fail;
+      *close = '\0';
+      char *owner = NULL;
+      for (char *q = p + 1;;) {
+        char *c = strchr(q, ',');
+        if (c) *c = '\0';
+        char *t = trim(q);
+        if (*t) {
+          if (!owner) {
+            owner = t;
+          } else if (strcmp(owner, proj) == 0) {
+            char mapped[WS_LINE_LEN];
+            bool isPub = strcmp(t, "I.") == 0;
+            if (isPub) {
+              if ((size_t)snprintf(mapped, sizeof(mapped), "%s/include", root) >= sizeof(mapped))
+                goto fail;
+            } else if (wsIsRelPath(t)) {
+              if ((size_t)snprintf(mapped, sizeof(mapped), "./%s", t) >= sizeof(mapped)) goto fail;
+            } else {
+              if (!wsMapList(root, t, true, mapped, sizeof(mapped))) goto fail;
+            }
+            if (isPub ? npub >= 256 : nint >= 256) goto fail;
+            char *dup = malloc(strlen(mapped) + 1);
+            if (!dup) goto fail;
+            strcpy(dup, mapped);
+            if (isPub) pub[npub++] = dup; else intl[nint++] = dup;
+          }
+        }
+        if (!c) break;
+        q = c + 1;
+      }
+      p = close + 1;
+    } else {
+      char *end = p;
+      while (*end && *end != ',' && *end != '(') end++;
+      char save = *end;
+      *end = '\0';
+      char *t = trim(p);
+      if (*t) {
+        char mapped[WS_LINE_LEN];
+        bool isPub = strcmp(t, "I.") == 0 || !split;
+        if (strcmp(t, "I.") == 0) {
+          /* global: include root workspace. proyek: include milik proyek itu. */
+          if (global) snprintf(mapped, sizeof(mapped), "include");
+          else if ((size_t)snprintf(mapped, sizeof(mapped), "%s/include", root) >= sizeof(mapped))
+            goto fail;
+        } else if (global && wsIsRelPath(t)) {
+          char candidate[WS_LINE_LEN];
+          if (snprintf(candidate, sizeof(candidate), "%s/include", t) >= (int)sizeof(candidate))
+            goto fail;
+          if (fsDirExists(candidate)) copyStr(mapped, sizeof(mapped), candidate);
+          else if (!wsMapList(".", t, true, mapped, sizeof(mapped))) goto fail;
+        } else if (!wsMapList(root, t, true, mapped, sizeof(mapped))) {
+          goto fail;
+        }
+        if (isPub ? npub >= 256 : nint >= 256) goto fail;
+        char *dup = malloc(strlen(mapped) + 1);
+        if (!dup) goto fail;
+        strcpy(dup, mapped);
+        if (isPub) pub[npub++] = dup; else intl[nint++] = dup;
+      }
+      *end = save;
+      p = end;
+      if (save == '\0') break;
     }
-    if (!comma) break;
-    part = comma + 1;
   }
-  qsort(items, (size_t)count, sizeof(items[0]), wsHeaderCmp);
-  out[0] = '\0';
-  for (int i = 0; i < count; i++) {
-    if (i && strcmp(items[i], items[i - 1]) == 0) continue;
-    size_t have = strlen(out), add = strlen(items[i]);
-    if (have + add + (have ? 2 : 0) + 1 > n) goto fail;
-    if (have) strcat(out, ", ");
-    strcat(out, items[i]);
+  /* gabungkan ke string, tanpa duplikat, dalam urutan deterministik */
+  char **lists[2] = {pub, intl};
+  int counts[2] = {npub, nint};
+  char *outs[2] = {outPub, outInt};
+  for (int li = 0; li < 2; li++) {
+    qsort(lists[li], (size_t)counts[li], sizeof(char *), wsHeaderCmp);
+    outs[li][0] = '\0';
+    for (int i = 0; i < counts[li]; i++) {
+      if (i && strcmp(lists[li][i], lists[li][i - 1]) == 0) continue;
+      size_t have = strlen(outs[li]), add = strlen(lists[li][i]);
+      if (have + add + (have ? 2 : 0) + 1 > n) goto fail;
+      if (have) strcat(outs[li], ", ");
+      strcat(outs[li], lists[li][i]);
+    }
   }
-  for (int i = 0; i < count; i++) free(items[i]);
+  for (int i = 0; i < npub; i++) free(pub[i]);
+  for (int i = 0; i < nint; i++) free(intl[i]);
   return true;
 fail:
-  for (int i = 0; i < count; i++) free(items[i]);
+  for (int i = 0; i < npub; i++) free(pub[i]);
+  for (int i = 0; i < nint; i++) free(intl[i]);
   return false;
 }
 
@@ -865,11 +924,92 @@ static void wsApplyLine(const WsModel *m, const WsProject *p, Config *c, const c
     return;
   }
   if (strcmp(key, "cdeps") == 0) return; /* dikonsumsi wsApplyCdeps */
+  /* headers.each = X: X diterapkan ke SETIAP proyek, diresolve relatif root
+     tiap proyek (I. = <proyek>/include). Setara dengan menulis <proyek>.headers = X
+     untuk setiap proyek, tanpa mengulang penulisan. */
+  if (strcmp(key, "headers.each") == 0) {
+    /* headers.each = [nama-proyek, ...] [I. | auto | path, ...]
+       - Token yang cocok dengan nama proyek = PENYARING: hanya proyek itu yang
+         menerima sisanya. Tanpa nama = semua proyek.
+       - I. = <proyek>/include (-I), auto = I. bila include/ ada, path lain =
+         dilacak relatif root proyek.
+       - Token yang bukan nama proyek dan tidak ada sebagai folder di proyek mana
+         pun diberi peringatan (salah tulis tidak lolos diam-diam). */
+    char list[WS_LINE_LEN];
+    if (strlen(value) >= sizeof(list)) return;
+    snprintf(list, sizeof(list), "%s", value);
+    bool hasNames = false, applies = false;
+    char others[WS_LINE_LEN] = "";
+    char *save = NULL;
+    for (char *t = strtok_r(list, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
+      while (*t == ' ' || *t == '\t') t++;
+      size_t tl = strlen(t);
+      while (tl > 0 && (t[tl - 1] == ' ' || t[tl - 1] == '\t')) t[--tl] = '\0';
+      if (tl == 0) continue;
+      bool isName = false;
+      for (int k = 0; k < m->projectCount; k++)
+        if (strcmp(m->projects[k].name, t) == 0) { isName = true; break; }
+      if (isName) {
+        hasNames = true;
+        if (strcmp(p->name, t) == 0) applies = true;
+        continue;
+      }
+      /* bukan nama proyek: harus berupa flag (I./auto) atau folder yang ada */
+      if (strcmp(t, "I.") != 0 && strcmp(t, "auto") != 0) {
+        bool found = false;
+        for (int k = 0; k < m->projectCount && !found; k++) {
+          const char *r = m->projects[k].root[0] ? m->projects[k].root : ".";
+          char probe[WS_PATH_LEN];
+          if ((size_t)snprintf(probe, sizeof(probe), "%s/%s", r, t) < sizeof(probe) &&
+              fsDirExists(probe))
+            found = true;
+        }
+        /* peringatan dicetak sekali per nama (baris ini dipanggil per proyek/pass) */
+        static char warnedTok[32][WS_LINE_LEN];
+        static int nwarned = 0;
+        bool already = false;
+        for (int w = 0; w < nwarned; w++)
+          if (strcmp(warnedTok[w], t) == 0) already = true;
+        if (!found && !already && nwarned < 32) {
+          snprintf(warnedTok[nwarned++], WS_LINE_LEN, "%s", t);
+          fprintf(stderr, "rbot: workspace: headers.each: '%s' bukan nama proyek dan tidak ada "
+                          "sebagai folder di proyek mana pun, dilewati\n", t);
+        }
+      }
+      if (strlen(others) + strlen(t) + 4 < sizeof(others)) {
+        if (others[0]) strcat(others, ", ");
+        strcat(others, t);
+      }
+    }
+    if (hasNames && !applies) return;
+    if (others[0] == '\0') return;
+    /* auto: I. hanya bila include/ proyek ada */
+    char finalv[WS_LINE_LEN] = "";
+    char tmp[WS_LINE_LEN];
+    snprintf(tmp, sizeof(tmp), "%s", others);
+    char *s2 = NULL;
+    for (char *t = strtok_r(tmp, ",", &s2); t; t = strtok_r(NULL, ",", &s2)) {
+      while (*t == ' ') t++;
+      if (strcmp(t, "auto") == 0) {
+        char inc[WS_PATH_LEN];
+        const char *r = p->root[0] ? p->root : ".";
+        if ((size_t)snprintf(inc, sizeof(inc), "%s/include", r) >= sizeof(inc)) continue;
+        if (!fsDirExists(inc)) continue;
+        t = (char *)"I.";
+      }
+      if (strlen(finalv) + strlen(t) + 4 < sizeof(finalv)) {
+        if (finalv[0]) strcat(finalv, ", ");
+        strcat(finalv, t);
+      }
+    }
+    if (finalv[0]) wsApplyLine(m, p, c, "headers", finalv, false);
+    return;
+  }
   /* headers.internal = folder shared di root workspace -> publik lewat
      `headers` supaya ikut -I (kriteria: shared headers di-root ditambahkan
      ke -I). Value relatif root workspace — tanpa prefix. */
   if (strcmp(key, "headers.internal") == 0) {
-    configApplyLine(c, "headers", value);
+    configApplyLine(c, "headers.internal", value); /* dilacak, bukan -I */
     return;
   }
 
@@ -880,7 +1020,12 @@ static void wsApplyLine(const WsModel *m, const WsProject *p, Config *c, const c
     return;
   }
   if (strncmp(key, "headers", 7) == 0 && (key[7] == '\0' || key[7] == '.')) {
-    if (wsMapHeaders(root, value, global, mapped, sizeof(mapped))) configApplyLine(c, key, mapped);
+    char pub[WS_LINE_LEN], intl[WS_LINE_LEN];
+    bool split = key[7] == '\0';
+    if (wsMapHeaders(root, value, global, p->name, split, pub, intl, sizeof(pub))) {
+      if (pub[0]) configApplyLine(c, key, pub);
+      if (intl[0]) configApplyLine(c, "headers.internal", intl);
+    }
     return;
   }
   if (strcmp(key, "archive.src") == 0) {
