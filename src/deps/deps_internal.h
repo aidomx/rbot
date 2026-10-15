@@ -38,6 +38,7 @@ struct DepCache {
   DepNode *nodes;
   int count, cap;
   unsigned gen;
+  int semRoot; /* TU yang sedang diperiksa (RBOT_HDR_SEM) */
   const Config *cfg;
   List incDirs;
 
@@ -118,6 +119,11 @@ char *depReadWhole(const char *path, size_t *outLen);
 
 /* Pastikan node sudah punya edges (dari .d bila layak, else pemindai). */
 void depParseNodeIfNeeded(DepCache *dc, int idx);
+
+/* Pemeriksaan semantik header (deps_semhdr.c, opt-in RBOT_HDR_SEM=1). */
+bool depsSemEnabled(void);
+void depsSemRecordNode(DepCache *dc, int idx);
+bool depsSemAcceptNode(DepCache *dc, int root, int idx);
 
 /* DFS: mtime terbaru di subtree node; INT64_MAX bila ada dependensi hilang. */
 int64_t depNewestUnder(DepCache *dc, int idx);

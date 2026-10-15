@@ -289,7 +289,7 @@ static bool subtreeUpToDate(DepCache *dc, int idx) {
   dc->nodes[idx].mark = dc->gen;
   bool flat = dc->nodes[idx].dloaded;
 
-  if (!nodeUpToDateShallow(dc, idx)) return false;
+  if (!nodeUpToDateShallow(dc, idx) && !depsSemAcceptNode(dc, dc->semRoot, idx)) return false;
 
   /* salin kids dulu: depParseNodeIfNeeded anak bisa merealloc dc->nodes */
   int nkids = dc->nodes[idx].nkids;
@@ -302,7 +302,9 @@ static bool subtreeUpToDate(DepCache *dc, int idx) {
     int kid = kids[i];
     if (dc->nodes[kid].mark == dc->gen) continue;
     dc->nodes[kid].mark = dc->gen;
-    if (flat ? !nodeUpToDateShallow(dc, kid) : !subtreeUpToDate(dc, kid)) {
+    bool kidOk = flat ? (nodeUpToDateShallow(dc, kid) || depsSemAcceptNode(dc, dc->semRoot, kid))
+                      : subtreeUpToDate(dc, kid);
+    if (!kidOk) {
       ok = false;
       break;
     }
@@ -321,6 +323,7 @@ static void subtreeRecord(DepCache *dc, int idx) {
 
   if (dc->nodes[idx].mtime < 0) return;
   snapshotSet(dc, dc->nodes[idx].path, dc->nodes[idx].mtime, nodeRecordHash(dc, idx));
+  depsSemRecordNode(dc, idx);
 
   int nkids = dc->nodes[idx].nkids;
   int *kids = malloc((size_t)(nkids > 0 ? nkids : 1) * sizeof(int));
@@ -334,6 +337,7 @@ static void subtreeRecord(DepCache *dc, int idx) {
     if (flat) {
       if (dc->nodes[kid].mtime < 0) continue;
       snapshotSet(dc, dc->nodes[kid].path, dc->nodes[kid].mtime, nodeRecordHash(dc, kid));
+      depsSemRecordNode(dc, kid);
     } else {
       subtreeRecord(dc, kid);
     }
@@ -351,6 +355,7 @@ bool depsContentUpToDate(DepCache *dc, const char *src) {
   if (root < 0) return false;
 
   dc->gen++;
+  dc->semRoot = root;
   return subtreeUpToDate(dc, root);
 }
 
