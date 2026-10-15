@@ -3,6 +3,19 @@ name: Workspace Benchmark
 on:
   workflow_dispatch:
     inputs:
+      tools:
+        description: "Benchmark tools (comma-separated: rbot,ninja,make)"
+        type: choice
+        required: true
+        default: rbot,ninja
+        options:
+          - rbot
+          - ninja
+          - make
+          - rbot,ninja
+          - rbot,make
+          - ninja,make
+          - rbot,ninja,make
       sources:
         description: "C sources per project (core and bade)"
         type: number
@@ -42,6 +55,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
+      BENCH_TOOLS: ${{ inputs.tools }}
       BENCH_SOURCES: ${{ inputs.sources }}
       BENCH_REPEATS: ${{ inputs.repeats }}
       BENCH_HEADERS: ${{ inputs.headers }}
@@ -81,14 +95,14 @@ jobs:
       # rbot, GCC, the archiver, or Ninja on this runner. Warm up BOTH tools
       # with an independent workspace, preserving the real cold-build work in
       # every subsequent measured repetition.
-      - name: Warm up rbot and Ninja (not measured)
+      - name: Warm up selected tools (not measured)
         run: |
           bash bench/ws.sh \
             -b "$PWD/build/bin/rbot" \
             -n "$BENCH_SOURCES" \
             -H "$BENCH_HEADERS" \
             -m "$BENCH_MODULES" \
-            -r 1 -t rbot,ninja \
+            -r 1 -t "$BENCH_TOOLS" \
             -o "$PWD/benchmark-results/warmup" \
             2>&1 | tee benchmark-results/warmup.log
           exit "${PIPESTATUS[0]}"
@@ -103,7 +117,7 @@ jobs:
             -H "$BENCH_HEADERS" \
             -m "$BENCH_MODULES" \
             -r "$BENCH_REPEATS" \
-            -t rbot,ninja \
+            -t "$BENCH_TOOLS" \
             -D "$BENCH_DELAY" \
             -d "$BENCH_MUTATION_DELAY" \
             -O abba \
@@ -116,6 +130,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: workspace-n${{ inputs.sources }}-r${{ inputs.repeats }}
+          name: workspace-${{ inputs.tools }}-n${{ inputs.sources }}-r${{ inputs.repeats }}
           path: benchmark-results/
           if-no-files-found: warn
