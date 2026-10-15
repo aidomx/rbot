@@ -32,7 +32,7 @@ embed_mode() {
     return
   }
   # ld -r -b binary adalah fitur GNU/Linux; jangan coba pada platform lain.
-  if [ "$(uname -s)" != Linux ] || ! command -v ld >/dev/null 2>&1; then
+  if [ "$(uname -s)" != Linux ] || ! command -v ld > /dev/null 2>&1; then
     printf carray
     return
   fi
@@ -117,7 +117,7 @@ EOF
     echo "projects = bade, core, rupamod"
     echo "compiler = $COMPILERS"
     echo "flags = Wall, Wextra, MMD, MP, fPIC"
-    echo "headers = I."
+    echo "headers.each = auto"
     echo "std = gnu11"
     echo "mod.output.binary = false"
     echo "mod.archive.src = ."
