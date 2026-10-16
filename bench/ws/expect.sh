@@ -11,12 +11,15 @@ NOT_ACC=0 # run (semua tool) yang kerjanya tidak sesuai harapan -> Not in accord
 EXPECT_MISS=""
 exp_chk() { [ "$2" -eq "$3" ] || EXPECT_MISS+=" $1=$2(harap $3)"; }
 # Harapan kerja per skenario. obj/arc/lib/bin berasal dari snapshot artefak,
-# cc dari shim gcc (bukti kompilasi aktual). Divergensi bin/lib antar tool
-# TIDAK di-hard-check pada leaf/bade/mod: relink berlebih/kurang adalah
-# temuan peluang optimasi yang dilaporkan di ringkasan, bukan gagal ukur.
+# cc dari shim gcc (bukti kompilasi aktual). bin di-hard-check juga pada
+# leaf/bade/mod (bin 2): kedua binary me-relink oleh siklus core <-> bade dan
+# under-relink bin 1 pernah jadi bug (problems/ws-benchmark-2026-10-15.md
+# Temuan 2). Divergensi lib antar tool TIDAK di-hard-check pada leaf/bade/mod:
+# relink .a/.so berlebih/kurang adalah temuan peluang optimasi yang dilaporkan
+# di ringkasan, bukan gagal ukur.
 # Selain men-flag EXPECT_MISS (temuan di stderr.log), eksplisit mencatat
 # harapan ke EXP_* untuk laporan view (problems/ws.md "View"): -1 = field
-# TIDAK di-hard-check (tampil '*' di blok except — divergensi antar tool
+# TIDAK di-hard-check (tampil '*' di blok except — divergensi lib antar tool
 # pada leaf/bade/mod adalah temuan, bukan gagal ukur).
 expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
   local k=$1 s=$2 o=$3 a=$4 l=$5 b=$6 c=$7
@@ -45,17 +48,21 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       ;;
     leaf | bade)
       # 1 source berubah -> tepat 1 kompilasi ulang di proyeknya sendiri.
-      # lib/bin tidak di-hard-check (relink antar tool boleh berbeda).
-      EXP_OBJ=1 EXP_ARC=0 EXP_CC=1
+      # bin wajib 2: kedua binary me-relink karena siklus core <-> bade.
+      # lib tidak di-hard-check (relink .a/.so antar tool boleh berbeda).
+      EXP_OBJ=1 EXP_ARC=0 EXP_CC=1 EXP_BIN=2
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
+      exp_chk bin "$b" "$EXP_BIN"
       exp_chk cc "$c" "$EXP_CC"
       ;;
     mod)
       # 1 .rp -> arsip -> 1 .o embed; nol kompilasi C.
-      EXP_OBJ=1 EXP_ARC=1 EXP_CC=$(embed_extra)
+      # bin wajib 2: arsip -> lib bade -> kedua binary ikut me-relink.
+      EXP_OBJ=1 EXP_ARC=1 EXP_CC=$(embed_extra) EXP_BIN=2
       exp_chk obj "$o" "$EXP_OBJ"
       exp_chk arc "$a" "$EXP_ARC"
+      exp_chk bin "$b" "$EXP_BIN"
       exp_chk cc "$c" "$EXP_CC"
       ;;
     touch)

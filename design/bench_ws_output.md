@@ -27,8 +27,8 @@ Metrics :
 
 Correctness (Validation Rules) :
   cold      : obj penuh, arc 1, lib 4, bin 2 · noop: semua nol
-  leaf/bade : cc 1 — dependensi compile terbukti via shim
-  mod       : cc 0 — arsip berubah, kompilasi tidak perlu ulang
+  leaf/bade : cc 1, bin 2 — dependensi compile & relink siklus via shim
+  mod       : cc 0, bin 2 — arsip berubah, kompilasi tidak perlu ulang
   touch     : satria 0 (content-hash); ninja/make 6 (mtime, dependen a.h)
   hedit     : SEMUA tool obj cc 6 (edit konten header pusat), lib 4, bin 2
   sel       : cakupan disamakan (SEL_TARGETS) — obj cc 2, lib 4, bin 2

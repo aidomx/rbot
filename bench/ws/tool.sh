@@ -13,11 +13,29 @@ tool_cmd() {
 # library + kedua binary; ninja/make diberi target keluaran yang sama persis
 # agar waktunya layak dibandingkan (audit problems/ws.md butir 5).
 SEL_TARGETS="core/bin/rupa bade/bin/bade core/lib/libcore.so bade/lib/libbade.so"
+# CMake memakai NAMA TARGET, bukan path keluaran. Pemetaan ke CMakeLists
+# hasil gen.sh: rupa -> core/bin/rupa, bade -> bade/bin/bade,
+# core_shared -> core/lib/libcore.so, bade_shared -> bade/lib/libbade.so
+# (tutupannya sama dengan $SEL_TARGETS: object + dua .a + arsip + embed).
+# --target diulang satu per nama: cmake 3.31 + generator Ninja MENOLAK daftar
+# berpemisah koma/spasi ("unknown target 'rupa,bade,...'"), jadi list dipisah
+# spasi lalu dipecah jadi flag terpisah. Tanpa --target, cmake --build memakai
+# default target "all" sehingga cakupan selektif tidak pernah dinyatakan —
+# beda dengan ninja/make yang diberi $SEL_TARGETS
+# (audit workspace-cmake,satria-n1000-r5).
+CMAKE_SEL_TARGETS="rupa bade core_shared bade_shared"
+cmake_sel_cmd() { # build selektif setara SEL_TARGETS (nama target CMake)
+  local -a names=() targs=()
+  read -ra names <<< "$CMAKE_SEL_TARGETS"
+  local n
+  for n in "${names[@]}"; do targs+=(--target "$n"); done
+  cmake --build .cmake-build --parallel "$NPROC" "${targs[@]}"
+}
 sel_cmd() { # build selektif cakupan core
   case $1 in
     satria) "$SATRIA" $SATRIA_ARGS -j"$NPROC" -w core ;;
     ninja) ninja -j"$NPROC" $SEL_TARGETS ;;
-    cmake) cmake --build .cmake-build --parallel "$NPROC" ;;
+    cmake) cmake_sel_cmd ;;
     make) make -j"$NPROC" $SEL_TARGETS ;;
   esac
 }
@@ -25,7 +43,7 @@ dep_cmd() { # build selektif cakupan bade
   case $1 in
     satria) "$SATRIA" $SATRIA_ARGS -j"$NPROC" -w bade ;;
     ninja) ninja -j"$NPROC" $SEL_TARGETS ;;
-    cmake) cmake --build .cmake-build --parallel "$NPROC" ;;
+    cmake) cmake_sel_cmd ;;
     make) make -j"$NPROC" $SEL_TARGETS ;;
   esac
 }

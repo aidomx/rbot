@@ -100,8 +100,8 @@ rules_header() {
   echo
   echo "Correctness (Validation Rules) :"
   printf '  %-10s: %s\n' "cold" "obj penuh, arc 1, lib 4, bin 2 · noop: semua nol"
-  printf '  %-10s: %s\n' "leaf/bade" "cc 1 — dependensi compile terbukti via shim"
-  printf '  %-10s: %s\n' "mod" "cc 0 — arsip berubah, kompilasi tidak perlu ulang"
+  printf '  %-10s: %s\n' "leaf/bade" "cc 1, bin 2 — dependensi compile & relink siklus via shim"
+  printf '  %-10s: %s\n' "mod" "cc 0, bin 2 — arsip berubah, kompilasi tidak perlu ulang"
   printf '  %-10s: %s\n' "touch" "satria 0 (content-hash); ninja/make 6 (mtime, dependen a.h)"
   printf '  %-10s: %s\n' "hedit" "SEMUA tool obj cc 6 (edit konten header pusat), lib 4, bin 2"
   printf '  %-10s: %s\n' "sel" "cakupan disamakan (SEL_TARGETS) — obj cc 2, lib 4, bin 2"

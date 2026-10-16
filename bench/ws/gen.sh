@@ -277,7 +277,7 @@ CMAKE_EOF
 
   # ---- pembanding: Makefile (FAIR: Static Libs + Circular Deps) ----
   {
-    echo "CFLAGS := -Wall -Wextra -fPIC -std=gnu11"
+    echo "CFLAGS := -Wall -Wextra -fPIC -std=gnu11 -Iinclude"
     echo -n "CORE_OBJS :="
     for ((i = 1; i <= NSRC; i++)); do printf ' core/build/r%d.o' "$i"; done
     if ((NSRC == 1)); then printf " core/build/r2.o"; fi
