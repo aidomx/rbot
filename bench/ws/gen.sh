@@ -6,7 +6,7 @@ gen_c() { # gen_c <proyek> <prefix>
   for ((h = 1; h <= NHEAD; h++)); do
     {
       echo "#pragma once"
-      [ "$h" -gt 1 ] && echo "#include \"h$((h - 1)).h\""
+      [ "$h" -gt 1 ] && echo "#include \"h$((h / 2)).h\""
       echo "static const int v$h = $h;"
     } > "$WS/$proj/src/h$h.h"
   done
