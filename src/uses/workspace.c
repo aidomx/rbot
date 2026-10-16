@@ -1645,20 +1645,31 @@ static int wsRunBatchFork(const WsModel *m, const WsWork *batch, int n, int jobs
 }
 #endif
 
-/* Jalankan batch anak build — DEFAULT SERIAL. Paralel lintas proyek (fork)
-   hanya opt-in via SATRIA_WS_PAR=1: pengukuran di rupaws (proot, -j4) menunjukkan
-   paralel anak ~netral pada inkremental kecil dan ~48% LEBIH LAMBAT pada warm
-   build besar (213 compile: 310.8s paralel vs 208.8s serial) — pembagian jobs
-   antar anak menurunkan paralelisme dalam-proyek dan proot/contended gcc tidak
-   diuntungkan. Keuntungan nyata butuh scheduler global lintas proyek (satu pool
-   jobs untuk semua compile), bukan fork per anak. Jalur paralel dipertahankan
-   untuk lingkungan native yang bisa diuntungkan — ukur dulu sebelum memakai. */
+/* Jalankan batch anak build — FASE 2 (binary) DEFAULT PARALEL, FASE 1
+   (library) DEFAULT SERIAL. Alasan terukur:
+   - FASE 2: anak hanya menjalankan link (tak ada compile pool yang kebagi
+     jobs), file state workspace per proyek (.satria/workspace/<proyek>.<leaf>,
+     cmds_state.c) jadi tulisan anak tidak berebut, dan output anak ditampung
+     per slot lalu dicetak urut worklist. Rupaws -j4: 2 link binary bertindih
+     (dari profil: 557 ms + 471 ms -> wall turun ~376 ms pada kasus dirty).
+   - FASE 1: anak membagi jobs; pada compile-heavy itu MALAH merugikan —
+     rupaws cold -j4 (proot, 213 compile): 206.2 s serial vs 252.1 s fork
+     (+22%). Keuntungan nyata butuh scheduler global lintas proyek (satu pool
+     jobs untuk semua compile), bukan pembagian jobs per anak — lihat catatan
+     di wsRunBatchFork. Paralelintas proyek FASE 1 tetap opt-in.
+   Override: SATRIA_WS_PAR=1 keduanya paralel; SATRIA_WS_PAR=0 keduanya
+   serial (nilai "0" dulu ikut dianggap aktif karena hanya getenv; kini
+   ditafsir eksplisit). */
 static int wsRunBatch(const WsModel *m, const WsWork *batch, int n, int jobs, const char *cmd,
                       const char *wsDir, bool libOnly) {
   (void)wsDir; /* proyek dieksekusi in-process dari root workspace */
   if (n <= 0) return 0;
 #ifndef _WIN32
-  if (jobs > 1 && n > 1 && getenv("SATRIA_WS_PAR"))
+  bool par;
+  const char *env = getenv("SATRIA_WS_PAR");
+  if (env && *env) par = strcmp(env, "0") != 0;
+  else par = !libOnly; /* default: FASE 2 paralel, FASE 1 serial */
+  if (par && jobs > 1 && n > 1)
     return wsRunBatchFork(m, batch, n, jobs, cmd, wsDir, libOnly);
 #endif
   return wsRunBatchSerial(m, batch, n, jobs, cmd, wsDir, libOnly);
@@ -2060,13 +2071,23 @@ int workspaceRun(const char *cmd, int jobs, const char *only, const char *releas
     /* FASE 1 — library pass: tiap proyek mengkompilasi source-nya dan
        mengemas lib<name>.a/.so TANPA link binary. Dipecah per level
        dependensi: proyek pada level sama tidak saling butuh hasil build
-       — dikerjakan paralel (lihat wsRunBatch). Urutan topo tetap
-       dijaga: archive rupamod jadi sebelum fase library ruka meng-embed. */
-    for (int i = 0; rc == 0 && i < wcount;) {
-      int j = i;
-      while (j < wcount && work[j].level == work[i].level) j++;
-      rc = wsRunBatch(&m, work + i, j - i, jobs, cmd, wsDir, true);
-      i = j;
+       — dikerjakan paralel (lihat wsRunBatch). Kelompok diambil dari
+       SELURUH worklist untuk tiap level, bukan potongan berturut: urutan
+       topo bisa berpaku level (rupamod 0, bade 1, core 0), sehingga
+       potongan berturut lama menaruh core SETELAH bade walau core tidak
+       butuh hasil build bade. Level dependensi selalu lebih rendah
+       (wsBuildWorklist: level = 1 + max level dependensi), jadi iterasi
+       naik tetap menjaga topo. Urutan topo dijaga juga DI DALAM batch:
+       archive rupamod jadi sebelum fase library ruka meng-embed. */
+    WsWork lvlBatch[WS_MAX_PROJECTS];
+    int maxLevel = 0;
+    for (int i = 0; i < wcount; i++)
+      if (work[i].level > maxLevel) maxLevel = work[i].level;
+    for (int lv = 0; rc == 0 && lv <= maxLevel; lv++) {
+      int n = 0;
+      for (int i = 0; i < wcount; i++)
+        if (work[i].level == lv) lvlBatch[n++] = work[i];
+      if (n > 0) rc = wsRunBatch(&m, lvlBatch, n, jobs, cmd, wsDir, true);
     }
     /* FASE 2 — binary pass: link binary setelah SEMUA library tersedia
        (cdeps bisa siklik — lihat catatan wsBuildWorklist). Proyek
