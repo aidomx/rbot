@@ -69,6 +69,7 @@ s_strace() {
   [ "$HAVE_STRACE" != 1 ] && return 0
   local k r report total_sec total_calls total_err rank
   local pct sec usecs calls errs syscall
+  local -a tcmd
   for k in "${TOOLS[@]}"; do
     for ((r = 1; r <= 1; r++)); do
       reset_all
@@ -81,9 +82,23 @@ s_strace() {
       elif [ "$k" = ninja ]; then
         tcmd=(ninja -j"$NPROC")
       elif [ "$k" = cmake ]; then
-        tcmd=(cmake --build .cmake-build --parallel "$NPROC")
+        # reset_all menghapus .cmake-build; trace configure + build sebagai cold.
+        tcmd=(bash -c 'cmake -S . -B .cmake-build -G Ninja -DCMAKE_C_COMPILER="$1/gcc" >/dev/null && cmake --build .cmake-build --parallel "$2"' _ "$WRAPDIR" "$NPROC")
       else tcmd=(make -j"$NPROC"); fi
-      (cd "$WS" && strace -c -f -o "$report" "${tcmd[@]}") > /dev/null 2>> "$ERRLOG"
+      if ! (cd "$WS" && strace -c -f -o "$report" "${tcmd[@]}") > /dev/null 2>> "$ERRLOG"; then
+        clear_line
+        printf '  %s✗%s %-6s strace %-4s GAGAL (lihat %s)\n' "$C_RED" "$C_RST" "$k" "$r" "$ERRLOG"
+        MISMATCH_RUNS=$((MISMATCH_RUNS + 1))
+        STEP=$((STEP + 1)); draw_progress
+        continue
+      fi
+      if [ ! -s "$report" ] || ! awk '$NF == "total" && $4 ~ /^[0-9]+$/ && $4 > 0 { ok=1 } END { exit !ok }' "$report"; then
+        clear_line
+        printf '  %s✗%s %-6s strace %-4s laporan kosong/tidak valid\n' "$C_RED" "$C_RST" "$k" "$r"
+        MISMATCH_RUNS=$((MISMATCH_RUNS + 1))
+        STEP=$((STEP + 1)); draw_progress
+        continue
+      fi
       total_sec=$(awk '$NF == "total" { print $2; exit }' "$report")
       total_calls=$(awk '$NF == "total" { print $4; exit }' "$report")
       total_err=$(awk '$NF == "total" { if (NF >= 6) print $5; else print 0; exit }' "$report")
