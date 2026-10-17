@@ -1,0 +1,92 @@
+name: Single-Project Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      tools:
+        description: 'Comma-separated tools (ninja,make,bear,satria,cmake,meson,xmake,tup)'
+        type: string
+        required: true
+        default: 'ninja,cmake,satria'
+      sources:
+        description: 'Number of generated C sources'
+        type: number
+        required: true
+        default: 150
+      headers:
+        description: 'Number of generated headers'
+        type: number
+        required: true
+        default: 30
+      repeats:
+        description: 'Measured repetitions'
+        type: number
+        required: true
+        default: 5
+      warmup:
+        description: 'Run an untimed warm-up'
+        type: boolean
+        default: true
+      audit:
+        description: 'Run untimed actual-work audit'
+        type: boolean
+        default: true
+      artifacts:
+        description: 'Keep and upload logs/CSV'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      BENCH_TOOLS: ${{ inputs.tools }}
+      BENCH_SOURCES: ${{ inputs.sources }}
+      BENCH_HEADERS: ${{ inputs.headers }}
+      BENCH_REPEATS: ${{ inputs.repeats }}
+      BENCH_AUDIT: ${{ inputs.audit }}
+      BENCH_ARTIFACTS: ${{ inputs.artifacts }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install benchmark dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build make time
+      - name: Bootstrap Satria
+        run: |
+          ./install.sh --dev
+          test -x build/bin/satria
+      - name: Warm up (untimed)
+        if: ${{ inputs.warmup }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(-b "$PWD/build/bin/satria" -t "$BENCH_TOOLS" -n "$BENCH_SOURCES" -H "$BENCH_HEADERS" -r 1 -A -o "$RUNNER_TEMP/satria-compare-warmup")
+          bash bench/compare.sh "${args[@]}"
+          rm -rf "$RUNNER_TEMP/satria-compare-warmup"
+      - name: Measure
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(-b "$PWD/build/bin/satria" -t "$BENCH_TOOLS" -n "$BENCH_SOURCES" -H "$BENCH_HEADERS" -r "$BENCH_REPEATS")
+          if [[ "$BENCH_AUDIT" != true ]]; then args+=(-A); fi
+          if [[ "$BENCH_ARTIFACTS" == true ]]; then
+            mkdir -p benchmark-results
+            args+=(-k -o "$PWD/benchmark-results/compare")
+            bash bench/compare.sh "${args[@]}" 2>&1 | tee benchmark-results/compare.log
+          else
+            args+=(-o "$RUNNER_TEMP/satria-compare-measured")
+            bash bench/compare.sh "${args[@]}"
+            rm -rf "$RUNNER_TEMP/satria-compare-measured"
+          fi
+      - name: Upload artifacts
+        if: ${{ always() && inputs.artifacts }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: compare-${{ inputs.sources }}-r${{ inputs.repeats }}
+          path: benchmark-results/
+          if-no-files-found: warn

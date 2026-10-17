@@ -4,17 +4,31 @@ on:
   workflow_dispatch:
     inputs:
       tools:
-        description: "Benchmark tools (comma-separated: satria,ninja,make)"
+        description: "Benchmark tools (comma-separated: cninja,ninja,make,satria)"
         type: choice
         required: true
-        default: cmake,satria
+        default: cninja,satria
         options:
-          - cmake
-          - satria
+          - cninja
+          - ninja
           - make
-          - cmake,satria
-          - satria,make
-          - cmake,make,satria
+          - satria
+          - cninja,satria
+          - ninja,satria
+          - make,satria
+          - cninja,ninja,make,satria
+      warmup:
+        description: "Run untimed warm-up"
+        type: boolean
+        default: true
+      artifacts:
+        description: "Keep and upload benchmark logs/artifacts"
+        type: boolean
+        default: true
+      audit:
+        description: "Validate actual workspace work before timing"
+        type: boolean
+        default: true
       sources:
         description: "C sources per project (core and bade)"
         type: number
@@ -55,6 +69,8 @@ jobs:
     timeout-minutes: 180
     env:
       BENCH_TOOLS: ${{ inputs.tools }}
+      BENCH_ARTIFACTS: ${{ inputs.artifacts }}
+      BENCH_AUDIT: ${{ inputs.audit }}
       BENCH_SOURCES: ${{ inputs.sources }}
       BENCH_REPEATS: ${{ inputs.repeats }}
       BENCH_HEADERS: ${{ inputs.headers }}
@@ -70,18 +86,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build make time
 
-      # Setup Node.js 24 untuk environment
-      - name: Setup Node.js 24
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
       - name: Bootstrap satria
         run: |
           ./install.sh --dev
           test -x build/bin/satria
 
       - name: Capture runner environment
+        if: ${{ inputs.artifacts }}
         run: |
           mkdir -p benchmark-results
           {
@@ -102,16 +113,21 @@ jobs:
       # with an independent workspace, preserving the real cold-build work in
       # every subsequent measured repetition.
       - name: Warm up selected tools (not measured)
+        if: ${{ inputs.warmup }}
         run: |
+          mkdir -p benchmark-results
           bash bench/ws.sh \
             -b "$PWD/build/bin/satria" \
             -n "$BENCH_SOURCES" \
             -H "$BENCH_HEADERS" \
             -m "$BENCH_MODULES" \
-            -r 1 -t "$BENCH_TOOLS" \
+            -r 1 -t "$BENCH_TOOLS" -w false -artifacts "$BENCH_ARTIFACTS" \
             -o "$PWD/benchmark-results/warmup" \
-            2>&1 | tee benchmark-results/warmup.log
-          exit "${PIPESTATUS[0]}"
+            > benchmark-results/warmup.log 2>&1
+          rc=$?
+          cat benchmark-results/warmup.log
+          if [ "$BENCH_ARTIFACTS" != true ]; then rm -f benchmark-results/warmup.log; fi
+          exit "$rc"
 
       - name: Measure workspace benchmark
         run: |
@@ -126,14 +142,16 @@ jobs:
             -t "$BENCH_TOOLS" \
             -D "$BENCH_DELAY" \
             -d "$BENCH_MUTATION_DELAY" \
-            -O abba \
+            -O abba -w "$BENCH_AUDIT" -artifacts "$BENCH_ARTIFACTS" \
             -o "$PWD/benchmark-results/measured" \
-            2>&1 | tee benchmark-results/measured.log
-
-          exit "${PIPESTATUS[0]}"
+            > benchmark-results/measured.log 2>&1
+          rc=$?
+          cat benchmark-results/measured.log
+          if [ "$BENCH_ARTIFACTS" != true ]; then rm -f benchmark-results/measured.log; fi
+          exit "$rc"
 
       - name: Upload benchmark artifacts
-        if: always()
+        if: ${{ always() && inputs.artifacts }}
         uses: actions/upload-artifact@v4
         with:
           name: workspace-${{ inputs.tools }}-n${{ inputs.sources }}-r${{ inputs.repeats }}
