@@ -57,21 +57,37 @@ OUTDIR=""                     # -o : direktori kerja
 NPROC=$(nproc 2> /dev/null || echo 4)
 MUT_DELAY=0       # -d : jeda (detik) sebelum tiap edit
 RUN_DELAY=0       # -D : jeda (detik) sebelum tiap pengukuran
+AUDIT_ENABLED=true             # -w true/false: preflight audit sebelum benchmark
+ARTIFACTS_ENABLED=true         # -artifacts true/false: simpan log dan CSV
 RUN_ORDER=grouped # -O : grouped atau abba (rotasi urutan tool)
 
 usage() {
   sed -n '2,/^# ====.*$/p' "$0"
   exit 0
 }
-while getopts "n:H:m:r:b:a:c:d:D:O:ko:s:t:h" opt; do
+# Long option diproses sebelum getopts agar -artifacts false tidak dibaca sebagai -a.
+args=()
+while (($#)); do
+  case $1 in
+    -artifacts|--artifacts)
+      (($# >= 2)) || { echo "-artifacts membutuhkan true/false" >&2; exit 2; }
+      ARTIFACTS_ENABLED=$2; shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- "${args[@]}"
+while getopts "n:H:m:r:b:a:c:d:D:O:ko:s:t:w:h" opt; do
   case $opt in
     n) NSRC=$OPTARG ;; H) NHEAD=$OPTARG ;; m) NMOD=$OPTARG ;;
     r) NRUN=$OPTARG ;; b) SATRIA=$OPTARG ;; a) SATRIA_ARGS=$OPTARG ;;
     c) COMPILERS=$OPTARG ;; k) KEEP=1 ;; o) OUTDIR=$OPTARG ;;
-    s) ONLY=$OPTARG ;; t) TOOLS_OPT=$OPTARG ;; d) MUT_DELAY=$OPTARG ;; D) RUN_DELAY=$OPTARG ;; O) RUN_ORDER=$OPTARG ;; *) usage ;;
+    s) ONLY=$OPTARG ;; t) TOOLS_OPT=$OPTARG ;; d) MUT_DELAY=$OPTARG ;; D) RUN_DELAY=$OPTARG ;; O) RUN_ORDER=$OPTARG ;; w) AUDIT_ENABLED=$OPTARG ;; *) usage ;;
   esac
 done
 
+for v in AUDIT_ENABLED ARTIFACTS_ENABLED; do
+  case ${!v} in true|false) ;; *) echo "$v harus true atau false" >&2; exit 2 ;; esac
+done
 # Validasi argumen SEJAK DINI (problems/ws.md "Noted"): getopts mengambil
 # argv berikutnya apa adanya, jadi `-r -t ninja,satria` membuat NRUN="-t" dan
 # gagal jauh setelah parse dengan pesan membingungkan. Contoh aman:
@@ -119,11 +135,16 @@ esac
 SATRIA=$(cd "$(dirname "$SATRIA")" && pwd)/$(basename "$SATRIA")
 IFS=, read -r -a TOOLS <<< "$TOOLS_OPT"
 for t in "${TOOLS[@]}"; do
-  case $t in cmake | satria | ninja | make) ;; *)
+  case $t in cmake | cninja | satria | ninja | make) ;; *)
     echo "tool tidak dikenal: $t" >&2
     exit 1
     ;;
   esac
+done
+# Alias publik cninja = CMake + Ninja; internal tetap cmake untuk
+# menjaga seluruh generator, skenario dan validator existing.
+for i in "${!TOOLS[@]}"; do
+  [ "${TOOLS[$i]}" = cninja ] && TOOLS[$i]=cmake
 done
 for t in gcc tar ar $(printf '%s\n' "${TOOLS[@]}" | grep -vE '^(satria|cmake)$'); do
   command -v "$t" > /dev/null 2>&1 || {
@@ -233,12 +254,41 @@ echo "Graph     : bade depends_on rupamod (embed), core <-> bade (circular)"
 echo "Directory : $WS"
 echo
 echo "Versions  :"
-for k in "${TOOLS[@]}"; do printf '  %-5s : %s\n' "$k" "${VER[$k]:-?}"; done
+for k in "${TOOLS[@]}"; do printf '  %-6s : %s\n' "$(tool_display "$k")" "${VER[$k]:-?}"; done
 printf '  %-5s : %s\n' "$CC_NAME" "$VER_GCC · $(uname -m)"
 [ -n "$SATRIA_ARGS" ] && echo "satria args : $SATRIA_ARGS"
 echo
 rules_header
 echo
+if [ "$AUDIT_ENABLED" = true ]; then
+  echo "${C_BLD}[Actual Work Audit · untimed]${C_RST}"
+  audit_failed=0
+  AUDIT_QUIET_PROGRESS=1
+  for k in "${TOOLS[@]}"; do
+    : > "$RB_CC_LOG"
+    if prime_tool "$k"; then
+      read -r audit_cc audit_link < <(awk -F'|' '
+        $1=="C" {c++} $1=="L" {l++} END {print c+0, l+0}' "$RB_CC_LOG")
+      # Dua main + dua kumpulan source; dua executable wajib di-link.
+      if ((audit_cc >= 2 * NSRC + 2 && audit_link >= 2)); then
+        printf '  ✓ %-8s compile=%s binary-links=%s · gate OK\n' "$(tool_display "$k")" "$audit_cc" "$audit_link"
+      else
+        printf '  ✗ %-8s compile=%s binary-links=%s (expected >=%s / >=2)\n' \
+          "$(tool_display "$k")" "$audit_cc" "$audit_link" "$((2 * NSRC + 2))"
+        audit_failed=1
+      fi
+    else
+      printf '  ✗ %-8s prime/gate failed\n' "$(tool_display "$k")"
+      audit_failed=1
+    fi
+  done
+  unset AUDIT_QUIET_PROGRESS
+  if ((audit_failed)); then
+    echo "Audit gagal; benchmark dibatalkan. Lihat $ERRLOG" >&2
+    exit 1
+  fi
+  echo
+fi
 echo "${C_BLD}[Execution Stream]${C_RST}"
 
 TOTAL=0
@@ -291,12 +341,17 @@ if [ "$NOT_ACC" -gt 0 ] || [ "$MISMATCH_RUNS" -gt 0 ]; then
     "$C_RED" "$NOT_ACC" "$MISMATCH_RUNS" "$ERRLOG" "$C_RST"
 fi
 echo
+if [ "$ARTIFACTS_ENABLED" = true ]; then
 echo "${C_BLD}Artifacts :${C_RST}"
 echo "  hasil lengkap : $CSV"
 [ -s "$VIEW_CSV" ] && echo "  view data     : $VIEW_CSV"
 [ -s "$WORK_LOG" ] && echo "  bukti kerja   : $WORK_LOG"
 [ "$HAVE_STRACE" = 1 ] && echo "  syscall detail: $SYSCALL_CSV"
 [ -s "$ERRLOG" ] && echo "  stderr tool   : $ERRLOG"
+else
+  rm -f "$CSV" "$VIEW_CSV" "$WORK_LOG" "$SYSCALL_CSV" "$ERRLOG"
+  rm -f "$OUTDIR"/workspace.strace.*.txt
+fi
 rm -f "$OUTDIR/.artifacts.before" "$OUTDIR/.artifacts.after" "$OUTDIR/.gate.list" "$OUTDIR/.nm.list"
 [ "$KEEP" = 1 ] || rm -rf "$WS" "$OUTDIR/.prime"
 

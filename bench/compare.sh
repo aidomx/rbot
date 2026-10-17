@@ -16,7 +16,7 @@
 #            + baris "gcc-floor" (gcc -c 1 file + link langsung, tanpa build
 #              tool) sebagai lantai; selisih tool vs lantai = overhead tool
 #   compdb : generate compile_commands.json (bear: butuh build bersih)
-#   strace : hitung syscall no-op (jika strace tersedia)
+#   strace : hitung syscall no-op (opsional: -s strace; jika tersedia)
 #
 # Metodologi (v2):
 #   - Tiap tool diukur berurutan (tool-major) dan DIPRIME dulu: build bersih
@@ -31,6 +31,7 @@
 #   ./bench/compare.sh                # default: 150 source, 30 header, 5 run
 #   ./bench/compare.sh -n 40 -H 10    # project kecil, cepat
 #   ./bench/compare.sh -s edit,touch  # subset skenario
+#   ./bench/compare.sh -s strace      # syscall profiling (opt-in)
 #   NO_COLOR=1 ./bench/compare.sh     # tanpa warna / progress bar
 #
 # Catatan kejujuran: semua tool menghasilkan artefak yang setara, tapi
@@ -46,13 +47,15 @@ NSRC=150      # -n : jumlah source t1..tN.c
 NHEAD=30      # -H : jumlah header berantai h1->hH
 NRUN=5        # -r : pengulangan per skenario (ambil median)
 SATRIA=bin/satria # -b : binary satria yang dipakai
+AUDIT=1       # -A : disable untimed compile/link audit
 KEEP=0        # -k : 1 = jangan hapus sys.tmp di akhir
 ONLY=""       # -s : hanya skenario ini (comma-separated)
 OUTDIR=""     # -o : direktori kerja benchmark (default sys.tmp di cwd)
-NPROC=$(nproc 2>/dev/null || echo 4)
+NPROC=${NPROC:-$(nproc 2>/dev/null || echo 4)}
+TARGETS=""
 
 usage() { sed -n '2,/^# ====.*$/p' "$0"; exit 0; }
-while getopts "n:H:r:b:t:ko:s:h" opt; do
+while getopts "n:H:r:b:t:ko:s:Ah" opt; do
   case $opt in
     n) NSRC=$OPTARG ;;
     H) NHEAD=$OPTARG ;;
@@ -60,6 +63,7 @@ while getopts "n:H:r:b:t:ko:s:h" opt; do
     b) SATRIA=$OPTARG ;;
     t) TARGETS=$OPTARG ;;
     k) KEEP=1 ;;
+    A) AUDIT=0 ;;
     o) OUTDIR=$OPTARG ;;
     s) ONLY=$OPTARG ;;
     h) usage ;;
@@ -177,6 +181,8 @@ PROJ="$OUTDIR/proj"
 CSV="$OUTDIR/results.csv"
 MARK="$OUTDIR/.mark"
 ERRLOG="$OUTDIR/stderr.log"
+AUDITCSV="$OUTDIR/work-audit.csv"
+AUDITLOG="$OUTDIR/work-audit.log"
 rm -f "$CSV" "$ERRLOG"
 echo 'label,scenario,ms,rc,rebuilt,version' >"$CSV"
 SYSCSV="$OUTDIR/syscalls.csv"
@@ -199,6 +205,64 @@ PBW=$(( COLS - 30 ))
 (( PBW < 8 ))  && PBW=8
 
 STEP=0; TOTAL=1; CUR=""; T_START=$SECONDS
+
+rule_line() {
+  local w=$1 s
+  printf -v s '%*s' "$w" ''
+  printf '%s%s%s\n' "$C_DIM" "${s// /─}" "$C_RST"
+}
+box_width() {
+  local w=$(( COLS > 72 ? 70 : COLS - 2 ))
+  (( w < 40 )) && w=40
+  printf '%s' "$w"
+}
+rules_header() {
+  echo 'Legend :'
+  echo '  ★    : Tercepat pada skenario ini'
+  echo '  ×    : Rasio waktu terhadap yang tercepat'
+  echo '  ✗    : Eksekusi gagal (exit non-zero)'
+  echo
+  echo 'Metrics :'
+  echo '  obj   : Jumlah .o yang berubah (mtime)'
+  echo '  ms    : Durasi eksekusi; laporan memakai median'
+  echo
+  echo 'Correctness (Validation Rules) :'
+  echo '  cold  : build bersih; jumlah .o dicatat'
+  echo '  noop  : build tanpa perubahan'
+  echo '  touch : header di-touch tanpa mengubah konten'
+  echo '  edit  : satu source diubah; gcc-floor diukur terpisah'
+  echo '  compdb: compile_commands.json harus dihasilkan'
+  echo '  Audit : compile/link diuji terpisah tanpa memengaruhi timed runs'
+}
+validation_report() {
+  echo
+  echo "${C_BLD}[Detailed Validation Log]${C_RST}"
+  echo
+  awk -F, -v TOOLS="${TOOLS[*]}" '
+    NR == 1 { next }
+    {
+      key = $2 SUBSEP $1
+      seen[key] = 1
+      if ($4 != 0) failed[key]++
+      else passed[key]++
+    }
+    END {
+      nsc = split("cold noop touch edit compdb", SC, " ")
+      nt = split(TOOLS, TL, " ")
+      w = 12
+      printf "%-*s | %-9s | %s\n", w, "tool", "execution", "status"
+      for (si = 1; si <= nsc; si++) {
+        for (ti = 1; ti <= nt; ti++) {
+          t = TL[ti]
+          name = t == "bear" ? "bear-make" : t == "cmake" ? "cmake-ninja" : t == "meson" ? "meson-ninja" : t
+          k = SC[si] SUBSEP name
+          if (!(k in seen)) continue
+          printf "%-*s | %-9s | %s\n", w, name, SC[si], failed[k] ? "Failed" : "Passed (exit status)"
+        }
+      }
+    }
+  ' "$CSV"
+}
 
 fmt_t() { printf '%d:%02d' $(( $1 / 60 )) $(( $1 % 60 )); }
 
@@ -226,6 +290,36 @@ draw_progress() {
 }
 
 # ---------------------------- generator project ----------------------------
+# Rebuild Ninja graph from the real source tree. Cold measures this work.
+# No precomputed source/object list is reused between cold runs.
+gen_ninja_graph() {
+  local src obj
+  local -a sources=() objects=()
+  # Discover actual files instead of using NSRC as a precomputed manifest.
+  mapfile -d '' -t sources < <(cd "$PROJ" && find src -type f -name '*.c' -print0 | sort -z)
+  [ "${#sources[@]}" -gt 0 ] || return 1
+  {
+    echo 'cflags = -O2 -std=gnu11 -Iinclude'
+    echo
+    echo 'rule cc'
+    echo '  command = gcc $cflags -MMD -MP -MF $out.d -c $in -o $out'
+    echo '  depfile = $out.d'
+    echo '  deps = gcc'
+    echo 'rule link'
+    echo '  command = gcc $in -o $out'
+    echo
+    for src in "${sources[@]}"; do
+      obj="build/${src#src/}"
+      obj="${obj%.c}.o"
+      objects+=("$obj")
+      printf 'build %s: cc %s\n' "$obj" "$src"
+    done
+    printf 'build bin/app: link'
+    printf ' %s' "${objects[@]}"
+    printf '\n\ndefault bin/app\n'
+  } >"$PROJ/build.ninja"
+}
+
 gen_project() {
   rm -rf "$PROJ"
   mkdir -p "$PROJ/src" "$PROJ/include" "$PROJ/bin" "$PROJ/build"
@@ -255,33 +349,14 @@ gen_project() {
     echo "int t1(void);"
     echo "int main(void) { return t1() - 1; }"
   } >"$PROJ/src/main.c"
+  cp "$PROJ/src/t1.c" "$PROJ/src/t1.c.baseline"
 
-  # ---- build.ninja ----
-  {
-    echo "cflags = -O2 -Iinclude"
-    echo
-    echo "rule cc"
-    echo "  command = gcc \$cflags -MMD -MF \$out.d -c \$in -o \$out"
-    echo "  depfile = \$out.d"
-    echo "  deps = gcc"
-    echo "rule link"
-    echo "  command = gcc \$in -o \$out"
-    echo
-    for ((i = 1; i <= NSRC; i++)); do
-      echo "build build/t$i.o: cc src/t$i.c"
-    done
-    echo "build build/main.o: cc src/main.c"
-    echo -n "build bin/app: link build/main.o "
-    for ((i = 1; i <= NSRC; i++)); do printf 'build/t%d.o ' "$i"; done
-    echo
-    echo
-    echo "default bin/app"
-  } >"$PROJ/build.ninja"
+  gen_ninja_graph
 
   # ---- Makefile ----
   {
     echo "CC      := gcc"
-    echo "CFLAGS  := -O2 -Iinclude"
+    echo "CFLAGS  := -O2 -std=gnu11 -Iinclude"
     echo -n "OBJS    := build/main.o "
     for ((i = 1; i <= NSRC; i++)); do printf 'build/t%d.o ' "$i"; done
     echo
@@ -322,15 +397,17 @@ gen_project() {
 
   # ---- CMakeLists.txt (untuk CMake + Ninja) ----
   {
-    echo "cmake_minimum_required(VERSION 3.10)"
+    echo "cmake_minimum_required(VERSION 3.12)"
     echo "project(app C)"
     echo
     echo "set(CMAKE_C_STANDARD 11)"
+    echo "set(CMAKE_C_EXTENSIONS ON)"
     echo "set(CMAKE_C_STANDARD_REQUIRED ON)"
     echo "set(CMAKE_EXPORT_COMPILE_COMMANDS ON)"
     echo "set(CMAKE_RUNTIME_OUTPUT_DIRECTORY \${CMAKE_BINARY_DIR}/bin)"
     echo
-    echo "file(GLOB SOURCES \"src/*.c\")"
+    echo "file(GLOB SOURCES CONFIGURE_DEPENDS \"\${CMAKE_CURRENT_SOURCE_DIR}/src/*.c\")"
+    echo "list(SORT SOURCES)"
     echo "add_executable(app \${SOURCES})"
     echo "target_include_directories(app PRIVATE include)"
     echo "target_compile_options(app PRIVATE -O2 -MMD -MP)"
@@ -375,7 +452,7 @@ gen_project() {
 
   # ---- Tupfile (untuk Tup) ----
   {
-    echo "CFLAGS = -O2 -Iinclude -MMD -MF \$(@).d"
+    echo "CFLAGS = -O2 -std=gnu11 -Iinclude -MMD -MP -MF \$(@).d"
     echo
     echo "foreach src in src/*.c"
     echo "  obj = \$(src:t=o)"
@@ -397,24 +474,25 @@ gen_project() {
 ARGV=()
 tool_argv() {
   case $1 in
-    ninja) ARGV=(ninja) ;;
+    ninja) ARGV=(ninja -j"$NPROC") ;;
     make)  ARGV=(make -j"$NPROC") ;;
     bear)  ARGV=(bear -- make -j"$NPROC") ;;
-    satria)  ARGV=("$SATRIA") ;;
-    cmake) ARGV=(ninja -C build-cmake) ;;
-    meson) ARGV=(ninja -C build-meson) ;;
-    xmake) ARGV=(xmake -y) ;;
+    satria)  ARGV=("$SATRIA" -j"$NPROC") ;;
+    cmake) ARGV=(ninja -C build-cmake -j"$NPROC") ;;
+    meson) ARGV=(ninja -C build-meson -j"$NPROC") ;;
+    xmake) ARGV=(xmake -y -j"$NPROC") ;;
     tup)   ARGV=(tup) ;;
   esac
 }
 tool_cmd() { tool_argv "$1"; "${ARGV[@]}"; }
 
-# Build dari nol termasuk langkah configure (dipakai cold & prime).
+# Cold includes Ninja graph generation and CMake/Meson configure (also used for prime).
 build_full() {
   case $1 in
     satria)  "$SATRIA" -j"$NPROC" ;;
-    cmake) cmake -G Ninja -B build-cmake -DCMAKE_BUILD_TYPE=Release && ninja -C build-cmake ;;
-    meson) meson setup build-meson --buildtype=release && ninja -C build-meson ;;
+    ninja)  gen_ninja_graph && ninja -j"$NPROC" ;;
+    cmake) CC=gcc cmake -G Ninja -B build-cmake -DCMAKE_BUILD_TYPE= -DCMAKE_C_FLAGS="-O2 -std=gnu11" && ninja -C build-cmake -j"$NPROC" ;;
+    meson) CC=gcc meson setup build-meson --buildtype=plain -Dc_args="-O2 -std=gnu11" && ninja -C build-meson -j"$NPROC" ;;
     xmake) xmake -y -j"$NPROC" ;;
     *)     tool_cmd "$1" ;;
   esac
@@ -433,6 +511,23 @@ run_once() {
   ms=$(( (t1 - t0 + 500) / 1000 ))
   nobj=$(find "$PROJ" -name '*.o' -newer "$MARK" 2>/dev/null | wc -l)
   nobj=${nobj//[[:space:]]/}
+  # Check actual outputs, not merely process exit status.
+  if [ "$rc" -eq 0 ] && [ -z "${CHECK_COMPDB:-}" ]; then
+    local binary="$PROJ/bin/app"
+    case "$label" in
+      cmake-ninja) binary="$PROJ/build-cmake/bin/app" ;;
+      meson-ninja) binary="$PROJ/build-meson/app" ;;
+      xmake) binary="" ;; # xmake output location is tool-dependent
+    esac
+    if [ -n "$binary" ] && [ ! -x "$binary" ]; then rc=97; fi
+    if [ "$rc" -eq 0 ]; then
+      case "$scen" in
+        cold) [ "$nobj" -eq "$((NSRC+1))" ] || rc=96 ;;
+        noop) [ "$nobj" -eq 0 ] || rc=96 ;;
+        edit) [ "$nobj" -eq 1 ] || rc=96 ;;
+      esac
+    fi
+  fi
   if [ "$rc" -eq 0 ] && [ -n "${CHECK_COMPDB:-}" ]; then
     find "$PROJ" -name compile_commands.json -newer "$MARK" -size +2c 2>/dev/null \
       | grep -q . || rc=98
@@ -441,6 +536,8 @@ run_once() {
   if [ "$rc" -ne 0 ]; then
     local why="exit $rc"
     [ "$rc" -eq 98 ] && why="compile_commands.json tidak dihasilkan"
+    [ "$rc" -eq 97 ] && why="binary tidak dihasilkan"
+    [ "$rc" -eq 96 ] && why="jumlah objek tidak sesuai"
     printf '  %s✗ %-12s %-7s GAGAL (%s)%s\n' "$C_RED" "$label" "$scen" "$why" "$C_RST"
     ms=-1
   else
@@ -464,7 +561,7 @@ report() {
     }
     END {
       nsc = split("cold noop touch edit compdb", SC, " ")
-      desc["cold"]   = "build dari nol (cmake/meson incl. configure)"
+      desc["cold"]   = "build dari nol (Ninja graph gen, CMake/Meson configure included)"
       desc["noop"]   = "tanpa perubahan"
       desc["touch"]  = "touch 1 header, konten sama"
       desc["edit"]   = "edit 1 source (vs lantai gcc)"
@@ -513,9 +610,6 @@ report() {
     }' "$sorted"
   rm -f "$sorted"
   echo
-  echo "${C_DIM}angka = median ms · ★ tercepat · × = rasio vs tercepat${C_RST}"
-  echo "${C_DIM}obj = rata-rata .o yang dikompilasi ulang. touch: obj 0 pada tool${C_RST}"
-  echo "${C_DIM}selain satria (⚠) = header tidak terlacak; satria 0 = content-hash.${C_RST}"
 }
 
 # ---------------------------- skenario -------------------------------------
@@ -531,7 +625,7 @@ reset_build() {
 
 reset_all() {
   # Reset semua artefak termasuk configure cache
-  ( cd "$PROJ" && rm -rf build bin/app build-cmake build-meson .xmake .tup compile_commands.json )
+  ( cd "$PROJ" && rm -rf build bin/app build-cmake build-meson .xmake .tup .satria .rbot .ninja_log .ninja_deps compile_commands.json )
   if [ "$HAVE_TUP" = 1 ]; then ( cd "$PROJ" && tup init >/dev/null 2>&1 || true ); fi
 }
 
@@ -540,6 +634,8 @@ reset_all() {
 prime_tool() {
   CUR="prime $(label_of "$1")"; draw_progress
   reset_all
+  # Each tool starts from the exact same source content.
+  [ ! -f "$PROJ/src/t1.c.baseline" ] || cp "$PROJ/src/t1.c.baseline" "$PROJ/src/t1.c"
   if ! ( cd "$PROJ" && build_full "$1" && tool_cmd "$1" ) >/dev/null 2>>"$ERRLOG"; then
     clear_line
     printf '  %s! prime gagal: %s (lihat %s)%s\n' "$C_YEL" "$(label_of "$1")" "$ERRLOG" "$C_RST"
@@ -587,7 +683,7 @@ s_touch() {
 
 # ---- EDIT: edit 1 source (file & jumlah edit sama untuk semua tool) -------
 floor_run() {  # lantai: compile 1 file + link, tanpa build tool
-  gcc -O2 -Iinclude -MMD -MP -c src/t1.c -o build/t1.o && gcc build/*.o -o bin/app
+  gcc -O2 -std=gnu11 -Iinclude -MMD -MP -c src/t1.c -o build/t1.o && gcc build/*.o -o bin/app
 }
 s_edit() {
   have_scenario edit || return 0
@@ -629,7 +725,7 @@ s_compdb() {
     [ "$k" = satria ] && ( cd "$PROJ" && sed -i 's/^o.compileCommands = false/o.compileCommands = auto/' Buildfile )
     for ((r = 1; r <= NRUN; r++)); do
       ( cd "$PROJ" && rm -f compile_commands.json build-cmake/compile_commands.json build-meson/compile_commands.json )
-      [ "$k" = bear ] && reset_all
+      [ "$k" = bear ] && { reset_all; cp "$PROJ/src/t1.c.baseline" "$PROJ/src/t1.c"; }
       CHECK_COMPDB=1 run_once "$(label_of "$k")" compdb compdb_run "$k"
     done
     [ "$k" = satria ] && ( cd "$PROJ" && sed -i 's/^o.compileCommands = auto/o.compileCommands = false/' Buildfile )
@@ -638,6 +734,8 @@ s_compdb() {
 
 # ---- STRACE: hitung syscall no-op ----------------------------------------
 s_strace() {
+  # strace hanya berjalan bila diminta eksplisit melalui -s strace.
+  [ -n "$ONLY" ] || return 0
   have_scenario strace || return 0
   [ "$HAVE_STRACE" = 1 ] || { echo "  (strace tidak ada — lewati)"; return 0; }
   local k n f lbl top err
@@ -665,6 +763,146 @@ s_strace() {
   done
 }
 
+# -------------------- untimed actual-work audit -----------------------------
+# GCC shim records the actual compiler driver invocations. The shim delegates
+# to the real compiler; no wrapper is present during measured benchmark runs.
+# Compare source coverage, compile/link counts, and important command options.
+# Each tool gets an isolated clean project state. Non-GCC toolchains are marked
+# unsupported rather than silently claiming equivalence.
+audit_work() {
+  [ "$AUDIT" = 1 ] || return 0
+  local k scen label auditbin realgcc log rc summary
+  realgcc=$(command -v gcc)
+  auditbin="$OUTDIR/.audit-bin"
+  mkdir -p "$auditbin"
+  cat >"$auditbin/gcc" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s\0' "$@" >>"$SATRIA_AUDIT_LOG"
+printf '\n' >>"$SATRIA_AUDIT_LOG"
+exec "$SATRIA_REAL_GCC" "$@"
+SHIM
+  chmod +x "$auditbin/gcc"
+  : >"$AUDITCSV"
+  echo 'tool,scenario,status,compiles,links,unique_sources,details' >"$AUDITCSV"
+  : >"$AUDITLOG"
+  echo
+  echo "${C_BLD}[Actual Work Audit · untimed]${C_RST}"
+  local audit_failed=0
+  for k in "${TOOLS[@]}"; do
+    label=$(label_of "$k")
+    # Only tools whose compiler can be redirected to gcc are auditable here.
+    case "$k" in
+      ninja|make|bear|satria|cmake|meson) ;;
+      *) echo "$label,cold,UNSUPPORTED,0,0,0,compiler interception not verified" >>"$AUDITCSV"; continue ;;
+    esac
+    for scen in cold noop edit; do
+      reset_all
+      cp "$PROJ/src/t1.c.baseline" "$PROJ/src/t1.c"
+      log="$OUTDIR/.audit-$k-$scen.argv"
+      : >"$log"
+      # Build outside the observed window for incremental scenarios.
+      if [ "$scen" != cold ]; then
+        ( cd "$PROJ" && PATH="$auditbin:$PATH" SATRIA_REAL_GCC="$realgcc" SATRIA_AUDIT_LOG="$log" build_full "$k" ) >>"$AUDITLOG" 2>&1 || {
+          echo "$label,$scen,PRIME_FAILED,0,0,0,initial build failed" >>"$AUDITCSV"; continue;
+        }
+        : >"$log"
+        if [ "$scen" = edit ]; then
+          # A semantic source change, not a comment-only edit.
+          sed -i -E 's/(return v[0-9]+ \+ )[0-9]+;/\199999;/' "$PROJ/src/t1.c"
+        fi
+      fi
+      if [ "$scen" = cold ]; then
+        ( cd "$PROJ" && PATH="$auditbin:$PATH" SATRIA_REAL_GCC="$realgcc" SATRIA_AUDIT_LOG="$log" build_full "$k" ) >>"$AUDITLOG" 2>&1
+      else
+        ( cd "$PROJ" && PATH="$auditbin:$PATH" SATRIA_REAL_GCC="$realgcc" SATRIA_AUDIT_LOG="$log" tool_cmd "$k" ) >>"$AUDITLOG" 2>&1
+      fi
+      rc=$?
+      python3 - "$log" "$AUDITCSV" "$label" "$scen" "$rc" "$NSRC" <<'PY_AUDIT'
+import csv, os, sys
+path, out, tool, scenario, rc, nsrc = sys.argv[1:]
+nsrc = int(nsrc)
+raw = open(path, 'rb').read().split(b'\n')
+cmds = [[v.decode(errors='replace') for v in line.split(b'\0') if v]
+        for line in raw if line]
+
+def output_of(cmd):
+    try:
+        return cmd[cmd.index('-o') + 1]
+    except (ValueError, IndexError):
+        return ''
+
+def source_of(cmd):
+    return [x for x in cmd if x.endswith('.c') and
+            (x.startswith('src/') or '/src/' in x)]
+
+def includes_project(cmd):
+    paths = []
+    for i, arg in enumerate(cmd):
+        if arg == '-I' and i + 1 < len(cmd):
+            paths.append(cmd[i + 1])
+        elif arg.startswith('-I') and len(arg) > 2:
+            paths.append(arg[2:])
+        elif arg == '-isystem' and i + 1 < len(cmd):
+            paths.append(cmd[i + 1])
+    return any(os.path.normpath(p) == 'include' or
+               os.path.normpath(p).endswith('/include') for p in paths)
+
+compiles, links, badflags = [], [], []
+for cmd in cmds:
+    output = output_of(cmd)
+    sources = source_of(cmd)
+    if '-c' in cmd and sources:
+        compiles.extend(sources)
+        if '-O2' not in cmd or '-std=gnu11' not in cmd:
+            badflags.append('compile flags')
+        if not includes_project(cmd):
+            badflags.append('include path')
+    elif '-c' not in cmd and output and os.path.basename(output) == 'app':
+        # Only the project executable counts. CMake's compiler checks
+        # (cmTC_*, CMakeFiles/CMakeScratch) are configure work, not app links.
+        links.append(cmd)
+
+expected = nsrc + 1 if scenario == 'cold' else (1 if scenario == 'edit' else 0)
+expected_links = 0 if scenario == 'noop' else 1
+srcset = {os.path.basename(x) for x in compiles}
+if scenario == 'cold':
+    expected_sources = {'main.c'} | {f't{i}.c' for i in range(1, nsrc + 1)}
+elif scenario == 'edit':
+    expected_sources = {'t1.c'}
+else:
+    expected_sources = set()
+issues = []
+if int(rc):
+    issues.append('build exit ' + rc)
+if len(compiles) != expected:
+    issues.append(f'compile {len(compiles)} != {expected}')
+if len(links) != expected_links:
+    issues.append(f'link {len(links)} != {expected_links}')
+if srcset != expected_sources:
+    issues.append('source coverage mismatch')
+if badflags:
+    issues.append('flags: ' + '/'.join(sorted(set(badflags))))
+if any(len([x for x in cmd if x.endswith('.o')]) != nsrc + 1 for cmd in links):
+    issues.append('link object inputs mismatch')
+status = 'PASS' if not issues else 'FAIL'
+with open(out, 'a', newline='') as f:
+    csv.writer(f).writerow([tool, scenario, status, len(compiles),
+                            len(links), len(srcset), '; '.join(issues)])
+PY_AUDIT
+      summary=$(tail -n 1 "$AUDITCSV")
+      case "$summary" in *",PASS,"*) printf '  ✓ %-12s %-5s compile/link validated\n' "$label" "$scen" ;; *) audit_failed=1; printf '  ✗ %-12s %-5s %s\n' "$label" "$scen" "$(printf '%s' "$summary" | cut -d, -f7-)" ;; esac
+    done
+  done
+  reset_all
+  cp "$PROJ/src/t1.c.baseline" "$PROJ/src/t1.c"
+  rm -rf "$auditbin" "$OUTDIR"/.audit-*.argv
+  if [ "$audit_failed" -ne 0 ]; then
+    echo "  ${C_RED}Audit gagal; benchmark tidak dijalankan. Periksa $AUDITCSV dan $AUDITLOG${C_RST}"
+    return 1
+  fi
+  echo "  ${C_GRN}Audit lulus; benchmark dimulai.${C_RST}"
+}
+
 # ---------------------------- main -----------------------------------------
 trap 'echo; echo "dibatalkan."; exit 130' INT
 
@@ -676,16 +914,22 @@ SKIPPED=""
 [ "$HAVE_TUP"   = 0 ] && SKIPPED+=" tup"
 
 echo "${C_BLD}${C_CYN}▌ satria benchmark${C_RST} ${C_DIM}· ${#TOOLS[@]} tool · $NRUN run · median${C_RST}"
-echo "  project : $NSRC source, $NHEAD header"
-echo "  versi   :"
-for k in "${TOOLS[@]}"; do
-  printf '    %-12s %s\n' "$(label_of "$k")" "${VER[$(label_of "$k")]:-?}"
-done
-printf '    %-12s %s\n' gcc "$VER_GCC · $(uname -m)"
-[ -n "$SKIPPED" ] && echo "  ${C_DIM}dilewati (tidak terpasang):$SKIPPED${C_RST}"
-echo "  dir     : $PROJ"
+rule_line "$(box_width)"
+echo "Project   : $NSRC source · $NHEAD header"
+echo "Workers   : $NPROC (all tools with configurable -j)"
+echo "Compiler  : gcc · -O2 · gnu11 (generator-dependent extra flags may remain)"
+echo "Caveat    : cold includes Ninja graph generation and CMake/Meson configure; Bear compiles for compdb"
+echo "Directory : $PROJ"
 echo
-
+echo 'Versions  :'
+for k in "${TOOLS[@]}"; do
+  printf '  %-12s : %s\n' "$(label_of "$k")" "${VER[$(label_of "$k")]:-?}"
+done
+printf '  %-12s : %s\n' gcc "$VER_GCC · $(uname -m)"
+[ -n "$SKIPPED" ] && echo "${C_DIM}Skipped   :$SKIPPED${C_RST}"
+echo
+rules_header
+echo
 # total langkah untuk progress bar
 TOTAL=0
 for s in cold noop touch edit; do
@@ -693,14 +937,17 @@ for s in cold noop touch edit; do
 done
 have_scenario edit && TOTAL=$(( TOTAL + NRUN ))   # baris gcc-floor
 have_scenario compdb && TOTAL=$(( TOTAL + ${#CDB_TOOLS[@]} * NRUN ))
-if have_scenario strace && [ "$HAVE_STRACE" = 1 ]; then TOTAL=$(( TOTAL + ${#TOOLS[@]} )); fi
+if [ -n "$ONLY" ] && have_scenario strace && [ "$HAVE_STRACE" = 1 ]; then TOTAL=$(( TOTAL + ${#TOOLS[@]} )); fi
 [ "$TOTAL" -gt 0 ] || TOTAL=1
 
-CUR="gen"; draw_progress
 gen_project
-clear_line
+if ! audit_work; then
+  exit 1
+fi
+echo
+echo "${C_BLD}[Execution Stream]${C_RST}"
 T_START=$SECONDS
-draw_progress
+CUR="gen"; draw_progress
 
 s_cold
 s_noop
@@ -712,12 +959,18 @@ s_strace
 clear_line
 echo
 echo "${C_GRN}✔ selesai${C_RST} dalam $(fmt_t $(( SECONDS - T_START )))"
-report
-
+validation_report
 echo
-echo "hasil lengkap: $CSV"
-[ -f "$SYSCSV" ] && echo "syscall      : $SYSCSV"
-[ -s "$ERRLOG" ] && echo "stderr tool  : $ERRLOG"
+echo "${C_BLD}BENCHMARK REPORT (Median)${C_RST}"
+rule_line "$(box_width)"
+report
+echo
+echo "${C_BLD}Artifacts :${C_RST}"
+echo "  hasil lengkap : $CSV"
+[ -f "$AUDITCSV" ] && echo "  work audit    : $AUDITCSV"
+[ -s "$AUDITLOG" ] && echo "  audit log     : $AUDITLOG"
+[ -f "$SYSCSV" ] && echo "  syscall detail: $SYSCSV"
+[ -s "$ERRLOG" ] && echo "  stderr tool   : $ERRLOG"
 
 rm -f "$MARK"
 [ "$KEEP" = 1 ] || { rm -rf "$PROJ" "$OUTDIR"/strace.*.txt; }

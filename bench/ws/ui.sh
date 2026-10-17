@@ -49,7 +49,9 @@ clear_line() {
   [ "$TTY" = 1 ] && printf '\r\033[K'
   return 0
 }
+tool_display() { case "$1" in cmake|cninja) printf cninja ;; *) printf "%s" "$1" ;; esac; }
 draw_progress() {
+  [ "${AUDIT_QUIET_PROGRESS:-0}" = 1 ] && return 0
   [ "$TTY" = 1 ] || return 0
   local el=$((SECONDS - T_START)) eta=0 pct
   pct=$((STEP * 100 / TOTAL))

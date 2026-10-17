@@ -62,14 +62,14 @@ run_once() {
     "$RB_CC_LOG" 2> /dev/null) || { ncc=0; nlnk=0; }
   # Jejak bukti kerja aktual per run (audit pasca-run: compile/relink mana
   # yang benar-benar terjadi).
-  { printf '## %s/%s rc=%s\n' "$label" "$scen" "$rc"
+  { printf '## %s/%s rc=%s\n' "$(tool_display "$label")" "$scen" "$rc"
     sed 's/^/   /' "$RB_CC_LOG" 2> /dev/null; } >> "$WORK_LOG"
 
   expect_check "$label" "$scen" "$nobj" "$narc" "$nlib" "$nbin" "$ncc"
   # Jejak ringkas per run untuk laporan view: aktual + harapan (EXP_* = -1
   # bila tidak di-hard-check) + miss flag (kerja berbeda dari harapan).
   printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
-    "$label" "$scen" "$rc" "$ms" "$nobj" "$narc" "$nlib" "$nbin" "$ncc" \
+    "$(tool_display "$label")" "$scen" "$rc" "$ms" "$nobj" "$narc" "$nlib" "$nbin" "$ncc" \
     "$EXP_OBJ" "$EXP_ARC" "$EXP_LIB" "$EXP_BIN" "$EXP_CC" \
     $([ -n "$EXPECT_MISS" ] && echo 1 || echo 0) >> "$VIEW_CSV"
   if [ "$rc" -eq 0 ] && [ -n "$EXPECT_MISS" ]; then
@@ -80,16 +80,16 @@ run_once() {
   fi
   clear_line
   if [ "$rc" -eq 0 ] && [ -n "$EXPECT_MISS" ]; then
-    printf '  %s✗ %-6s %-6s Not in accordance:%s%s\n' "$C_RED" "$label" "$scen" "$EXPECT_MISS" "$C_RST"
+    printf '  %s✗ %-6s %-6s Not in accordance:%s%s\n' "$C_RED" "$(tool_display "$label")" "$scen" "$EXPECT_MISS" "$C_RST"
   elif [ "$rc" -ne 0 ]; then
-    printf '  %s✗ %-6s %-6s GAGAL (exit %s)%s\n' "$C_RED" "$label" "$scen" "$rc" "$C_RST"
+    printf '  %s✗ %-6s %-6s GAGAL (exit %s)%s\n' "$C_RED" "$(tool_display "$label")" "$scen" "$rc" "$C_RST"
     MISMATCH_RUNS=$((MISMATCH_RUNS + 1))
     ms=-1
   else
     # Per-run: satu baris ringkas, format "> [tool in skenario] N ms obj cc lib bin" (rata kolom, <= 54 kolom). "summary vs except" tidak dicetak di sini
     # (verdict baru pasti setelah semua run selesai, lihat laporan view).
     printf '%s>%s [%-5s %-8s] %5sms | obj:%s cc:%s lib:%s bin:%s\n' \
-      "$C_CYN" "$C_RST" "$label" "$scen" "$ms" "$nobj" "$ncc" "$nlib" "$nbin"
+      "$C_CYN" "$C_RST" "$(tool_display "$label")" "$scen" "$ms" "$nobj" "$ncc" "$nlib" "$nbin"
   fi
   local ver=${VER[$label]:-}
   ver=${ver//,/ }

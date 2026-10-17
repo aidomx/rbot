@@ -60,14 +60,14 @@ for (i = 1; i <= k; i++) {
 len = int(M[i] / mx * BW + 0.5); if (len < 1) len = 1; br = ""
 for (j = 1; j <= BW; j++) br = br (j <= len ? "█" : "░")
 col = (i == 1) ? G : ""; mark = (i == 1) ? "★" : " "
-printf "  %s%s %-6s %s %6d ms %5.2f×%s", col, mark, L[i], br, M[i], M[i] / best, Z
+printf "  %s%s %-6s %s %6d ms %5.2f×%s", col, mark, (L[i]=="cmake"?"cninja":L[i]), br, M[i], M[i] / best, Z
 if (BD[i] > 0) printf " %s✗%d%s", R, BD[i], Z
 # Divergensi pekerjaan antar tool: tanda [!] menempel di belakang baris
 # (design/bench_ws_output.md) — waktu bukan perbandingan setara 1:1.
 if (div) printf " %s[!]%s", Y, Z
 printf "\n"
 }
-for (i = 1; i <= nf; i++) printf "  %s✗ %-6s semua run gagal atau tidak sesuai harapan%s\n", R, fl[i], Z
+for (i = 1; i <= nf; i++) printf "  %s✗ %-6s semua run gagal atau tidak sesuai harapan%s\n", R, (fl[i]=="cmake"?"cninja":fl[i]), Z
 }
 }
 function diverges(arr, cnt,  i, mn, mx) {
