@@ -59,6 +59,7 @@ MUT_DELAY=0       # -d : jeda (detik) sebelum tiap edit
 RUN_DELAY=0       # -D : jeda (detik) sebelum tiap pengukuran
 AUDIT_ENABLED=true             # -w true/false: preflight audit sebelum benchmark
 ARTIFACTS_ENABLED=true         # -artifacts true/false: simpan log dan CSV
+STRACE_ENABLED=false           # -strace true/false: syscall profiling (opt-in)
 RUN_ORDER=grouped # -O : grouped atau abba (rotasi urutan tool)
 
 usage() {
@@ -69,6 +70,9 @@ usage() {
 args=()
 while (($#)); do
   case $1 in
+    -strace|--strace)
+      (($# >= 2)) || { echo "-strace membutuhkan true/false" >&2; exit 2; }
+      STRACE_ENABLED=$2; shift 2 ;;
     -artifacts|--artifacts)
       (($# >= 2)) || { echo "-artifacts membutuhkan true/false" >&2; exit 2; }
       ARTIFACTS_ENABLED=$2; shift 2 ;;
@@ -85,7 +89,7 @@ while getopts "n:H:m:r:b:a:c:d:D:O:ko:s:t:w:h" opt; do
   esac
 done
 
-for v in AUDIT_ENABLED ARTIFACTS_ENABLED; do
+for v in AUDIT_ENABLED ARTIFACTS_ENABLED STRACE_ENABLED; do
   case ${!v} in true|false) ;; *) echo "$v harus true atau false" >&2; exit 2 ;; esac
 done
 # Validasi argumen SEJAK DINI (problems/ws.md "Noted"): getopts mengambil
@@ -167,7 +171,7 @@ if [ -n "${PROOT:-}" ] || [ -n "${PROOT_L2S_DIR:-}" ]; then IN_PROOT=1; fi
 case ${container:-} in *proot*) IN_PROOT=1 ;; esac
 HAVE_STRACE=0
 STRACE_SKIP=""
-if command -v strace > /dev/null 2>&1; then
+if [ "$STRACE_ENABLED" = true ] && command -v strace > /dev/null 2>&1; then
   if [ "${SATRIA_BENCH_STRACE:-}" = 1 ]; then
     HAVE_STRACE=1
   elif [ "$IN_PROOT" = 1 ]; then
