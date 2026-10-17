@@ -25,6 +25,10 @@ on:
         description: "Keep and upload benchmark logs/artifacts"
         type: boolean
         default: true
+      strace:
+        description: "Enable syscall profiling (strace; slower on large workspaces)"
+        type: boolean
+        default: false
       audit:
         description: "Validate actual workspace work before timing"
         type: boolean
@@ -71,6 +75,7 @@ jobs:
       BENCH_TOOLS: ${{ inputs.tools }}
       BENCH_ARTIFACTS: ${{ inputs.artifacts }}
       BENCH_AUDIT: ${{ inputs.audit }}
+      BENCH_STRACE: ${{ inputs.strace }}
       BENCH_SOURCES: ${{ inputs.sources }}
       BENCH_REPEATS: ${{ inputs.repeats }}
       BENCH_HEADERS: ${{ inputs.headers }}
@@ -115,13 +120,12 @@ jobs:
       - name: Warm up selected tools (not measured)
         if: ${{ inputs.warmup }}
         run: |
-          mkdir -p benchmark-results
           bash bench/ws.sh \
             -b "$PWD/build/bin/satria" \
             -n "$BENCH_SOURCES" \
             -H "$BENCH_HEADERS" \
             -m "$BENCH_MODULES" \
-            -r 1 -t "$BENCH_TOOLS" -w false -artifacts "$BENCH_ARTIFACTS" \
+            -r 1 -t "$BENCH_TOOLS" -w false -strace false -artifacts "$BENCH_ARTIFACTS" \
             -o "$PWD/benchmark-results/warmup" \
             > benchmark-results/warmup.log 2>&1
           rc=$?
@@ -142,7 +146,7 @@ jobs:
             -t "$BENCH_TOOLS" \
             -D "$BENCH_DELAY" \
             -d "$BENCH_MUTATION_DELAY" \
-            -O abba -w "$BENCH_AUDIT" -artifacts "$BENCH_ARTIFACTS" \
+            -O abba -w "$BENCH_AUDIT" -strace "$BENCH_STRACE" -artifacts "$BENCH_ARTIFACTS" \
             -o "$PWD/benchmark-results/measured" \
             > benchmark-results/measured.log 2>&1
           rc=$?
