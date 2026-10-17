@@ -44,7 +44,7 @@ run_once() {
   # WS_SHARED_VALUE mengalir ke kedua main).
   if [ "$rc" -eq 0 ]; then
     # Path binary: satria root-centric (bin/ di root workspace — design/
-    # workspace_v1.md); ninja/make memakai layout nested per proyek.
+    # workspace_v1.md); CMake memakai layout nested per proyek.
     local rupa_bin bade_bin
     case $label in
       satria) rupa_bin="$WS/bin/rupa"; bade_bin="$WS/bin/bade" ;;

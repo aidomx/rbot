@@ -66,7 +66,7 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     touch)
-      # Konten header sama: satria wajib 0 (content-hash); ninja/make (mtime)
+      # Konten header sama: satria wajib 0 (content-hash); CMake (mtime)
       # wajib membangun ulang seluruh dependen library/a.h.
       if [ "$k" = satria ]; then
         EXP_OBJ=0 EXP_ARC=0 EXP_LIB=0 EXP_BIN=0 EXP_CC=0
@@ -82,7 +82,7 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       fi
       ;;
     hedit)
-      # Edit isi header pusat: SEMUA tool wajib mengompilasi ulang persis
+      # Edit isi header pusat: kedua tool wajib mengompilasi ulang persis
       # dependen library/a.h (r1,r2,main core; k1,k2,main bade), memperbarui
       # keempat library dan kedua binary. Runtime check memastikan tidak ada
       # object basi yang lolos: nilai WS_SHARED_VALUE mengalir ke kedua main.
@@ -94,7 +94,7 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       exp_chk cc "$c" "$EXP_CC"
       ;;
     sel)
-      # Kesetaraan selektif: satria -w core dan ninja/make <SEL_TARGETS> wajib
+      # Kesetaraan selektif: satria -w core dan CMake <SEL_TARGETS> wajib
       # mengerjakan pekerjaan yang sama — compile r1.c + k1.c, 4 library,
       # 2 binary, nol arsip.
       EXP_OBJ=2 EXP_ARC=0 EXP_LIB=4 EXP_BIN=2 EXP_CC=2
@@ -116,7 +116,7 @@ expect_check() { # <tool> <scen> <obj> <arc> <lib> <bin> <cc>
       ;;
     libtouch)
       # Header internal (library/ext.h) dengan konten sama: satria wajib 0
-      # (content-hash). ninja/make (mtime) membangun ulang 2 TU yang meng-include-nya.
+      # (content-hash). CMake (mtime) membangun ulang 2 TU yang meng-include-nya.
       if [ "$k" = satria ]; then
         EXP_OBJ=0 EXP_ARC=0 EXP_LIB=0 EXP_BIN=0 EXP_CC=0
         exp_chk obj "$o" "$EXP_OBJ"

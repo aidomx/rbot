@@ -1,6 +1,6 @@
 # Shim gcc/ld: mencatat compile/link nyata per run (bukti kerja).
 # ------------------------ shim gcc/ld (bukti kerja) ------------------------
-# satria/ninja/make semuanya memanggil gcc/ld lewat PATH (posix_spawnp/direct),
+# satria dan CMake+Ninja keduanya memanggil gcc/ld lewat PATH (posix_spawnp/direct),
 # jadi shim ini mencatat setiap kompilasi (C), link binary (L), link shared
 # (S), embed biner (E), dan link ld lain (D) tanpa mengubah hasil build.
 # Log per run dipakai untuk membuktikan compile/relink yang benar-benar

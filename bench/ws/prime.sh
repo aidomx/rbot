@@ -1,6 +1,7 @@
 # Prime tool + gate correctness + skenario release.
 prime_cached() { # prime_cached <tool>: prime sekali per tool, lalu cp -a
   local k=$1 snap="$OUTDIR/.prime/$1"
+  select_ws "$k" || return 1
   [ -n "${PRIME_FAIL[$k]:-}" ] && return 1
   if [ -n "${PRIME_OK[$k]:-}" ]; then
     rm -rf "$WS"
@@ -39,7 +40,7 @@ s_release() {
 
 reset_all() {
   # root build/bin/lib/dist = output root-centric satria (design/
-  # workspace_v1.md); sisanya layout nested ninja/make + state satria.
+  # workspace_v1.md); sisanya layout nested CMake + state satria.
   (cd "$WS" && rm -rf core/build core/bin bade/build bade/bin \
     rupamod/build rupamod/modules modules .satria core/lib bade/lib .ninja_log .ninja_deps \
     build bin lib dist .cmake-build)
@@ -60,6 +61,7 @@ check_artifacts() {
 }
 
 prime_tool() {
+  select_ws "$1" || return 1
   CUR="prime $1"
   draw_progress
   gen_ws # isolated workspace per tool, including cache and state
@@ -81,7 +83,7 @@ prime_tool() {
 prime_gate() {
   local archive="$WS/modules/rupa_modules.tar" f list="$OUTDIR/.gate.list"
   # Path keluaran per tool: satria root-centric (bin/, lib/, build/<proyek>/
-  # di root workspace — design/workspace_v1.md); ninja/make layout nested.
+  # di root workspace — design/workspace_v1.md); CMake layout nested.
   local rupa_bin bade_bin core_so bade_so core_main bade_main core_a bade_a
   case $1 in
     satria)
@@ -93,10 +95,6 @@ prime_gate() {
       core_so="core/lib/libcore.so"; bade_so="bade/lib/libbade.so"
       core_main=".cmake-build/CMakeFiles/rupa.dir/core/src/main.c.o"; bade_main=".cmake-build/CMakeFiles/bade.dir/bade/src/main.c.o"
       core_a="core/build/libcore.a"; bade_a="bade/build/libbade.a" ;;
-    *)
-      rupa_bin="core/bin/rupa"; bade_bin="bade/bin/bade"
-      core_so="core/lib/libcore.so"; bade_so="bade/lib/libbade.so"
-      core_main="core/build/main.o"; bade_main="bade/build/main.o"; core_a="core/build/libcore.a"; bade_a="bade/build/libbade.a" ;;
   esac
   [ -s "$archive" ] || { echo "  ✗ $1: archive tidak ditemukan: $archive" >&2; return 1; }
   tar -tf "$archive" > "$list" 2> /dev/null

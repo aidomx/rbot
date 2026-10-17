@@ -1,4 +1,4 @@
-# Generator workspace (source C, Buildfile.ws, pembanding ninja/make).
+# Generator workspace (source C, Buildfile.ws, CMakeLists.txt).
 # ---------------------------- generator workspace --------------------------
 gen_c() { # gen_c <proyek> <prefix>
   local proj=$1 pre=$2 h i
@@ -50,6 +50,13 @@ EMBED_MODE=$(embed_mode)
 embed_extra() { [ "$EMBED_MODE" = carray ] && echo 1 || echo 0; }
 
 gen_ws() {
+  # Tool workspace sudah dipilih lewat select_ws; hanya buat konfigurasi miliknya.
+  local ws_tool=${WS##*/}
+  case "$ws_tool" in satria | cmake) ;; *)
+    echo "gen_ws: unknown tool workspace: $WS" >&2
+    return 1
+    ;;
+  esac
   rm -rf "$WS"
   mkdir -p "$WS/rupamod"
   local i
@@ -108,45 +115,48 @@ EOF
   # -n 1 tetap memiliki dua translation unit untuk menguji siklus simbol.
   # Source tambahan khusus ini tidak mengubah arti -n (jumlah source beban).
   # ---- Buildfile.ws (Sesuai desain terbaru) ----
-  {
-    extract_tmp="${TMPDIR:-${PREFIX:+$PREFIX/tmp}}"
-    extract_tmp="${extract_tmp:-/tmp}"
-    echo "use workspace"
-    echo "projects.rupamod as mod"
-    echo "projects.core as core"
-    echo "projects = bade, core, rupamod"
-    echo "compiler = $COMPILERS"
-    echo "flags = Wall, Wextra, MMD, MP, fPIC"
-    echo "headers.each = auto"
-    echo "std = gnu11"
-    echo "mod.output.binary = false"
-    echo "mod.archive.src = ."
-    echo "mod.archive.name = rupa_modules"
-    echo "mod.archive.with = tar"
-    echo "mod.archive.dir = modules"
-    echo "mod.archive.exclude = build, dist, LICENSE, README.md, self_archive"
-    echo "core.sources = src"
-    echo "core.exclude = main.c"
-    echo "core.output.binaryName = rupa"
-    echo "core.output.libraryName = core"
-    echo "core.output.libraryShared = true"
-    echo "bade.sources = manager, src"
-    echo "bade.exclude = manager/main.c"
-    echo "bade.output.binaryName = bade"
-    echo "bade.output.libraryName = bade"
-    echo "bade.output.libraryShared = true"
-    echo "bade.depends_on = rupamod"
-    echo "bade.embedded.modules.file = modules/rupa_modules.tar"
-    echo "bade.embedded.modules.variable = MODULES"
-    echo "bade.embedded.modules.extract = ${extract_tmp}/rupa-system"
-    echo "bade.embedded.modules.pattern = .rp"
-    echo "bade.library.cdeps = core"
-    echo "core.library.cdeps = bade"
-  } > "$WS/Buildfile.ws"
+  if [ "$ws_tool" = satria ]; then
+    {
+      extract_tmp="${TMPDIR:-${PREFIX:+$PREFIX/tmp}}"
+      extract_tmp="${extract_tmp:-/tmp}"
+      echo "use workspace"
+      echo "projects.rupamod as mod"
+      echo "projects.core as core"
+      echo "projects = bade, core, rupamod"
+      echo "compiler = $COMPILERS"
+      echo "flags = Wall, Wextra, MMD, MP, fPIC"
+      echo "headers.each = auto"
+      echo "std = gnu11"
+      echo "mod.output.binary = false"
+      echo "mod.archive.src = ."
+      echo "mod.archive.name = rupa_modules"
+      echo "mod.archive.with = tar"
+      echo "mod.archive.dir = modules"
+      echo "mod.archive.exclude = build, dist, LICENSE, README.md, self_archive"
+      echo "core.sources = src"
+      echo "core.exclude = main.c"
+      echo "core.output.binaryName = rupa"
+      echo "core.output.libraryName = core"
+      echo "core.output.libraryShared = true"
+      echo "bade.sources = manager, src"
+      echo "bade.exclude = manager/main.c"
+      echo "bade.output.binaryName = bade"
+      echo "bade.output.libraryName = bade"
+      echo "bade.output.libraryShared = true"
+      echo "bade.depends_on = rupamod"
+      echo "bade.embedded.modules.file = modules/rupa_modules.tar"
+      echo "bade.embedded.modules.variable = MODULES"
+      echo "bade.embedded.modules.extract = ${extract_tmp}/rupa-system"
+      echo "bade.embedded.modules.pattern = .rp"
+      echo "bade.library.cdeps = core"
+      echo "core.library.cdeps = bade"
+    } > "$WS/Buildfile.ws"
+  fi
 
   # CMake idiomatis, mengikuti tests/rupaws/CMakeLists.txt:
   # CMake sendiri melakukan discovery, compile, archive dan link.
-  cat > "$WS/CMakeLists.txt" <<'CMAKE_EOF'
+  if [ "$ws_tool" = cmake ]; then
+    cat > "$WS/CMakeLists.txt" << 'CMAKE_EOF'
 cmake_minimum_required(VERSION 3.20)
 project(wsbench C)
 set(CMAKE_C_STANDARD 11)
@@ -204,114 +214,7 @@ foreach(t IN ITEMS rupa bade)
   target_link_libraries(${t} PRIVATE -Wl,--start-group core_static bade_static -Wl,--end-group)
 endforeach()
 CMAKE_EOF
-  sed -i "s|@EMBED_MODE@|$EMBED_MODE|g; s|@WS_LIB@|$WS_LIB|g" "$WS/CMakeLists.txt"
+    sed -i "s|@EMBED_MODE@|$EMBED_MODE|g; s|@WS_LIB@|$WS_LIB|g" "$WS/CMakeLists.txt"
+  fi
 
-  # ---- pembanding: build.ninja (FAIR: Static Libs + Circular Deps) ----
-  {
-    echo "cflags = -Wall -Wextra -fPIC -std=gnu11 -Iinclude"
-    echo "rule cc"
-    echo "  command = mkdir -p \$\$(dirname \$out) && gcc \$cflags -MMD -MF \$out.d -c \$in -o \$out"
-    echo "  depfile = \$out.d"
-    echo "  deps = gcc"
-    echo "rule shared"
-    echo "  command = mkdir -p \$\$(dirname \$out) && gcc -shared -o \$out \$in"
-    echo "rule ar"
-    echo "  command = mkdir -p \$\$(dirname \$out) && ar rcs \$out \$in"
-    echo "rule link_group"
-    echo "  command = mkdir -p \$\$(dirname \$out) && gcc \$main -Wl,-u,_binary_modules_rupa_modules_tar_start -Wl,--start-group \$in -Wl,--end-group -o \$out"
-    echo "rule pack"
-    echo "  command = mkdir -p \$\$(dirname \$out) && tar -cf \$out -C rupamod --exclude=build --exclude=dist --exclude=LICENSE --exclude=README.md --exclude=self_archive ."
-    echo "rule embed"
-    if [ "$EMBED_MODE" = carray ]; then
-      echo "  command = mkdir -p \$\$(dirname \$out) && sh $WS_LIB/embed_c.sh \$in \$out.c _binary_modules_rupa_modules_tar && gcc -c -fPIC -o \$out \$out.c"
-    else
-      echo "  command = mkdir -p \$\$(dirname \$out) && ld -r -b binary -o \$out \$in"
-    fi
-
-    local p pre
-    for p in core:r bade:k; do
-      pre=${p#*:}
-      p=${p%%:*}
-      echo "build $p/build/main.o: cc $p/src/main.c"
-      for ((i = 1; i <= NSRC; i++)); do echo "build $p/build/$pre$i.o: cc $p/src/$pre$i.c"; done
-    done
-
-    echo -n "build modules/rupa_modules.tar: pack"
-    for ((i = 1; i <= NMOD; i++)); do printf ' rupamod/m%d.rp' "$i"; done
-    echo
-
-    echo "build bade/build/embed.o: embed modules/rupa_modules.tar"
-
-    if ((NSRC == 1)); then
-      echo "build core/build/r2.o: cc core/src/r2.c"
-      echo "build bade/build/k2.o: cc bade/src/k2.c"
-    fi
-    echo -n "build core/build/libcore.a: ar"
-    for ((i = 1; i <= NSRC; i++)); do printf ' core/build/r%d.o' "$i"; done
-    if ((NSRC == 1)); then printf " core/build/r2.o"; fi
-    echo
-
-    echo -n "build bade/build/libbade.a: ar"
-    for ((i = 1; i <= NSRC; i++)); do printf ' bade/build/k%d.o' "$i"; done
-    if ((NSRC == 1)); then printf " bade/build/k2.o"; fi
-    echo " bade/build/embed.o"
-
-    # Shared libraries dibangun dari object yang sama, tanpa melewatkan embed.
-    echo -n "build core/lib/libcore.so: shared"
-    for ((i = 1; i <= NSRC; i++)); do printf ' core/build/r%d.o' "$i"; done
-    if ((NSRC == 1)); then printf ' core/build/r2.o'; fi
-    echo
-    echo -n "build bade/lib/libbade.so: shared"
-    for ((i = 1; i <= NSRC; i++)); do printf ' bade/build/k%d.o' "$i"; done
-    if ((NSRC == 1)); then printf ' bade/build/k2.o'; fi
-    echo " bade/build/embed.o"
-
-    # Circular dependency diselesaikan dengan linker group
-    echo "build core/bin/rupa: link_group core/build/libcore.a bade/build/libbade.a | core/build/main.o"
-    echo "  main = core/build/main.o"
-    echo "build bade/bin/bade: link_group core/build/libcore.a bade/build/libbade.a | bade/build/main.o"
-    echo "  main = bade/build/main.o"
-
-    echo "default core/bin/rupa bade/bin/bade core/lib/libcore.so bade/lib/libbade.so"
-  } > "$WS/build.ninja"
-
-  # ---- pembanding: Makefile (FAIR: Static Libs + Circular Deps) ----
-  {
-    echo "CFLAGS := -Wall -Wextra -fPIC -std=gnu11 -Iinclude"
-    echo -n "CORE_OBJS :="
-    for ((i = 1; i <= NSRC; i++)); do printf ' core/build/r%d.o' "$i"; done
-    if ((NSRC == 1)); then printf " core/build/r2.o"; fi
-    echo
-    echo -n "BADE_OBJS :="
-    for ((i = 1; i <= NSRC; i++)); do printf ' bade/build/k%d.o' "$i"; done
-    if ((NSRC == 1)); then printf " bade/build/k2.o"; fi
-    echo " bade/build/embed.o"
-    echo -n "MODS :="
-    for ((i = 1; i <= NMOD; i++)); do printf ' rupamod/m%d.rp' "$i"; done
-    echo
-
-    echo "all: core/bin/rupa bade/bin/bade core/lib/libcore.so bade/lib/libbade.so"
-
-    # Linking dengan --start-group untuk circular dependency
-    printf 'core/bin/rupa: core/build/main.o core/build/libcore.a bade/build/libbade.a\n\t@mkdir -p $(@D)\n\tgcc $< -Wl,-u,_binary_modules_rupa_modules_tar_start -Wl,--start-group core/build/libcore.a bade/build/libbade.a -Wl,--end-group -o $@\n'
-    printf 'bade/bin/bade: bade/build/main.o core/build/libcore.a bade/build/libbade.a\n\t@mkdir -p $(@D)\n\tgcc $< -Wl,-u,_binary_modules_rupa_modules_tar_start -Wl,--start-group core/build/libcore.a bade/build/libbade.a -Wl,--end-group -o $@\n'
-
-    printf 'core/build/libcore.a: $(CORE_OBJS)\n\tar rcs $@ $^\n'
-    printf 'bade/build/libbade.a: $(BADE_OBJS)\n\tar rcs $@ $^\n'
-
-    printf 'modules/rupa_modules.tar: $(MODS)\n\t@mkdir -p $(@D)\n\ttar -cf $@ -C rupamod --exclude=build --exclude=dist --exclude=LICENSE --exclude=README.md --exclude=self_archive .\n'
-    if [ "$EMBED_MODE" = carray ]; then
-      printf 'bade/build/embed.o: modules/rupa_modules.tar\n\t@mkdir -p $(@D)\n\tsh %s $< $@.c _binary_modules_rupa_modules_tar && gcc -c -fPIC -o $@ $@.c\n' "$WS_LIB/embed_c.sh"
-    else
-      printf 'bade/build/embed.o: modules/rupa_modules.tar\n\t@mkdir -p $(@D)\n\tld -r -b binary -o $@ $<\n'
-    fi
-
-    printf 'core/lib/libcore.so: $(CORE_OBJS)\n\t@mkdir -p $(@D)\n\tgcc -shared -o $@ $^\n'
-    printf 'bade/lib/libbade.so: $(BADE_OBJS)\n\t@mkdir -p $(@D)\n\tgcc -shared -o $@ $^\n'
-
-    printf 'core/build/%%.o: core/src/%%.c\n\t@mkdir -p $(@D)\n\tgcc $(CFLAGS) -MMD -MP -c $< -o $@\n'
-    printf 'bade/build/%%.o: bade/src/%%.c\n\t@mkdir -p $(@D)\n\tgcc $(CFLAGS) -MMD -MP -c $< -o $@\n'
-
-    echo '-include $(CORE_OBJS:.o=.d) $(BADE_OBJS:.o=.d) core/build/main.d bade/build/main.d'
-  } > "$WS/Makefile"
 }

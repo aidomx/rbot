@@ -8,7 +8,7 @@
 #   bade    : binary C + library (bade), depends_on rupamod, embed arsip
 #
 # PERBEDAAN PENTING:
-# Skrip ini memaksa ninja/make melakukan pekerjaan yang SAMA dengan satria:
+# Benchmark end-to-end: Satria vs CMake+Ninja, dengan pekerjaan build ekuivalen:
 # 1. Membangun static library (libcore.a, libbade.a).
 # 2. Menyelesaikan circular dependency (core <-> bade) menggunakan
 #    linker group (-Wl,--start-group ... -Wl,--end-group).
@@ -17,7 +17,7 @@
 # Skenario: cold, noop, leaf, bade, mod, touch, hedit, sel, dep, libtouch, libhdr, rel, strace.
 # Setiap run memakai shim gcc/ld (PATH) yang mencatat setiap kompilasi/link
 # ke work.log — bukti pekerjaan aktual, bukan sekadar timestamp artefak.
-#   touch : touch library/a.h tanpa ubah konten (satria: skip; ninja/make: rebuild)
+#   touch : touch include/a.h tanpa ubah konten (perilaku tiap tool diaudit)
 #   hedit : ubah ISI library/a.h -> semua tool wajib rebuild dependen header
 #   sel   : edit core+bade, cakupan -w core (target keluaran disamakan antar tool)
 #   dep   : edit .rp+core, cakupan -w bade (target keluaran disamakan antar tool)
@@ -52,7 +52,7 @@ SATRIA_ARGS=""                # -a : argumen tambahan untuk satria
 COMPILERS="gcc"               # -c : nilai 'compiler =' di Buildfile.ws
 KEEP=0                        # -k : jangan hapus workspace di akhir
 ONLY=""                       # -s : subset skenario
-TOOLS_OPT="satria,ninja,make" # -t : subset tool pembanding
+TOOLS_OPT="satria,cmake" # -t : subset tool pembanding
 OUTDIR=""                     # -o : direktori kerja
 NPROC=$(nproc 2> /dev/null || echo 4)
 MUT_DELAY=0       # -d : jeda (detik) sebelum tiap edit
@@ -93,13 +93,13 @@ for v in AUDIT_ENABLED ARTIFACTS_ENABLED STRACE_ENABLED; do
   case ${!v} in true|false) ;; *) echo "$v harus true atau false" >&2; exit 2 ;; esac
 done
 # Validasi argumen SEJAK DINI (problems/ws.md "Noted"): getopts mengambil
-# argv berikutnya apa adanya, jadi `-r -t ninja,satria` membuat NRUN="-t" dan
+# argv berikutnya apa adanya, jadi `-r -t satria,cmake` membuat NRUN="-t" dan
 # gagal jauh setelah parse dengan pesan membingungkan. Contoh aman:
-#   bench/ws.sh -n 1 -r 1 -t ninja,make,satria
+#   bench/ws.sh -n 1 -r 1 -t satria,cmake
 opt_uint() { # opt_uint <flag> <nilai> <min>
   case $2 in
     '' | *[!0-9]*)
-      echo "opsi -$1 butuh angka (nilai '$2') — '-$1 -t ...' salah baca -t sebagai argumen. Contoh aman: $0 -n 1 -r 1 -t ninja,make,satria" >&2
+      echo "opsi -$1 butuh angka (nilai '$2') — '-$1 -t ...' salah baca -t sebagai argumen. Contoh aman: $0 -n 1 -r 1 -t satria,cmake" >&2
       exit 2
       ;;
   esac
@@ -139,7 +139,7 @@ esac
 SATRIA=$(cd "$(dirname "$SATRIA")" && pwd)/$(basename "$SATRIA")
 IFS=, read -r -a TOOLS <<< "$TOOLS_OPT"
 for t in "${TOOLS[@]}"; do
-  case $t in cmake | cninja | satria | ninja | make) ;; *)
+  case $t in cmake | cninja | satria) ;; *)
     echo "tool tidak dikenal: $t" >&2
     exit 1
     ;;
@@ -150,7 +150,8 @@ done
 for i in "${!TOOLS[@]}"; do
   [ "${TOOLS[$i]}" = cninja ] && TOOLS[$i]=cmake
 done
-for t in gcc tar ar $(printf '%s\n' "${TOOLS[@]}" | grep -vE '^(satria|cmake)$'); do
+[ "${#TOOLS[@]}" -gt 0 ] || { echo "pilih satria dan/atau cmake" >&2; exit 2; }
+for t in gcc tar ar; do
   command -v "$t" > /dev/null 2>&1 || {
     echo "tool wajib tidak ada: $t" >&2
     exit 1
@@ -208,14 +209,20 @@ CC_NAME=gcc
 gcc --version 2> /dev/null | head -1 | grep -qi clang && CC_NAME=clang
 command -v cmake > /dev/null 2>&1 && VER[cmake]=$(cmake --version 2>&1 | first_ver)
 command -v ninja > /dev/null 2>&1 && VER[ninja]=$(ninja --version 2>&1 | first_ver)
-command -v make > /dev/null 2>&1 && VER[make]=$(make --version 2>&1 | first_ver)
 VER[satria]=$(satria_id)
 
 # ---------------------------- direktori kerja ------------------------------
 [ -n "$OUTDIR" ] || OUTDIR="$PWD/ws.tmp"
 mkdir -p "$OUTDIR"
 OUTDIR=$(cd "$OUTDIR" && pwd)
-WS="$OUTDIR/wstest"
+WSROOT="$OUTDIR"
+WS=""
+select_ws() {
+  case "$1" in
+    satria|cmake) WS="$WSROOT/$1" ;;
+    *) echo "tool workspace tidak dikenal: $1" >&2; return 1 ;;
+  esac
+}
 CSV="$OUTDIR/results.csv"
 SYSCALL_CSV="$OUTDIR/workspace-syscalls.csv"
 VIEW_CSV="$OUTDIR/view.csv" # aktual + harapan per run (laporan view ws.md)
@@ -255,7 +262,7 @@ echo "${C_BLD}${C_CYN}▌ satria workspace benchmark${C_RST} ${C_DIM}· $(plural
 rule_line "$(box_width)"
 echo "Workspace : rupamod ($NMOD .rp) · core ($NSRC .c) · bade ($NSRC .c)"
 echo "Graph     : bade depends_on rupamod (embed), core <-> bade (circular)"
-echo "Directory : $WS"
+echo "Directory : $WSROOT/{${TOOLS_OPT//,/ ,}}"
 echo
 echo "Versions  :"
 for k in "${TOOLS[@]}"; do printf '  %-6s : %s\n' "$(tool_display "$k")" "${VER[$k]:-?}"; done
@@ -269,6 +276,7 @@ if [ "$AUDIT_ENABLED" = true ]; then
   audit_failed=0
   AUDIT_QUIET_PROGRESS=1
   for k in "${TOOLS[@]}"; do
+    select_ws "$k"
     : > "$RB_CC_LOG"
     if prime_tool "$k"; then
       read -r audit_cc audit_link < <(awk -F'|' '
@@ -311,7 +319,10 @@ have_scenario rel && case " ${TOOLS[*]} " in *" satria "*) TOTAL=$((TOTAL + NRUN
 
 CUR="gen"
 draw_progress
-gen_ws
+for k in "${TOOLS[@]}"; do
+  select_ws "$k"
+  gen_ws
+done
 clear_line
 T_START=$SECONDS
 draw_progress
@@ -357,6 +368,9 @@ else
   rm -f "$OUTDIR"/workspace.strace.*.txt
 fi
 rm -f "$OUTDIR/.artifacts.before" "$OUTDIR/.artifacts.after" "$OUTDIR/.gate.list" "$OUTDIR/.nm.list"
-[ "$KEEP" = 1 ] || rm -rf "$WS" "$OUTDIR/.prime"
+if [ "$KEEP" != 1 ]; then
+  for k in "${TOOLS[@]}"; do select_ws "$k"; rm -rf "$WS"; done
+  rm -rf "$OUTDIR/.prime"
+fi
 
 { [ "$MISMATCH_RUNS" -eq 0 ] && [ "$NOT_ACC" -eq 0 ]; } || exit 1

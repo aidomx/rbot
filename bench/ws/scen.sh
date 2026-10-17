@@ -46,6 +46,7 @@ s_cold() {
   if [ "$RUN_ORDER" = grouped ]; then
     for k in "${TOOLS[@]}"; do
       for ((r = 1; r <= NRUN; r++)); do
+        select_ws "$k"
         gen_ws
         wait_run
         run_once "$k" cold build_full "$k"
@@ -54,6 +55,7 @@ s_cold() {
   else
     for ((r = 0; r < NRUN; r++)); do
       while IFS= read -r k; do
+        select_ws "$k"
         gen_ws
         wait_run
         run_once "$k" cold build_full "$k"
@@ -72,6 +74,7 @@ s_strace() {
   local -a tcmd
   for k in "${TOOLS[@]}"; do
     for ((r = 1; r <= 1; r++)); do
+      select_ws "$k"
       reset_all
       CUR="strace/$k#$r"
       draw_progress
@@ -79,12 +82,10 @@ s_strace() {
       rm -f "$report"
       if [ "$k" = satria ]; then
         tcmd=("$SATRIA" $SATRIA_ARGS -j"$NPROC" -w)
-      elif [ "$k" = ninja ]; then
-        tcmd=(ninja -j"$NPROC")
       elif [ "$k" = cmake ]; then
         # reset_all menghapus .cmake-build; trace configure + build sebagai cold.
         tcmd=(bash -c 'cmake -S . -B .cmake-build -G Ninja -DCMAKE_C_COMPILER="$1/gcc" >/dev/null && cmake --build .cmake-build --parallel "$2"' _ "$WRAPDIR" "$NPROC")
-      else tcmd=(make -j"$NPROC"); fi
+      fi
       if ! (cd "$WS" && strace -c -f -o "$report" "${tcmd[@]}") > /dev/null 2>> "$ERRLOG"; then
         clear_line
         printf '  %s✗%s %-6s strace %-4s GAGAL (lihat %s)\n' "$C_RED" "$C_RST" "$k" "$r" "$ERRLOG"
@@ -135,28 +136,20 @@ run_scenario() {
       done
     done
   else
-    # Simpan workspace masing-masing tool antar giliran. Salinan dilakukan
-    # DI LUAR pengukuran; tidak menghapus state incremental yang sedang diuji.
+    # Setiap tool memiliki direktori tetap; tidak perlu menyalin atau
+    # mengganti workspace saat rotasi ABBA. State incremental tetap utuh.
     for ((r = 0; r < NRUN; r++)); do
       while IFS= read -r k; do
-        snap="$OUTDIR/.order-state/$1/$k"
+        select_ws "$k"
         if [ "$r" -eq 0 ]; then
           if ! prime_cached "$k"; then record_fail "$k" "$1"; continue; fi
-        else
-          [ -d "$snap" ] || continue
-          rm -rf "$WS"
-          cp -a "$snap" "$WS" || return 1
         fi
         [ "$MUT_DELAY" = 0 ] || sleep "$MUT_DELAY"
         "$2" "$((r + 1))" "$k"
         wait_run
         run_once "$k" "$1" "${3:-tool_cmd}" "$k"
-        mkdir -p "$(dirname "$snap")"
-        rm -rf "$snap"
-        cp -a "$WS" "$snap" || return 1
       done < <(scenario_order "$r")
     done
-    rm -rf "$OUTDIR/.order-state/$1"
   fi
 }
 mut_none() { :; }
