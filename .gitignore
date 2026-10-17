@@ -22,3 +22,6 @@ RELEASE_*.md
 *.plist
 *.tmp
 *.log
+
+editor/*
+!*.zip
