@@ -128,6 +128,7 @@ view_report() {
 END {
   nsc = split("cold noop leaf bade mod touch hedit sel dep libtouch libhdr rel", SC, " ")
   nt = split(TOOLS, TL, " ")
+  for (ti = 1; ti <= nt; ti++) if (TL[ti] == "cmake") TL[ti] = "cninja"
   w = 4
   for (ti = 1; ti <= nt; ti++) if (length(TL[ti]) > w) w = length(TL[ti])
   printf "%-*s | %-9s | %s\n", w, "tool", "execution", "status"
