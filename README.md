@@ -96,12 +96,10 @@ satria -w clean    # clean the entire workspace
 satria builds the workspace in two phases — the library pass creates `lib<name>.a`/`.so` without linking, and the binary pass links the final binaries after all libraries are available — so cross-library dependencies (`rupa <-> ruka`) can still be built. Details in [docs/guide/workspace.md](./docs/guide/workspace.md).
 
 ## Release
-The workspace separates `projects` (build units) and `releases` (distribution units):
+The workspace separates `projects` (build units) and `release` (distribution units):
 ```text
-releases = rupa, ruka
-releases.rupa as rrupa
-rrupa.name = rupa
-rrupa.target = deb
+release.name = rupa
+release.target = deb
 ```
 ```bash
 satria -w                          # build + release all -> dist/release/
